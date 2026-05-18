@@ -1,0 +1,9 @@
+{
+  "pipeline_enabled": false,
+  "pipeline_converted_dir": "%USERPROFILE%\Downloads\VIDS\",
+  "telegram_api_id": "YOUR_API_ID_HERE",
+  "telegram_api_hash": "YOUR_API_HASH_HERE",
+  "telegram_group_id": "YOUR_GROUP_ID_HERE",
+  "telegram_topic_id": "1",
+  "telegram_session_dir": "%USERPROFILE%/Downloads/VIDS/.tdlib"
+}

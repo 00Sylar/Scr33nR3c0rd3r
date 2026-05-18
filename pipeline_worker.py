@@ -1,0 +1,606 @@
+"""
+pipeline_worker.py — GUI-friendly refactor of Pipeline/pipeline.py.
+
+Watches a folder for .ts files produced by the recorder, converts/splits them
+into .mp4 with ffmpeg, then uploads each .mp4 to a Telegram chat/topic via TDLib.
+
+Designed to run as a background thread from the Tkinter app:
+  w = PipelineWorker(cfg, on_log=..., on_state=..., prompt_cb=...)
+  w.start()       # non-blocking
+  w.stop()        # graceful
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import os
+import re
+import subprocess
+import threading
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+
+@dataclass
+class PipelineConfig:
+    api_id: int = 0
+    api_hash: str = ""
+    phone: str = ""
+    chat_id: int = 0
+    topic_id: int = 0
+    watch_folder: str = ""          # where .ts files are written
+    output_folder: str = ""         # where converted .mp4 files live before upload
+    tdlib_dir: str = ""             # holds clientN/ subfolders (tdlib db)
+    uploaded_log: str = ""          # text log of already-uploaded basenames
+    upload_workers: int = 2
+    max_bytes: float = 3.8 * 1e9    # Telegram file-size cap
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
+
+
+class PipelineWorker:
+    """Runs the convert+upload pipeline in a background thread.
+
+    Callbacks (all optional, invoked from worker thread — marshal to GUI yourself):
+      on_log(line: str)               — human-readable log line
+      on_state(state: str)            — lifecycle: 'starting','running','stopping','stopped','error'
+      on_progress(kind, name, pct, speed_bps) — pct 0..100; speed in bytes/sec
+      prompt_cb(label) -> str         — block until user enters OTP/2FA; runs on worker thread
+    """
+
+    def __init__(
+        self,
+        cfg: PipelineConfig,
+        on_log: Optional[Callable[[str], None]] = None,
+        on_state: Optional[Callable[[str], None]] = None,
+        on_progress: Optional[Callable[[str, str, float], None]] = None,
+        prompt_cb: Optional[Callable[[str], str]] = None,
+    ):
+        self.cfg = cfg
+        self.on_log = on_log or (lambda s: None)
+        self.on_state = on_state or (lambda s: None)
+        self.on_progress = on_progress or (lambda k, n, p, s=0.0: None)
+        self.prompt_cb = prompt_cb or (lambda label: "")
+
+        self._shutdown = False
+        self._thread: Optional[threading.Thread] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._clients: list = []
+
+    # ── Public control ───────────────────────────────────────────────────────
+
+    @property
+    def running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    def start(self):
+        if self.running:
+            return
+        self._shutdown = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._shutdown = True
+        self.on_state("stopping")
+        # The async loop checks _shutdown on every iteration.
+
+    # ── Thread entrypoint ────────────────────────────────────────────────────
+
+    def _run(self):
+        self.on_state("starting")
+        try:
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_until_complete(self._main())
+        except Exception as e:
+            self.on_log(f"[pipeline] fatal: {e}")
+            self.on_state("error")
+            return
+        finally:
+            try:
+                if self._loop:
+                    self._loop.close()
+            except Exception:
+                pass
+        self.on_state("stopped")
+
+    # ── Core async pipeline ──────────────────────────────────────────────────
+
+    async def _main(self):
+        cfg = self.cfg
+        for d in (cfg.watch_folder, cfg.output_folder, cfg.tdlib_dir):
+            if d:
+                os.makedirs(d, exist_ok=True)
+
+        uploaded = self._load_uploaded()
+        processed: set = set()
+        upload_queue: asyncio.Queue = asyncio.Queue()
+
+        # Lazy-import tdjson so the rest of the app doesn't crash if TDLib is
+        # not installed (it's a heavy, optional dependency).
+        try:
+            import tdjson  # type: ignore
+        except Exception as e:
+            self.on_log(f"[pipeline] tdjson import failed: {e}. "
+                         f"Install TDLib python bindings to enable uploads.")
+            self.on_state("error")
+            return
+
+        # Spin up TDLib clients
+        global_recv_started = _start_global_recv_once(tdjson)
+        self.on_log(f"[pipeline] TDLib global receiver: {'ready' if global_recv_started else 'already running'}")
+
+        self._clients = []
+        for i in range(cfg.upload_workers):
+            db = os.path.join(cfg.tdlib_dir, f"client{i+1}")
+            os.makedirs(db, exist_ok=True)
+            td = _TDLibClient(tdjson, cfg, db_path=db,
+                               on_log=self.on_log, prompt_cb=self.prompt_cb)
+            self.on_log(f"[pipeline] Connecting client {i+1}…")
+            try:
+                await td.start()
+            except Exception as e:
+                self.on_log(f"[pipeline] client{i+1} auth failed: {e}")
+                self.on_state("error")
+                return
+            self._clients.append(td)
+
+        self.on_state("running")
+        self.on_log(f"[pipeline] running — {len(uploaded)} already uploaded")
+
+        # Pre-queue any leftover .mp4s
+        try:
+            for f in sorted(os.listdir(cfg.output_folder)):
+                if f.endswith(".mp4") and f not in uploaded:
+                    await upload_queue.put(os.path.join(cfg.output_folder, f))
+        except Exception:
+            pass
+
+        loop = asyncio.get_running_loop()
+        tasks = [
+            loop.create_task(self._converter_worker(loop, upload_queue, processed)),
+        ]
+        for i, td in enumerate(self._clients):
+            tasks.append(loop.create_task(
+                self._uploader_worker(td, i + 1, upload_queue, uploaded)
+            ))
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            for td in self._clients:
+                try:
+                    await td.stop()
+                except Exception:
+                    pass
+
+    # ── Workers ──────────────────────────────────────────────────────────────
+
+    async def _converter_worker(self, loop, upload_queue: asyncio.Queue,
+                                 processed: set):
+        while True:
+            if self._shutdown:
+                for _ in range(self.cfg.upload_workers):
+                    await upload_queue.put(None)
+                return
+            try:
+                ts_files = [
+                    f for f in os.listdir(self.cfg.watch_folder)
+                    if f.endswith(".ts")
+                    and os.path.isfile(os.path.join(self.cfg.watch_folder, f))
+                ]
+            except Exception as e:
+                self.on_log(f"[convert] scan error: {e}")
+                await asyncio.sleep(10)
+                continue
+
+            for f in ts_files:
+                if self._shutdown:
+                    break
+                path = os.path.join(self.cfg.watch_folder, f)
+                if path in processed or not _is_free(path):
+                    continue
+                processed.add(path)
+                self.on_log(f"[convert] → {f}")
+                try:
+                    outputs = await loop.run_in_executor(
+                        None, lambda p=path: self._convert_and_split(p)
+                    )
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+                    self.on_progress("convert", "", 100.0, 0.0)   # → idle
+                    valid = [o for o in outputs if os.path.isfile(o)]
+                    if len(valid) != len(outputs):
+                        self.on_log(f"[convert] ⚠ {f}: {len(outputs)-len(valid)} part(s) missing (ffmpeg error)")
+                    self.on_log(f"[convert] ✓ {f} → {len(valid)} part(s)")
+                    for out in valid:
+                        await upload_queue.put(out)
+                except Exception as e:
+                    self.on_log(f"[convert] ✗ {f}: {e}")
+                    processed.discard(path)
+
+            for _ in range(50):
+                if self._shutdown:
+                    break
+                await asyncio.sleep(0.1)
+
+    async def _uploader_worker(self, td, slot: int, upload_queue: asyncio.Queue,
+                                uploaded: set):
+        while True:
+            try:
+                path = await asyncio.wait_for(upload_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if self._shutdown:
+                    return
+                continue
+            if path is None:
+                upload_queue.task_done()
+                return
+
+            name = os.path.basename(path)
+            if not os.path.isfile(path):
+                self.on_log(f"[upload #{slot}] ✗ {name}: file not found (conversion failed)")
+                upload_queue.task_done()
+                continue
+            file_size = max(1, os.path.getsize(path))
+
+            kind = f"upload{slot}"
+            _speed_state = {"last_sent": 0, "last_ts": 0.0, "speed": 0.0}
+
+            def _cb(sent, _k=kind, _n=name, _fs=file_size, _st=_speed_state):
+                import time as _time
+                now = _time.monotonic()
+                dt = now - _st["last_ts"]
+                if dt >= 0.5:          # recalculate every 0.5 s
+                    _st["speed"] = max(0.0, (sent - _st["last_sent"]) / dt)
+                    _st["last_sent"] = sent
+                    _st["last_ts"] = now
+                pct = min(100.0, sent * 100.0 / _fs)
+                self.on_progress(_k, _n, pct, _st["speed"])
+
+            caption = _extract_model(name)
+            try:
+                await td.send_video(path, caption=caption, progress_cb=_cb)
+                self._mark_uploaded(name)
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+                uploaded.add(name)
+                self.on_progress(kind, "", 100.0, 0.0)   # empty name → "idle"
+                self.on_log(f"[upload #{slot}] ✓ {name}")
+            except Exception as e:
+                self.on_log(f"[upload #{slot}] ✗ {name}: {e}")
+            finally:
+                upload_queue.task_done()
+
+    # ── Conversion ───────────────────────────────────────────────────────────
+
+    def _convert_and_split(self, ts_path: str) -> list:
+        size = os.path.getsize(ts_path)
+        base = os.path.splitext(os.path.basename(ts_path))[0]
+        duration = _get_duration(self.cfg.ffprobe_path, ts_path)
+        outputs: list = []
+
+        if size > self.cfg.max_bytes and duration > 0:
+            num_parts = max(1, math.ceil(size / self.cfg.max_bytes))
+            part_dur = duration / num_parts
+            for i in range(num_parts):
+                start = i * part_dur
+                out = os.path.join(self.cfg.output_folder,
+                                   f"{base}_part{i+1}.mp4")
+                cmd = [self.cfg.ffmpeg_path,
+                       "-i", ts_path,
+                       "-ss", str(start),
+                       *(["-t", str(part_dur)] if i < num_parts - 1 else []),
+                       "-c", "copy", out, "-y"]
+                self._run_ffmpeg(cmd, part_dur, f"{base} ({i+1}/{num_parts})")
+                outputs.append(out)
+        else:
+            out = os.path.join(self.cfg.output_folder, f"{base}.mp4")
+            cmd = [self.cfg.ffmpeg_path, "-i", ts_path, "-c", "copy", out, "-y"]
+            self._run_ffmpeg(cmd, duration or 1.0, base)
+            outputs.append(out)
+
+        return outputs
+
+    def _run_ffmpeg(self, cmd: list, total_secs: float, label: str):
+        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        proc = subprocess.Popen(
+            cmd + ["-loglevel", "error", "-progress", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            creationflags=flags,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            m = re.search(r"out_time_ms=(\d+)", line)
+            if m:
+                done = int(m.group(1)) / 1e6
+                pct = min(100.0, done * 100.0 / max(total_secs, 0.1))
+                self.on_progress("convert", label, pct)
+        proc.wait()
+        self.on_progress("convert", label, 100.0)
+
+    # ── Persistence helpers ──────────────────────────────────────────────────
+
+    def _load_uploaded(self) -> set:
+        p = self.cfg.uploaded_log
+        if p and os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return set(l.strip() for l in f if l.strip())
+            except Exception:
+                return set()
+        return set()
+
+    def _mark_uploaded(self, name: str):
+        p = self.cfg.uploaded_log
+        if not p:
+            return
+        try:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(name + "\n")
+        except Exception:
+            pass
+
+
+# ── Module-level helpers (shared by all clients) ─────────────────────────────
+
+_GLOBAL_RECV_LOCK = threading.Lock()
+_GLOBAL_RECV_STARTED = False
+_GLOBAL_CLIENTS: dict = {}
+_GLOBAL_CLIENTS_LOCK = threading.Lock()
+
+
+def _start_global_recv_once(tdjson) -> bool:
+    """Start the single TDLib receive thread that fans out updates to clients."""
+    global _GLOBAL_RECV_STARTED
+    with _GLOBAL_RECV_LOCK:
+        if _GLOBAL_RECV_STARTED:
+            return False
+        _GLOBAL_RECV_STARTED = True
+
+    def _loop():
+        while True:
+            try:
+                raw = tdjson.td_receive(0.1)
+                if not raw:
+                    continue
+                upd = json.loads(raw)
+                cid = upd.get("@client_id")
+                with _GLOBAL_CLIENTS_LOCK:
+                    client = _GLOBAL_CLIENTS.get(cid)
+                if client and client._loop:
+                    asyncio.run_coroutine_threadsafe(
+                        client._dispatch(upd), client._loop
+                    )
+            except Exception:
+                # Never let the global receiver die silently
+                continue
+
+    threading.Thread(target=_loop, daemon=True).start()
+    return True
+
+
+def _extract_model(filename: str) -> str:
+    base = re.sub(r'[_-]part\d+$', '',
+                   os.path.splitext(filename)[0], flags=re.IGNORECASE)
+    m = re.match(r'^(.+?)_(?:CB|ST|CS)_\d{8}_\d{6}', base, re.IGNORECASE)
+    if not m:
+        m = re.match(r'^(.+?)-\d{4}_', base)
+    name = (m.group(1) if m else base).strip('_')
+    tag = re.sub(r'[^a-zA-Z0-9_]', '', name)
+    return f"#{tag}"
+
+
+def _is_free(path: str) -> bool:
+    try:
+        os.rename(path, path)
+        return True
+    except Exception:
+        return False
+
+
+def _get_duration(ffprobe: str, path: str) -> float:
+    try:
+        r = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", path],
+            capture_output=True, text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0
+
+
+# ── TDLib client wrapper ─────────────────────────────────────────────────────
+
+class _TDLibClient:
+    def __init__(self, tdjson, cfg: PipelineConfig, db_path: str,
+                 on_log: Callable[[str], None],
+                 prompt_cb: Callable[[str], str]):
+        self._tdjson   = tdjson
+        self._cfg      = cfg
+        self._db_path  = db_path
+        self._on_log   = on_log
+        self._prompt   = prompt_cb
+        self._cid      = tdjson.td_create_client_id()
+        with _GLOBAL_CLIENTS_LOCK:
+            _GLOBAL_CLIENTS[self._cid] = self
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._futures: dict = {}
+        self._file_evts: dict = {}
+        self._send_evts: dict = {}
+        self._lock = threading.Lock()
+        self._counter = 0
+        self._ready: Optional[asyncio.Event] = None
+
+    def _next_extra(self) -> str:
+        with self._lock:
+            self._counter += 1
+            return str(self._counter)
+
+    def _raw_send(self, data: dict):
+        self._tdjson.td_send(self._cid, json.dumps(data).encode())
+
+    async def _invoke(self, data: dict):
+        extra = self._next_extra()
+        data["@extra"] = extra
+        assert self._loop
+        fut = self._loop.create_future()
+        with self._lock:
+            self._futures[extra] = fut
+        self._raw_send(data)
+        return await fut
+
+    async def _dispatch(self, upd: dict):
+        if not isinstance(upd, dict):
+            return
+        t = upd.get("@type", "")
+        extra = upd.get("@extra")
+        if extra:
+            with self._lock:
+                fut = self._futures.pop(extra, None)
+            if fut and not fut.done():
+                fut.set_result(upd)
+                return
+
+        if t == "updateAuthorizationState":
+            await self._on_auth(upd["authorization_state"])
+        elif t == "updateFile":
+            f = upd["file"]
+            fid = f["id"]
+            remote = f.get("remote", {})
+            done = remote.get("is_uploading_completed", False)
+            sent = remote.get("uploaded_size", 0)
+            with self._lock:
+                entry = self._file_evts.get(fid)
+            if entry:
+                ev, cb = entry
+                if cb:
+                    try:
+                        cb(sent)
+                    except Exception:
+                        pass
+                if done:
+                    ev.set()
+        elif t == "updateMessageSendSucceeded":
+            old = upd.get("old_message_id")
+            with self._lock:
+                ev = self._send_evts.pop(old, None)
+            if ev:
+                ev.set()
+        elif t == "updateMessageSendFailed":
+            old = upd.get("old_message_id")
+            with self._lock:
+                ev = self._send_evts.pop(old, None)
+            if ev:
+                ev.set()
+
+    async def _on_auth(self, state: dict):
+        t = state["@type"]
+        if t == "authorizationStateWaitTdlibParameters":
+            self._raw_send({
+                "@type":                 "setTdlibParameters",
+                "api_id":                self._cfg.api_id,
+                "api_hash":              self._cfg.api_hash,
+                "phone_number":          self._cfg.phone,
+                "database_directory":    self._db_path,
+                "files_directory":       self._db_path + "/files",
+                "use_message_database":  True,
+                "use_secret_chats":      False,
+                "system_language_code":  "en",
+                "device_model":          "Desktop",
+                "system_version":        "Windows",
+                "application_version":   "1.0",
+            })
+        elif t == "authorizationStateWaitPhoneNumber":
+            self._raw_send({
+                "@type":        "setAuthenticationPhoneNumber",
+                "phone_number": self._cfg.phone,
+            })
+        elif t == "authorizationStateWaitCode":
+            assert self._loop
+            code = await self._loop.run_in_executor(
+                None, lambda: self._prompt("Enter Telegram login code:")
+            )
+            self._raw_send({"@type": "checkAuthenticationCode", "code": code})
+        elif t == "authorizationStateWaitPassword":
+            assert self._loop
+            pwd = await self._loop.run_in_executor(
+                None, lambda: self._prompt("Enter 2FA password:")
+            )
+            self._raw_send({"@type": "checkAuthenticationPassword", "password": pwd})
+        elif t == "authorizationStateReady":
+            self._on_log("[tdlib] authorized.")
+            if self._ready:
+                self._ready.set()
+        elif t == "authorizationStateClosed":
+            pass
+
+    async def start(self):
+        self._loop = asyncio.get_running_loop()
+        self._ready = asyncio.Event()
+        self._tdjson.td_execute(json.dumps(
+            {"@type": "setLogVerbosityLevel", "new_verbosity_level": 0}
+        ).encode())
+        self._raw_send({"@type": "getAuthorizationState"})
+        await self._ready.wait()
+
+    async def stop(self):
+        self._raw_send({"@type": "close"})
+
+    async def send_video(self, file_path: str, caption: str = "",
+                          progress_cb=None):
+        abs_path = os.path.abspath(file_path).replace("\\", "/")
+        file_size = os.path.getsize(file_path)
+
+        result = await self._invoke({
+            "@type":             "sendMessage",
+            "chat_id":           self._cfg.chat_id,
+            "message_thread_id": self._cfg.topic_id,
+            "input_message_content": {
+                "@type":  "inputMessageVideo",
+                "video":  {"@type": "inputFileLocal", "path": abs_path},
+                "caption": {"@type": "formattedText",
+                             "text": caption, "entities": []},
+                "supports_streaming": True,
+                "duration": 0, "width": 0, "height": 0,
+            },
+        })
+        if result.get("@type") == "error":
+            raise Exception(f"TDLib: {result.get('message')}")
+
+        temp_msg_id = result.get("id")
+        file_id = (result.get("content", {})
+                         .get("video", {})
+                         .get("video", {})
+                         .get("id"))
+
+        send_ev = asyncio.Event()
+        with self._lock:
+            self._send_evts[temp_msg_id] = send_ev
+        if file_id:
+            file_ev = asyncio.Event()
+            with self._lock:
+                self._file_evts[file_id] = (file_ev, progress_cb)
+
+        try:
+            await asyncio.wait_for(send_ev.wait(), timeout=7200)
+        except asyncio.TimeoutError:
+            raise Exception("Upload timed out")
+        finally:
+            if file_id:
+                with self._lock:
+                    self._file_evts.pop(file_id, None)
+
+        if progress_cb:
+            try:
+                progress_cb(file_size)
+            except Exception:
+                pass
