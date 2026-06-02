@@ -34,7 +34,7 @@ class AppSettings:
     output_dir: str = os.path.join(os.path.expanduser("~"), "Videos", "StreamRecorder")
     max_size_mb: Optional[int] = None          # None = unlimited
     check_interval: int = 30                   # seconds
-    minimize_to_tray: bool = True
+    minimize_to_tray: bool = False
     notifications_enabled: bool = True
     models: List[dict] = None                  # [{name, site, auto_rec}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list

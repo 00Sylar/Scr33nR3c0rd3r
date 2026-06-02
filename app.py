@@ -3,6 +3,7 @@ app.py — WebcamRecorder 0.10 RC — GUI
 """
 
 import os
+import sys
 import json
 import threading
 import tkinter as tk
@@ -15,6 +16,11 @@ from urllib.parse import urlparse, parse_qs
 from recorder import StreamRecorder, ModelStatus
 from settings import AppSettings, load_settings, save_settings, save_pipeline_settings
 from notifier import send_notification
+
+if sys.platform == "win32":
+    from tray_win import WinTray
+else:
+    WinTray = None  # type: ignore
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG      = "#0d0f12"
@@ -248,12 +254,17 @@ class StreamRecorderApp(tk.Tk):
         self._auto_rec: dict[str, bool] = {}      # key → auto-rec state (recorder tab)
         self._monitoring_recorder = False
         self._monitoring_saved    = False
+        self._tray: Optional[WinTray] = None
+        self._hiding_to_tray = False
+        self._tray_poll_active = False
 
         self._build_styles()
         self._build_ui()
         self._restore_models()
         self._start_api_server()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        if WinTray is not None:
+            self.bind("<Unmap>", self._on_window_unmap)
 
     # ── Styles ────────────────────────────────────────────────────────────────
 
@@ -389,6 +400,12 @@ class StreamRecorderApp(tk.Tk):
         tk.Label(p, text="Check Interval (sec)", fg=TEXT2, bg=BG2, font=UI).pack(anchor="w", padx=16)
         self._v_interval = tk.StringVar(value=str(self.settings.check_interval))
         ttk.Entry(p, textvariable=self._v_interval).pack(fill="x", padx=16, pady=(2,8))
+
+        self._v_tray = tk.BooleanVar(value=self.settings.minimize_to_tray)
+        tk.Checkbutton(p, text="Minimize to SysTray", variable=self._v_tray,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                       activeforeground=TEXT, font=UI, relief="flat").pack(
+            anchor="w", padx=16, pady=(0,4))
 
         self._v_notif = tk.BooleanVar(value=self.settings.notifications_enabled)
         tk.Checkbutton(p, text="Notifications", variable=self._v_notif,
@@ -1570,6 +1587,7 @@ class StreamRecorderApp(tk.Tk):
         self.settings.output_dir            = self._e_folder.get().strip()
         self.settings.max_size_mb           = self._parse_int(self._v_maxsize.get())
         self.settings.check_interval        = self._parse_int(self._v_interval.get(), 30)
+        self.settings.minimize_to_tray       = self._v_tray.get()
         self.settings.notifications_enabled = self._v_notif.get()
         self._persist_models()
         save_settings(self.settings)
@@ -1649,6 +1667,79 @@ class StreamRecorderApp(tk.Tk):
         if getattr(self, "_api_server", None):
             self._api_server.shutdown()
 
+    # ── System tray ───────────────────────────────────────────────────────────
+
+    def _on_window_unmap(self, event):
+        if event.widget is not self:
+            return
+        if self._hiding_to_tray:
+            return
+        if not self._v_tray.get():
+            return
+        if self.state() != "iconic":
+            return
+        self.after_idle(self._minimize_to_tray)
+
+    def _minimize_to_tray(self):
+        if WinTray is None or not self._v_tray.get():
+            return
+        self._hiding_to_tray = True
+        try:
+            self.withdraw()
+            self._ensure_tray()
+        finally:
+            self._hiding_to_tray = False
+
+    def _ensure_tray(self):
+        if WinTray is None:
+            return
+        if self._tray is None:
+            hwnd = self.winfo_id()
+            self._tray = WinTray(
+                hwnd,
+                "WebcamRecorder",
+                on_show=self._restore_from_tray,
+                on_quit=self._on_close,
+            )
+            try:
+                self._tray.add()
+            except OSError:
+                self._tray = None
+                self.deiconify()
+                return
+        self._start_tray_poll()
+
+    def _start_tray_poll(self):
+        if not self._tray_poll_active:
+            self._tray_poll_active = True
+            self._tray_poll_tick()
+
+    def _tray_poll_tick(self):
+        if self._tray:
+            try:
+                self._tray.pump()
+            except Exception:
+                pass
+        if self._tray_poll_active:
+            self.after(200, self._tray_poll_tick)
+
+    def _restore_from_tray(self):
+        self.after(0, self._do_restore_from_tray)
+
+    def _do_restore_from_tray(self):
+        if not self.winfo_viewable():
+            self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def _remove_tray(self):
+        if self._tray:
+            try:
+                self._tray.remove()
+            except Exception:
+                pass
+            self._tray = None
+
     def _on_close(self):
         recording = any(
             self.recorder.models.get(k) and
@@ -1665,6 +1756,7 @@ class StreamRecorderApp(tk.Tk):
             except Exception:
                 pass
         self._stop_api_server()
+        self._remove_tray()
         self._save_settings()
         self.destroy()
 
