@@ -86,6 +86,7 @@ async def run(model: str, output_path: str) -> int:
     ff = subprocess.Popen(
         ff_cmd,
         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=sys.stderr,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
     stop = asyncio.Event()
