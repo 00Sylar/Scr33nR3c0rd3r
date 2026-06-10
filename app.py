@@ -280,6 +280,11 @@ class StreamRecorderApp(tk.Tk):
         self._monitoring_saved    = False
         self._tray: Optional[WinTray] = None
         self._hiding_to_tray = False
+        # Tray callbacks fire on the tray thread — they set these events,
+        # which a Tk after-loop polls (never call Tk from the tray thread).
+        self._tray_show_evt = threading.Event()
+        self._tray_quit_evt = threading.Event()
+        self._tray_poll_id: Optional[str] = None
         self._build_styles()
         self._build_ui()
         self._restore_models()
@@ -1717,12 +1722,10 @@ class StreamRecorderApp(tk.Tk):
         if WinTray is None:
             return
         if self._tray is None:
-            hwnd = self.winfo_id()
             self._tray = WinTray(
-                hwnd,
                 "WebcamRecorder",
-                on_show=self._restore_from_tray,
-                on_quit=self._on_close,
+                on_show=self._tray_show_evt.set,
+                on_quit=self._tray_quit_evt.set,
             )
             try:
                 self._tray.add()
@@ -1730,9 +1733,20 @@ class StreamRecorderApp(tk.Tk):
                 self._tray = None
                 self.deiconify()
                 return
+        if self._tray_poll_id is None:
+            self._tray_poll_id = self.after(150, self._poll_tray)
 
-    def _restore_from_tray(self):
-        self.after(0, self._do_restore_from_tray)
+    def _poll_tray(self):
+        self._tray_poll_id = None
+        if self._tray_quit_evt.is_set():
+            self._tray_quit_evt.clear()
+            self._on_close()
+            return
+        if self._tray_show_evt.is_set():
+            self._tray_show_evt.clear()
+            self._do_restore_from_tray()
+        if self._tray is not None:
+            self._tray_poll_id = self.after(150, self._poll_tray)
 
     def _do_restore_from_tray(self):
         # Window was withdrawn while iconic — force normal state first so
@@ -1749,6 +1763,12 @@ class StreamRecorderApp(tk.Tk):
         self.focus_force()
 
     def _remove_tray(self):
+        if self._tray_poll_id is not None:
+            try:
+                self.after_cancel(self._tray_poll_id)
+            except Exception:
+                pass
+            self._tray_poll_id = None
         if self._tray:
             try:
                 self._tray.remove()
