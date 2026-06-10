@@ -7,3 +7,8 @@ __pycache__/
 *.sqlite-wal
 *.binlog
 pipeline_settings.json
+
+# Recording artifacts
+*.ts
+*.mp4
+*.part

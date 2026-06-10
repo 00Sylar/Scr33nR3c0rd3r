@@ -5,6 +5,9 @@ app.py — WebcamRecorder 0.10 RC — GUI
 import os
 import sys
 import json
+import time
+import math
+import random
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -16,6 +19,28 @@ from urllib.parse import urlparse, parse_qs
 from recorder import StreamRecorder, ModelStatus
 from settings import AppSettings, load_settings, save_settings, save_pipeline_settings
 from notifier import send_notification
+
+# ── File logging ──────────────────────────────────────────────────────────────
+# pythonw has no console (stderr is discarded), so without this any background
+# thread error vanishes. Everything recorder.py logs — including monitor-crash
+# tracebacks — lands in ~/.streamrecorder.log with the thread name.
+import logging
+import faulthandler
+from logging.handlers import RotatingFileHandler
+
+LOG_FILE = os.path.join(os.path.expanduser("~"), ".streamrecorder.log")
+_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=2,
+                               encoding="utf-8")
+_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(threadName)-16s %(levelname)-7s %(message)s"))
+logging.getLogger().addHandler(_handler)
+logging.getLogger().setLevel(logging.INFO)
+try:
+    _crash_f = open(os.path.join(os.path.expanduser("~"),
+                                 ".streamrecorder_crash.log"), "a")
+    faulthandler.enable(_crash_f)
+except OSError:
+    pass
 
 if sys.platform == "win32":
     from tray_win import WinTray
@@ -40,6 +65,8 @@ TEXT2   = "#8a8a90"   # muted grey
 TEXT3   = "#56565c"   # dim grey
 MONO    = ("Consolas", 10)
 UI      = ("Segoe UI", 10)
+
+PRIVACY_IDLE_SECONDS = 3   # idle time before privacy mode covers the window
 
 STATUS_COLORS = {
     ModelStatus.OFFLINE:   (TEXT3,  "●  OFFLINE"),
@@ -291,6 +318,8 @@ class StreamRecorderApp(tk.Tk):
         self._build_ui()
         self._restore_models()
         self._start_api_server()
+        self._privacy_init()
+        self.after(5000, self._sync_monitor_buttons)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         if WinTray is not None:
             self.bind("<Unmap>", self._on_window_unmap)
@@ -438,6 +467,12 @@ class StreamRecorderApp(tk.Tk):
 
         self._v_notif = tk.BooleanVar(value=self.settings.notifications_enabled)
         tk.Checkbutton(p, text="Notifications", variable=self._v_notif,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                       activeforeground=TEXT, font=UI, relief="flat").pack(
+            anchor="w", padx=16, pady=(0,0))
+
+        self._v_privacy = tk.BooleanVar(value=self.settings.privacy_mode_enabled)
+        tk.Checkbutton(p, text="🔒 Privacy Mode", variable=self._v_privacy,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,4))
@@ -999,10 +1034,13 @@ class StreamRecorderApp(tk.Tk):
             self._log_add("Recorder monitor stopped.", "warn")
         else:
             self._sync_recorder_settings()
-            self.recorder.start_monitor("recorder")
-            self._monitoring_recorder = True
-            self._btn_monitor_rec.configure(text="⏹  STOP MONITOR", style="Red.TButton")
-            self._log_add("Recorder monitor started.", "success")
+            if self.recorder.start_monitor("recorder"):
+                self._monitoring_recorder = True
+                self._btn_monitor_rec.configure(text="⏹  STOP MONITOR", style="Red.TButton")
+                self._log_add("Recorder monitor started.", "success")
+            else:
+                self._log_add("Recorder monitor FAILED to start — "
+                              "see ~/.streamrecorder.log", "error")
         self._refresh_hdr_status()
 
     def _toggle_monitor_saved(self):
@@ -1015,11 +1053,210 @@ class StreamRecorderApp(tk.Tk):
             self._log_add("Saved Models scanner stopped.", "warn")
         else:
             self._sync_recorder_settings()
-            self.recorder.start_monitor("saved")
-            self._monitoring_saved = True
-            self._btn_monitor_saved.configure(text="⏹  STOP SCANNER", style="Red.TButton")
-            self._log_add("Saved Models scanner started.", "success")
+            if self.recorder.start_monitor("saved"):
+                self._monitoring_saved = True
+                self._btn_monitor_saved.configure(text="⏹  STOP SCANNER", style="Red.TButton")
+                self._log_add("Saved Models scanner started.", "success")
+            else:
+                self._log_add("Saved Models scanner FAILED to start — "
+                              "see ~/.streamrecorder.log", "error")
         self._refresh_hdr_status()
+
+    def _sync_monitor_buttons(self):
+        """Watchdog: if a monitor thread died (crash guard resets its running
+        flag), flip the button/header back so START works again instead of
+        silently pretending to monitor."""
+        if self._monitoring_recorder and not self.recorder._running.get("recorder"):
+            self._monitoring_recorder = False
+            self._btn_monitor_rec.configure(text="▶  START MONITOR",
+                                            style="Green.TButton")
+            self._log_add("Recorder monitor is no longer running.", "error")
+            self._refresh_hdr_status()
+        if self._monitoring_saved and not self.recorder._running.get("saved"):
+            self._monitoring_saved = False
+            self._btn_monitor_saved.configure(text="▶  START SCANNER",
+                                              style="Green.TButton")
+            self._log_add("Saved Models scanner is no longer running.", "error")
+            self._refresh_hdr_status()
+        self.after(5000, self._sync_monitor_buttons)
+
+    # ── Privacy Mode ──────────────────────────────────────────────────────────
+    # When enabled and the window sits untouched for PRIVACY_IDLE_SECONDS, a
+    # full-window starfield covers the UI (and the title is blanked) so nothing
+    # is readable while AFK. A click inside or a window move asks to exit;
+    # the mode re-arms after the next idle period until the box is unchecked.
+
+    def _privacy_init(self):
+        self._last_activity      = time.time()
+        self._privacy_canvas     = None
+        self._privacy_prompting  = False
+        self._privacy_anim_job   = None
+        self._privacy_title      = ""
+        for seq in ("<Motion>", "<KeyPress>", "<Button>", "<MouseWheel>"):
+            self.bind_all(seq, self._privacy_touch, add="+")
+        # Children share the root's bindtag, so filter to root-only events
+        self.bind("<Configure>", self._privacy_on_configure, add="+")
+        self.after(500, self._privacy_tick)
+
+    def _privacy_touch(self, event=None):
+        self._last_activity = time.time()
+
+    def _privacy_on_configure(self, event):
+        if event.widget is not self:
+            return
+        if self._privacy_canvas is not None:
+            self._privacy_prompt_exit()   # window moved/resized while covered
+        else:
+            self._last_activity = time.time()
+
+    def _privacy_tick(self):
+        try:
+            if (self._v_privacy.get()
+                    and self._privacy_canvas is None
+                    and not self._privacy_prompting
+                    and self.state() in ("normal", "zoomed")
+                    and time.time() - self._last_activity >= PRIVACY_IDLE_SECONDS):
+                self._privacy_engage()
+        finally:
+            self.after(500, self._privacy_tick)
+
+    def _privacy_engage(self):
+        self._privacy_title = self.title()
+        self.title(" ")
+        c = tk.Canvas(self, bg="#03030a", highlightthickness=0)
+        c.place(x=0, y=0, relwidth=1, relheight=1)
+        c.bind("<Button-1>", lambda e: self._privacy_prompt_exit())
+        self._privacy_canvas = c
+        self._privacy_scene_init()
+        self._privacy_animate()
+
+    def _privacy_disengage(self):
+        if self._privacy_anim_job:
+            self.after_cancel(self._privacy_anim_job)
+            self._privacy_anim_job = None
+        if self._privacy_canvas is not None:
+            self._privacy_canvas.destroy()
+            self._privacy_canvas = None
+        if self._privacy_title:
+            self.title(self._privacy_title)
+        self._last_activity = time.time()
+
+    def _privacy_prompt_exit(self):
+        if self._privacy_prompting or self._privacy_canvas is None:
+            return
+        self._privacy_prompting = True
+        try:
+            if messagebox.askyesno("Privacy Mode", "Exit privacy mode?",
+                                   parent=self):
+                self._privacy_disengage()
+        finally:
+            self._privacy_prompting = False
+            self._last_activity = time.time()
+
+    def _privacy_scene_init(self):
+        c = self._privacy_canvas
+        self.update_idletasks()
+        w = max(self.winfo_width(),  200)
+        h = max(self.winfo_height(), 200)
+        # Layered nebulas: a wide stippled base + a brighter stippled core per
+        # cloud fakes a soft alpha glow (Tk canvas has no real transparency)
+        self._neb_items = []
+        for base, glow in (("#141031", "#241d56"), ("#0c1c33", "#17345e"),
+                           ("#1c0f2e", "#352052"), ("#0e2430", "#1b4254"),
+                           ("#26101b", "#471f33")):
+            r = random.randint(100, 190)
+            x, y = random.uniform(0, w), random.uniform(0, h)
+            outer = c.create_oval(x - r, y - r, x + r, y + r,
+                                  fill=base, outline="", stipple="gray50")
+            ri = r * 0.55
+            inner = c.create_oval(x - ri, y - ri, x + ri, y + ri,
+                                  fill=glow, outline="", stipple="gray25")
+            self._neb_items.append([outer, inner,
+                                    random.uniform(-0.35, 0.35),
+                                    random.uniform(-0.25, 0.25), r])
+        # Stars: warp streaks in centered unit coords with depth z, per-star
+        # speed (parallax) and color temperature, plus a twinkle phase
+        self._star_items = []
+        palette = ("#ffffff", "#ffffff", "#dfe8ff", "#cfd8f5",
+                   "#ffe9d0", "#bcd2ff", "#f5d7e3")
+        for _ in range(170):
+            item = c.create_line(0, 0, 0, 0, fill=random.choice(palette),
+                                 width=1, capstyle="round")
+            self._star_items.append([item,
+                                     random.uniform(-1, 1),
+                                     random.uniform(-1, 1),
+                                     random.uniform(0.05, 1.0),
+                                     random.uniform(0.003, 0.010),
+                                     random.uniform(0, math.tau)])
+        # One shooting star, reused between flights
+        self._comet = c.create_line(0, 0, 0, 0, fill="#eaf2ff",
+                                    width=2, capstyle="round")
+        self._comet_state = None
+        self._privacy_frame = 0
+
+    def _privacy_animate(self):
+        c = self._privacy_canvas
+        if c is None:
+            return
+        w = max(c.winfo_width(), 2)
+        h = max(c.winfo_height(), 2)
+        cx, cy = w / 2, h / 2
+        self._privacy_frame += 1
+        f = self._privacy_frame
+        for s in self._star_items:
+            item, x, y, z, spd, ph = s
+            z -= spd
+            if z <= 0.03:
+                x, y, z = random.uniform(-1, 1), random.uniform(-1, 1), 1.0
+            px = cx + (x / z) * cx * 0.85
+            py = cy + (y / z) * cy * 0.85
+            if px < -20 or px > w + 20 or py < -20 or py > h + 20:
+                x, y, z = random.uniform(-1, 1), random.uniform(-1, 1), 1.0
+                px = cx + x * cx * 0.85
+                py = cy + y * cy * 0.85
+            # Tail end sampled at a slightly earlier depth — close, fast stars
+            # stretch into warp streaks; distant ones stay near-points
+            zt = min(z + spd * 7, 1.0)
+            qx = cx + (x / zt) * cx * 0.85
+            qy = cy + (y / zt) * cy * 0.85
+            depth = 1.0 - z
+            width = max(1.0, 3.2 * depth + 0.7 * math.sin(f * 0.18 + ph))
+            c.coords(item, qx, qy, px, py)
+            c.itemconfigure(item, width=width)
+            s[1], s[2], s[3] = x, y, z
+        # Shooting star: rare, fast diagonal streak with a long tail
+        if self._comet_state is None:
+            if random.random() < 0.006:
+                self._comet_state = [random.uniform(0.1, 0.9) * w, -12.0,
+                                     random.uniform(-7, 7),
+                                     random.uniform(8, 13)]
+        else:
+            st = self._comet_state
+            st[0] += st[2]
+            st[1] += st[3]
+            c.coords(self._comet, st[0] - st[2] * 5, st[1] - st[3] * 5,
+                     st[0], st[1])
+            if st[0] < -80 or st[0] > w + 80 or st[1] > h + 80:
+                c.coords(self._comet, 0, 0, 0, 0)
+                self._comet_state = None
+        for n in self._neb_items:
+            outer, inner, dx, dy, r = n
+            c.move(outer, dx, dy)
+            c.move(inner, dx, dy)
+            x0, y0, x1, y1 = c.coords(outer)
+            mx = my = 0
+            if x1 < 0:
+                mx = w + 2 * r
+            elif x0 > w:
+                mx = -(w + 2 * r)
+            if y1 < 0:
+                my = h + 2 * r
+            elif y0 > h:
+                my = -(h + 2 * r)
+            if mx or my:
+                c.move(outer, mx, my)
+                c.move(inner, mx, my)
+        self._privacy_anim_job = self.after(33, self._privacy_animate)
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
@@ -1650,6 +1887,7 @@ class StreamRecorderApp(tk.Tk):
         self.settings.check_interval        = self._parse_int(self._v_interval.get(), 30)
         self.settings.minimize_to_tray       = self._v_tray.get()
         self.settings.notifications_enabled = self._v_notif.get()
+        self.settings.privacy_mode_enabled  = self._v_privacy.get()
         self._persist_models()
         save_settings(self.settings)
         self.recorder.output_dir     = self.settings.output_dir

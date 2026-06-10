@@ -7,12 +7,15 @@ Chaturbate: ffmpeg direct recording
 import os
 import re
 import sys
+import glob
 import json
 import time
+import shutil
 import threading
 import subprocess
 import requests
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass, field
@@ -241,6 +244,82 @@ def get_camsoda_stream_url(model_name: str) -> Optional[str]:
         return None
 
 
+def get_chaturbate_online_rooms(should_continue: Optional[Callable[[], bool]] = None,
+                                on_progress: Optional[Callable[[int, int], None]] = None) -> Optional[set]:
+    """
+    Fetch usernames of ALL publicly online Chaturbate rooms via the paginated
+    room-list API (max 90 rooms/page, ~100 pages for the whole site). One full
+    sweep covers any number of saved models in ~2.5 min at the 1.5 s cadence —
+    vs one request per model, which Cloudflare rate-limits into false OFFLINEs.
+
+    on_progress(rooms_fetched, total_rooms) is called every ~25 pages.
+    Returns a set of lowercase usernames, or None on failure/abort so callers
+    keep previous statuses instead of marking everything offline.
+    """
+    global _CB_LAST_API_CALL
+    rooms: set = set()
+    offset = 0
+    total = 0
+    pages = 0
+    while True:
+        if should_continue and not should_continue():
+            return None
+        with _CB_API_LOCK:
+            wait = _CB_MIN_CALL_INTERVAL - (time.time() - _CB_LAST_API_CALL)
+            if wait > 0:
+                time.sleep(wait)
+            _CB_LAST_API_CALL = time.time()
+        try:
+            r = _http.get(
+                "https://chaturbate.com/api/ts/roomlist/room-list/",
+                params={"limit": 90, "offset": offset}, timeout=15,
+            )
+            if r.status_code != 200 or not r.content:
+                logger.warning(f"[CB] room-list HTTP {r.status_code} at offset {offset}")
+                return None
+            data = r.json()
+        except Exception as e:
+            logger.error(f"[CB] room-list fetch failed at offset {offset}: {e}")
+            return None
+        page = data.get("rooms") or []
+        if not total:
+            total = int(data.get("total_count") or 0)
+        for room in page:
+            u = (room.get("username") or "").lower()
+            if u:
+                rooms.add(u)
+        offset += len(page)
+        pages += 1
+        if on_progress and (pages == 10 or pages % 25 == 0):
+            on_progress(offset, total)
+        if not page or (total and offset >= total):
+            return rooms
+
+
+def _stripchat_is_live(model_name: str) -> Optional[bool]:
+    """Lightweight online check for the saved-models scanner.
+    Returns True/False, or None when the page couldn't be fetched
+    (so the caller keeps the previous status)."""
+    page_headers = {
+        **HEADERS,
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Referer": "https://stripchat.com/",
+    }
+    try:
+        resp = _http.get(
+            f"https://stripchat.com/{model_name}",
+            headers=page_headers, timeout=20
+        )
+        if resp.status_code == 404:
+            return False
+        if resp.status_code != 200:
+            return None
+        return bool(re.search(r'"isLive"\s*:\s*true', resp.text, re.IGNORECASE))
+    except Exception as e:
+        logger.error(f"[ST] live-check error for {model_name}: {e}")
+        return None
+
+
 def get_stream_url(site: str, model_name: str, thorough: bool = False) -> Optional[str]:
     if site == "chaturbate":
         return get_chaturbate_stream_url(model_name, max_retries=4 if thorough else 1)
@@ -253,20 +332,40 @@ def get_stream_url(site: str, model_name: str, thorough: bool = False) -> Option
 
 # ── FFmpeg ────────────────────────────────────────────────────────────────────
 
-def find_ffmpeg() -> str:
-    candidates = [
-        os.path.join(os.path.dirname(__file__), "ffmpeg", "ffmpeg.exe"),
-        os.path.join(os.path.dirname(__file__), "ffmpeg.exe"),
-        "ffmpeg",
-    ]
-    for c in candidates:
-        try:
-            r = subprocess.run([c, "-version"], capture_output=True, timeout=5)
-            if r.returncode == 0:
-                return c
-        except Exception:
-            continue
-    raise FileNotFoundError("ffmpeg not found. Place ffmpeg.exe in the StreamRecorder folder.")
+def find_ffmpeg(override: str = "") -> str:
+    """Resolve an absolute path to ffmpeg.exe by checking the filesystem.
+    No probe subprocess: spawning `ffmpeg -version` can fail transiently
+    (post-boot churn, Defender first-scan, console-less pythonw quirks) and
+    used to make the monitor refuse to start even though ffmpeg was fine.
+    On a miss, the error lists every candidate checked — never a mystery."""
+    here  = os.path.dirname(os.path.abspath(__file__))
+    local = os.environ.get("LOCALAPPDATA", "")
+
+    def candidates():
+        if override:
+            yield "settings ffmpeg_path", override
+        yield "app folder", os.path.join(here, "ffmpeg", "ffmpeg.exe")
+        yield "app folder", os.path.join(here, "ffmpeg.exe")
+        yield "PATH", shutil.which("ffmpeg") or "(no 'ffmpeg' on PATH)"
+        if local:
+            yield "WinGet links", os.path.join(
+                local, "Microsoft", "WinGet", "Links", "ffmpeg.exe")
+            for hit in sorted(glob.glob(os.path.join(
+                    local, "Microsoft", "WinGet", "Packages",
+                    "*FFmpeg*", "**", "bin", "ffmpeg.exe"), recursive=True)):
+                yield "WinGet package", hit
+
+    checked = []
+    for label, path in candidates():
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+        checked.append(f"{path} [{label}]")
+    detail = "; ".join(checked)
+    logger.error("ffmpeg not found. Checked: %s", detail)
+    raise FileNotFoundError(
+        f"ffmpeg not found. Checked: {detail}. Install it "
+        f"(winget install Gyan.FFmpeg) or set ffmpeg_path in "
+        f"~/.streamrecorder_config.json")
 
 
 SITE_TAGS = {"chaturbate": "CB", "stripchat": "ST", "camsoda": "CS"}
@@ -482,8 +581,9 @@ class StreamRecorder:
                              daemon=True, name=f"kill-{key}").start()
         self._log(f"Removed {site}/{name}")
 
-    def start_monitor(self, group: Optional[str] = None):
-        """Start monitor thread(s). With no arg, starts both 'recorder' and 'saved'."""
+    def start_monitor(self, group: Optional[str] = None) -> bool:
+        """Start monitor thread(s). With no arg, starts both 'recorder' and 'saved'.
+        Returns False when startup failed (so the GUI doesn't show MONITORING)."""
         groups = [group] if group else ["recorder", "saved"]
         try:
             self.ffmpeg_path = find_ffmpeg()
@@ -492,7 +592,7 @@ class StreamRecorder:
             self._log(f"ERROR: {e}")
             if self.on_notification:
                 self.on_notification("FFmpeg Missing", str(e))
-            return
+            return False
         os.makedirs(self.output_dir, exist_ok=True)
         for g in groups:
             if self._running.get(g):
@@ -501,6 +601,7 @@ class StreamRecorder:
             threading.Thread(target=self._monitor_loop, args=(g,),
                              daemon=True, name=f"mon-{g}").start()
             self._log(f"Monitor [{g}] started.")
+        return True
 
     def stop_monitor(self, group: Optional[str] = None):
         """Stop monitor thread(s) and kill their sessions. With no arg, stops both."""
@@ -583,39 +684,62 @@ class StreamRecorder:
 
     def _monitor_loop(self, group: str):
         """Old-style sequential monitor: one pass per tick, in-loop session
-        management, 5s base cadence, per-model check_interval gating."""
-        while self._running.get(group):
-            with self._lock:
-                configs = [c for c in self.models.values() if group in c.groups]
-            for cfg in configs:
-                if not self._running.get(group):
-                    break
-                now = time.time()
-                if cfg.session:
-                    self._check_split(cfg)
-                    if cfg.session and cfg.session.process:
-                        if cfg.session.process.poll() is not None:
-                            self._handle_ffmpeg_exit(cfg)
-                        else:
-                            self._check_stall(cfg)
-                if now - cfg.last_checked < self.check_interval:
-                    continue
-                cfg.last_checked = now
-                if cfg.session:
-                    continue
-                self._set_status(cfg, ModelStatus.CHECKING, "")
-                url = get_stream_url(cfg.site, cfg.name)
-                # Re-check session after slow network call — auto-rec may
-                # have started a recording while we were fetching the URL
-                if cfg.session:
-                    continue
-                if url:
-                    cfg.stream_url = url
-                    self._set_status(cfg, ModelStatus.ONLINE, "")
+        management, 5s base cadence, per-model check_interval gating.
+
+        The 'saved' group uses a bulk scanner instead — per-model checks don't
+        scale to watchlists with hundreds of models (Cloudflare rate-limits the
+        hammering and everything reports as a false OFFLINE)."""
+        try:
+            if group == "saved":
+                self._saved_monitor_loop()
+                return
+            while self._running.get(group):
+                with self._lock:
+                    configs = [c for c in self.models.values() if group in c.groups]
+                for cfg in configs:
+                    if not self._running.get(group):
+                        break
+                    # One bad model/session must never kill the whole loop
+                    try:
+                        self._monitor_check_one(cfg)
+                    except Exception:
+                        logger.exception(f"[mon-{group}] check failed for "
+                                         f"{cfg.site}/{cfg.name}")
+                time.sleep(5)
+        except Exception as e:
+            logger.exception(f"Monitor [{group}] crashed")
+            self._log(f"Monitor [{group}] CRASHED: {e!r} — see ~/.streamrecorder.log")
+        finally:
+            self._running[group] = False
+
+    def _monitor_check_one(self, cfg: ModelConfig):
+        """One recorder-loop pass for a single model: session housekeeping +
+        (when due) an online check."""
+        now = time.time()
+        if cfg.session:
+            self._check_split(cfg)
+            if cfg.session and cfg.session.process:
+                if cfg.session.process.poll() is not None:
+                    self._handle_ffmpeg_exit(cfg)
                 else:
-                    cfg.stream_url = ""
-                    self._set_status(cfg, ModelStatus.OFFLINE, "")
-            time.sleep(5)
+                    self._check_stall(cfg)
+        if now - cfg.last_checked < self.check_interval:
+            return
+        cfg.last_checked = now
+        if cfg.session:
+            return
+        self._set_status(cfg, ModelStatus.CHECKING, "")
+        url = get_stream_url(cfg.site, cfg.name)
+        # Re-check session after slow network call — auto-rec may
+        # have started a recording while we were fetching the URL
+        if cfg.session:
+            return
+        if url:
+            cfg.stream_url = url
+            self._set_status(cfg, ModelStatus.ONLINE, "")
+        else:
+            cfg.stream_url = ""
+            self._set_status(cfg, ModelStatus.OFFLINE, "")
 
     def _launch_proc(self, cfg: ModelConfig, output_path: str,
                      stream_url: str) -> Optional[subprocess.Popen]:
@@ -632,6 +756,154 @@ class StreamRecorder:
             return launch_stripchat_playwright(cfg.name, output_path)
         return launch_ffmpeg_hls(stream_url, output_path, self.ffmpeg_path,
                                  site=cfg.site)
+
+    def _saved_monitor_loop(self):
+        """Saved-group monitor: 5s session housekeeping tick + a bulk status
+        scan every check_interval, run in a worker thread so housekeeping
+        stays responsive during the multi-minute sweep."""
+        try:
+            last_scan = 0.0
+            scan_thread: Optional[threading.Thread] = None
+            while self._running.get("saved"):
+                with self._lock:
+                    configs = [c for c in self.models.values() if "saved" in c.groups]
+                for cfg in configs:
+                    if not self._running.get("saved"):
+                        break
+                    if not cfg.session:
+                        continue
+                    try:
+                        self._check_split(cfg)
+                        if cfg.session and cfg.session.process:
+                            if cfg.session.process.poll() is not None:
+                                self._handle_ffmpeg_exit(cfg)
+                            else:
+                                self._check_stall(cfg)
+                    except Exception:
+                        logger.exception(f"[mon-saved] housekeeping failed for "
+                                         f"{cfg.site}/{cfg.name}")
+                now = time.time()
+                if ((scan_thread is None or not scan_thread.is_alive())
+                        and now - last_scan >= self.check_interval):
+                    last_scan = now
+                    scan_thread = threading.Thread(target=self._scan_saved_pass,
+                                                   daemon=True, name="saved-scan")
+                    scan_thread.start()
+                time.sleep(5)
+        except Exception as e:
+            logger.exception("Monitor [saved] crashed")
+            self._log(f"Monitor [saved] CRASHED: {e!r} — see ~/.streamrecorder.log")
+        finally:
+            self._running["saved"] = False
+
+    def _scan_saved_pass(self):
+        try:
+            self._scan_saved_pass_inner()
+        except Exception as e:
+            logger.exception("Saved scan crashed")
+            self._log(f"Saved scan CRASHED: {e!r} — see ~/.streamrecorder.log")
+
+    def _scan_saved_pass_inner(self):
+        """One bulk status pass over all saved-group models:
+        - Chaturbate: one room-list sweep, membership test (no per-model calls)
+        - Stripchat/Camsoda: per-model checks through a small thread pool
+        Models with an active session are skipped; statuses only change on a
+        definitive online/offline answer (failures keep the previous status)."""
+        running = lambda: self._running.get("saved", False)
+        t0 = time.time()
+        with self._lock:
+            configs = [c for c in self.models.values() if "saved" in c.groups]
+        cb = [c for c in configs if c.site == "chaturbate"]
+        others = [c for c in configs if c.site in ("stripchat", "camsoda")]
+        if not configs:
+            return
+        self._log(f"Saved scan started ({len(configs)} models)…")
+        counts = {"chaturbate": 0, "stripchat": 0, "camsoda": 0}
+
+        # Stripchat/Camsoda per-model checks run CONCURRENTLY with the long
+        # Chaturbate sweep so the first statuses appear within seconds
+        def scan_others():
+            def check(cfg: ModelConfig):
+                if cfg.site == "stripchat":
+                    return cfg, _stripchat_is_live(cfg.name)
+                return cfg, (get_camsoda_stream_url(cfg.name) is not None)
+            try:
+                self._log(f"Saved scan: checking {len(others)} "
+                          f"Stripchat/Camsoda models…")
+                done = 0
+                with ThreadPoolExecutor(max_workers=6,
+                                        thread_name_prefix="saved-scan") as pool:
+                    futures = [pool.submit(check, c) for c in others]
+                    for fut in as_completed(futures):
+                        if not running():
+                            pool.shutdown(wait=False, cancel_futures=True)
+                            break
+                        try:
+                            cfg, live = fut.result()
+                        except Exception:
+                            logger.exception("[saved-scan] SC/CS check failed")
+                            continue
+                        done += 1
+                        if done % 150 == 0:
+                            self._log(f"Saved scan: Stripchat/Camsoda "
+                                      f"{done}/{len(others)} checked…")
+                        if live is None:
+                            continue  # fetch failed — keep previous status
+                        counts[cfg.site] += live
+                        self._apply_scan_status(cfg, live)
+            except Exception as e:
+                logger.exception("Saved scan (Stripchat/Camsoda) crashed")
+                self._log(f"Saved scan (SC/CS) CRASHED: {e!r} "
+                          f"— see ~/.streamrecorder.log")
+
+        t_others = None
+        if others and running():
+            t_others = threading.Thread(target=scan_others, daemon=True,
+                                        name="saved-scan-others")
+            t_others.start()
+
+        if cb and running():
+            rooms = get_chaturbate_online_rooms(
+                running,
+                lambda got, total: self._log(
+                    f"Saved scan: Chaturbate sweep {got}/{total} rooms…"))
+            if rooms is None:
+                if running():
+                    self._log("Saved scan: Chaturbate room list unavailable "
+                              "(rate-limited?) — keeping previous statuses.")
+            else:
+                for cfg in cb:
+                    online = cfg.name in rooms
+                    counts["chaturbate"] += online
+                    self._apply_scan_status(cfg, online)
+                self._log(f"Saved scan: Chaturbate done — "
+                          f"{counts['chaturbate']}/{len(cb)} online.")
+
+        if t_others is not None:
+            t_others.join()
+
+        if running():
+            n_sc = sum(1 for c in others if c.site == "stripchat")
+            n_cs = len(others) - n_sc
+            parts = []
+            if cb:
+                parts.append(f"CB {counts['chaturbate']}/{len(cb)} online")
+            if n_sc:
+                parts.append(f"SC {counts['stripchat']}/{n_sc} online")
+            if n_cs:
+                parts.append(f"CS {counts['camsoda']}/{n_cs} online")
+            self._log(f"Saved scan done: {', '.join(parts)} "
+                      f"({time.time() - t0:.0f}s)")
+
+    def _apply_scan_status(self, cfg: ModelConfig, online: bool):
+        with self._lock:
+            if cfg.session:
+                return
+            new = ModelStatus.ONLINE if online else ModelStatus.OFFLINE
+            if not online:
+                cfg.stream_url = ""
+            if cfg.status != new:
+                self._set_status(cfg, new, "")
 
     def _begin_recording(self, cfg: ModelConfig, stream_url: str):
         session = RecordingSession(
