@@ -450,7 +450,10 @@ class StreamRecorder:
             killed = cfg.session
             cfg.session = None
         if killed:
-            self._kill_session(killed)
+            # Session is already detached — flush it in the background so
+            # GUI-thread callers don't freeze on graceful_stop.
+            threading.Thread(target=self._kill_session, args=(killed,),
+                             daemon=True, name=f"kill-{key}").start()
         self._log(f"Removed {site}/{name}")
 
     def start_monitor(self, group: Optional[str] = None):
@@ -486,10 +489,19 @@ class StreamRecorder:
                 # Only kill sessions whose groups are ALL being stopped
                 # (so a shared-group model keeps recording under the other monitor)
                 if cfg.groups.issubset(set(groups)) or not cfg.groups:
-                    victims.append(cfg)
-            for cfg in victims:
-                self._kill_session(cfg.session)
-                cfg.session = None
+                    victims.append(cfg.session)
+                    cfg.session = None
+        # Kill OUTSIDE the lock (so monitor/GUI threads aren't blocked) and in
+        # parallel — graceful_stop waits up to ~15 s per process, so a serial
+        # loop over many recordings froze the app for minutes.
+        threads = [
+            threading.Thread(target=self._kill_session, args=(s,), daemon=True)
+            for s in victims
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=20)
         for g in groups:
             self._log(f"Monitor [{g}] stopped.")
 

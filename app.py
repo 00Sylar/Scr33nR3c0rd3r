@@ -653,7 +653,7 @@ class StreamRecorderApp(tk.Tk):
             m.add_command(label=f"▶  Start Recording  {name}",
                           command=lambda: self._toggle_rec(iid, name, site))
             m.add_command(label=f"⏹  Stop Recording  {name}",
-                          command=lambda: self.recorder.stop_recording(name, site))
+                          command=lambda: self._stop_async(name, site))
             m.add_separator()
             auto = self._auto_rec.get(iid, False)
             m.add_command(label=f"{'☑' if auto else '☐'}  Auto-Record",
@@ -884,14 +884,23 @@ class StreamRecorderApp(tk.Tk):
         self._update_stats()
         self._update_selection_label()
 
+    def _stop_async(self, name: str, site: str):
+        """Stop a recording on a worker thread — graceful_stop blocks up to
+        ~15 s per process, which froze the GUI when run on the Tk thread."""
+        def _do():
+            self.recorder.stop_recording(name, site)
+            self.after(0, lambda: self._log_add(
+                f"Stopped recording: {name} ({site})", "warn"))
+        threading.Thread(target=_do, daemon=True,
+                         name=f"stop-{site}-{name}").start()
+
     def _stop_selected(self):
         keys = self._get_selected_keys()
         for key in keys:
             site, name = key.split(":", 1)
             cfg = self.recorder.models.get(key)
             if cfg and cfg.status == ModelStatus.RECORDING:
-                self.recorder.stop_recording(name, site)
-                self._log_add(f"Stopped recording: {name} ({site})", "warn")
+                self._stop_async(name, site)
 
     def _rec_selected(self):
         keys = self._get_selected_keys()
@@ -934,7 +943,7 @@ class StreamRecorderApp(tk.Tk):
         if not cfg:
             return
         if cfg.status == ModelStatus.RECORDING:
-            self.recorder.stop_recording(name, site)
+            self._stop_async(name, site)
         else:
             def _do():
                 ok = self.recorder.start_recording(name, site)
@@ -964,7 +973,11 @@ class StreamRecorderApp(tk.Tk):
 
     def _toggle_monitor_recorder(self):
         if self._monitoring_recorder:
-            self.recorder.stop_monitor("recorder")
+            # stop_monitor flushes every active ffmpeg (seconds) — keep it
+            # off the Tk thread so the GUI stays responsive.
+            threading.Thread(target=self.recorder.stop_monitor,
+                             args=("recorder",), daemon=True,
+                             name="stop-mon-recorder").start()
             self._monitoring_recorder = False
             self._btn_monitor_rec.configure(text="▶  START MONITOR", style="Green.TButton")
             self._log_add("Recorder monitor stopped.", "warn")
@@ -978,7 +991,9 @@ class StreamRecorderApp(tk.Tk):
 
     def _toggle_monitor_saved(self):
         if self._monitoring_saved:
-            self.recorder.stop_monitor("saved")
+            threading.Thread(target=self.recorder.stop_monitor,
+                             args=("saved",), daemon=True,
+                             name="stop-mon-saved").start()
             self._monitoring_saved = False
             self._btn_monitor_saved.configure(text="▶  START SCANNER", style="Green.TButton")
             self._log_add("Saved Models scanner stopped.", "warn")
