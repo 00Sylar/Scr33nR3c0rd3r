@@ -80,11 +80,51 @@ _LL_TAGS = (
 )
 
 
+def _select_highest_variant(text: str) -> str:
+    """For a master playlist, keep only the highest-BANDWIDTH video variant
+    (and its referenced audio rendition) so ffmpeg can't fall back to a lower
+    bitrate. Media playlists (no EXT-X-STREAM-INF) pass through unchanged."""
+    lines = text.splitlines()
+    best_i, best_bw = -1, -1
+    for i, line in enumerate(lines):
+        if line.startswith("#EXT-X-STREAM-INF"):
+            m = re.search(r"BANDWIDTH=(\d+)", line)
+            bw = int(m.group(1)) if m else 0
+            if bw > best_bw:
+                best_i, best_bw = i, bw
+    if best_i < 0:
+        return text  # not a master playlist
+    inf = lines[best_i]
+    url = lines[best_i + 1] if best_i + 1 < len(lines) else ""
+    am = re.search(r'AUDIO="([^"]+)"', inf)
+    audio_group = am.group(1) if am else None
+
+    out = []
+    for line in lines:
+        if line.startswith("#EXT-X-STREAM-INF") or line.startswith("#EXT-X-MEDIA:"):
+            continue  # drop all variant/rendition declarations; re-add chosen below
+        s = line.strip()
+        if s and not s.startswith("#"):
+            continue  # drop variant URL lines
+        out.append(line)
+    # Re-add the chosen audio rendition (if any) then the chosen video variant.
+    for line in lines:
+        if line.startswith("#EXT-X-MEDIA:") and audio_group and \
+                f'GROUP-ID="{audio_group}"' in line:
+            out.append(line)
+    out.append(inf)
+    out.append(url)
+    return "\n".join(out) + "\n"
+
+
 def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate") -> str:
     if mode == "stripchat":
         # Resolve MOUFLON segment URLs / strip MOUFLON tags first, then wrap.
         import stripchat_native
         text = stripchat_native.rewrite_playlist(text)
+    elif mode == "chaturbate":
+        # Pin the highest-bitrate variant on the master playlist.
+        text = _select_highest_variant(text)
     out = []
     for line in text.splitlines():
         s = line.strip()
