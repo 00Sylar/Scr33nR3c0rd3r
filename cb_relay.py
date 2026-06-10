@@ -39,6 +39,7 @@ _session = requests.Session()
 _REFERERS = {
     "stripchat":  "https://stripchat.com/",
     "chaturbate": "https://chaturbate.com/",
+    "camsoda":    "https://www.camsoda.com/",
 }
 
 
@@ -58,12 +59,13 @@ def _fetch(url: str, mode: str = "chaturbate") -> requests.Response:
 
 
 def _wrap_url(url: str, mode: str = "chaturbate") -> str:
-    # ffmpeg's hls demuxer whitelists segment URLs by *path* extension, so
-    # mirror the upstream extension in the relay path (/p.m4s, /p.m3u8, ...).
+    # ffmpeg's hls demuxer whitelists segment URLs by *path* extension. Keep
+    # .m3u8 for playlists; normalize every other (segment/init) extension to
+    # .m4s — a universally-whitelisted fragmented-MP4 extension — so odd
+    # upstream extensions (e.g. Camsoda's .fmp4) aren't rejected.
     upath = urllib.parse.urlparse(url).path
-    ext = ""
-    if "." in upath.rsplit("/", 1)[-1]:
-        ext = "." + upath.rsplit(".", 1)[-1]
+    last = upath.rsplit("/", 1)[-1].lower()
+    ext = ".m3u8" if last.endswith(".m3u8") else ".m4s"
     return (
         f"http://127.0.0.1:{_port}/p{ext}"
         f"?m={mode}&u={urllib.parse.quote(url, safe='')}"
@@ -122,7 +124,7 @@ def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate") -> str
         # Resolve MOUFLON segment URLs / strip MOUFLON tags first, then wrap.
         import stripchat_native
         text = stripchat_native.rewrite_playlist(text)
-    elif mode == "chaturbate":
+    elif mode in ("chaturbate", "camsoda"):
         # Pin the highest-bitrate variant on the master playlist.
         text = _select_highest_variant(text)
     out = []
@@ -130,7 +132,7 @@ def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate") -> str
         s = line.strip()
         if not s:
             out.append(line)
-        elif mode == "chaturbate" and s.startswith(_LL_TAGS):
+        elif mode in ("chaturbate", "camsoda") and s.startswith(_LL_TAGS):
             continue
         elif s.startswith("#"):
             out.append(

@@ -216,8 +216,9 @@ def get_camsoda_stream_url(model_name: str) -> Optional[str]:
     """
     Camsoda live HLS resolver.
     Public endpoint:  https://www.camsoda.com/api/v1/video/vtoken/<name>
-    Response JSON:    { "token": "...", "edge_servers": ["..."], "stream_name": "...", "app": "edge" }
-    Builds: https://{edge}/{app}/{stream_name}_v1/index.m3u8?token={token}
+    Response JSON:    { "token": "...", "edge_servers": ["host/path"], "stream_name": "...", "status": "online" }
+    Builds: https://{edge}/{stream_name}_v1/index.m3u8?token={token}
+    (edge already includes its path segment; stream_name embeds the resolution.)
     """
     api_url = f"https://www.camsoda.com/api/v1/video/vtoken/{model_name}"
     try:
@@ -228,12 +229,13 @@ def get_camsoda_stream_url(model_name: str) -> Optional[str]:
         token = data.get("token")
         edges = data.get("edge_servers") or []
         stream_name = data.get("stream_name")
-        app = data.get("app") or "edge"
+        status = (data.get("status") or "").lower()
         if not (token and edges and stream_name):
             return None
+        if status and status != "online":
+            return None
         edge = edges[0]
-        # Most Camsoda edges use "https://{edge}/{app}/{stream}_v1/index.m3u8?token={token}"
-        return f"https://{edge}/{app}/{stream_name}_v1/index.m3u8?token={token}"
+        return f"https://{edge}/{stream_name}_v1/index.m3u8?token={token}"
     except Exception as e:
         logger.error(f"[CS] {model_name}: {e}")
         return None
@@ -350,12 +352,12 @@ def launch_ffmpeg_hls(stream_url: str, output_path: str, ffmpeg_path: str,
         ),
     }
     headers = headers_map.get(site, f"User-Agent: {USER_AGENT}\r\n")
-    if site == "chaturbate":
-        # CB's LL-HLS edges reset ffmpeg's TLS connections mid-segment,
-        # corrupting recordings. Route through the local cb_relay proxy
-        # (plain HTTP to 127.0.0.1; requests fetches upstream reliably).
+    if site in ("chaturbate", "camsoda"):
+        # Route through the local relay: it pins the highest-bitrate variant
+        # and (for CB) survives the edge's mid-segment TLS resets. Plain HTTP
+        # to 127.0.0.1; requests fetches upstream reliably.
         import cb_relay
-        stream_url = cb_relay.wrap(stream_url, USER_AGENT)
+        stream_url = cb_relay.wrap(stream_url, USER_AGENT, mode=site)
         headers = ""
     cmd = [
         ffmpeg_path,
@@ -368,6 +370,10 @@ def launch_ffmpeg_hls(stream_url: str, output_path: str, ffmpeg_path: str,
         "-reconnect_streamed", "1",
         "-reconnect_delay_max", "10",
     ]
+    if site in ("chaturbate", "camsoda"):
+        # Relay segment URLs may use extensions outside ffmpeg's HLS default
+        # whitelist (e.g. Camsoda's .fmp4) — accept them all.
+        cmd += ["-allowed_extensions", "ALL"]
     if site == "chaturbate":
         cmd += ["-m3u8_hold_counters", "20"]
     cmd += [
