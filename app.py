@@ -666,6 +666,8 @@ class StreamRecorderApp(tk.Tk):
                 m.add_command(label="⭐  Add to Saved Models",
                               command=lambda: self._add_to_saved(name, site))
             m.add_separator()
+            m.add_command(label="🔗  Copy Model URL",
+                          command=lambda: self._copy_model_url(name, site))
             m.add_command(label="📁  Open Output Folder",
                           command=lambda: os.startfile(self.settings.output_dir))
             m.add_command(label="✕  Remove Model",
@@ -883,6 +885,18 @@ class StreamRecorderApp(tk.Tk):
         self._persist_models()
         self._update_stats()
         self._update_selection_label()
+
+    _SITE_URLS = {
+        "chaturbate": "https://chaturbate.com/{}/",
+        "stripchat":  "https://stripchat.com/{}",
+        "camsoda":    "https://www.camsoda.com/{}",
+    }
+
+    def _copy_model_url(self, name: str, site: str):
+        url = self._SITE_URLS.get(site, "https://{}/").format(name)
+        self.clipboard_clear()
+        self.clipboard_append(url)
+        self._log_add(f"Copied URL: {url}")
 
     def _stop_async(self, name: str, site: str):
         """Stop a recording on a worker thread — graceful_stop blocks up to
@@ -1231,6 +1245,8 @@ class StreamRecorderApp(tk.Tk):
         m.delete(0, "end")
         m.add_command(label=f"＋  Add to Recorder  {name}",
                       command=lambda: self._add_to_recorder(name, site))
+        m.add_command(label="🔗  Copy Model URL",
+                      command=lambda: self._copy_model_url(name, site))
         m.add_separator()
         m.add_command(label="✕  Remove from Saved Models",
                       command=lambda: self._remove_saved(sid))
