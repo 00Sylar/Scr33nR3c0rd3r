@@ -74,6 +74,16 @@ async function postRemove(name, site, target) {
   return r.json();
 }
 
+async function postAuto(name, site, enabled) {
+  const r = await fetch(`${API}/auto`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ name, site, enabled }),
+    signal:  AbortSignal.timeout(3000),
+  });
+  return r.json();
+}
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function statusBadgeHTML(s) {
@@ -140,6 +150,10 @@ async function render() {
     <div class="site-label">${siteLabel}</div>
     ${statusBadgeHTML(curStatus)}
     ${recorderButtonHTML(inRec, curStatus, appUp)}
+    ${inRec ? `<label class="auto-row">
+        <input type="checkbox" id="chk-auto" ${appData?.auto ? 'checked' : ''}>
+        <span>Auto-Record when online</span>
+      </label>` : ''}
     <button class="btn btn-saved"
       id="btn-saved"
       ${inSaved || !appUp ? 'disabled' : ''}>
@@ -263,6 +277,32 @@ async function render() {
         fb.className = 'feedback err';
         fb.textContent = 'Could not reach StreamRecorder';
       }
+    });
+  }
+
+  // ── Auto-Record toggle ─────────────────────────────────────────────────────
+  const chkAuto = document.getElementById('chk-auto');
+  if (chkAuto) {
+    chkAuto.addEventListener('change', async () => {
+      const fb = document.getElementById('fb');
+      const want = chkAuto.checked;
+      chkAuto.disabled = true;
+      try {
+        const res = await postAuto(info.name, info.site, want);
+        if (res.ok) {
+          fb.className = 'feedback ok';
+          fb.textContent = want ? 'Auto-record enabled' : 'Auto-record disabled';
+        } else {
+          chkAuto.checked = !want;
+          fb.className = 'feedback err';
+          fb.textContent = res.error || 'Failed';
+        }
+      } catch {
+        chkAuto.checked = !want;
+        fb.className = 'feedback err';
+        fb.textContent = 'Could not reach StreamRecorder';
+      }
+      chkAuto.disabled = false;
     });
   }
 

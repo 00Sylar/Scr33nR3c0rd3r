@@ -100,6 +100,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             "in_recorder": key in app._rows,
             "in_saved":    sid in app._saved_rows,
             "status":      status_str,
+            "auto":        app._auto_rec.get(key, False),
         })
 
     def do_POST(self):
@@ -110,6 +111,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._handle_record()
         elif parsed.path == "/remove":
             self._handle_remove()
+        elif parsed.path == "/auto":
+            self._handle_auto()
         else:
             self._json({"error": "not found"}, 404)
 
@@ -211,6 +214,27 @@ class _ApiHandler(BaseHTTPRequestHandler):
             return
         app.after(0, lambda n=name, s=site: app._do_remove_from_recorder(n, s))
         self._json({"ok": True})
+
+    def _handle_auto(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+        name    = body.get("name", "").strip().lower()
+        site    = body.get("site", "").strip().lower()
+        enabled = bool(body.get("enabled", False))
+        if not name or not site:
+            self._json({"ok": False, "error": "missing name or site"}, 400)
+            return
+        app = self._app
+        key = f"{site}:{name}"
+        if key not in app._rows:
+            self._json({"ok": False, "error": "Model is not in the Recorder list"})
+            return
+        app.after(0, lambda: app._set_auto(key, enabled))
+        self._json({"ok": True, "auto": enabled})
 
     def _cors(self, code):
         self.send_response(code)
@@ -659,10 +683,11 @@ class StreamRecorderApp(tk.Tk):
         m.tk_popup(event.x_root, event.y_root)
 
     def _toggle_auto_single(self, key: str):
-        cur = self._auto_rec.get(key, False)
-        new_val = not cur
-        self._auto_rec[key] = new_val
-        self._tree.set(key, "auto", "☑" if new_val else "☐")
+        self._set_auto(key, not self._auto_rec.get(key, False))
+
+    def _set_auto(self, key: str, val: bool):
+        self._auto_rec[key] = val
+        self._tree.set(key, "auto", "☑" if val else "☐")
         self._persist_models()
 
     def _select_all(self, tree: ttk.Treeview):
