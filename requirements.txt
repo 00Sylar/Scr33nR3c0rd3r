@@ -1,2 +1,4 @@
 requests>=2.31.0
 winotify>=1.1.0; sys_platform == "win32"
+playwright>=1.50.0          # Stripchat recorder (stripchat_live.py); run: playwright install chromium
+tdjson>=1.8.56              # Telegram upload pipeline (pipeline_worker.py)

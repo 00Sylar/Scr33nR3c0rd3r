@@ -256,8 +256,6 @@ class StreamRecorderApp(tk.Tk):
         self._monitoring_saved    = False
         self._tray: Optional[WinTray] = None
         self._hiding_to_tray = False
-        self._tray_poll_active = False
-
         self._build_styles()
         self._build_ui()
         self._restore_models()
@@ -1707,29 +1705,22 @@ class StreamRecorderApp(tk.Tk):
                 self._tray = None
                 self.deiconify()
                 return
-        self._start_tray_poll()
-
-    def _start_tray_poll(self):
-        if not self._tray_poll_active:
-            self._tray_poll_active = True
-            self._tray_poll_tick()
-
-    def _tray_poll_tick(self):
-        if self._tray:
-            try:
-                self._tray.pump()
-            except Exception:
-                pass
-        if self._tray_poll_active:
-            self.after(200, self._tray_poll_tick)
 
     def _restore_from_tray(self):
         self.after(0, self._do_restore_from_tray)
 
     def _do_restore_from_tray(self):
-        if not self.winfo_viewable():
-            self.deiconify()
+        # Window was withdrawn while iconic — force normal state first so
+        # deiconify doesn't bring it back minimized.
+        try:
+            self.state("normal")
+        except tk.TclError:
+            pass
+        self.deiconify()
         self.lift()
+        # Briefly toggle topmost so Windows actually brings us to the front.
+        self.attributes("-topmost", True)
+        self.after(100, lambda: self.attributes("-topmost", False))
         self.focus_force()
 
     def _remove_tray(self):

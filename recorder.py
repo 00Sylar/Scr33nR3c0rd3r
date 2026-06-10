@@ -350,13 +350,27 @@ def launch_ffmpeg_hls(stream_url: str, output_path: str, ffmpeg_path: str,
         ),
     }
     headers = headers_map.get(site, f"User-Agent: {USER_AGENT}\r\n")
+    if site == "chaturbate":
+        # CB's LL-HLS edges reset ffmpeg's TLS connections mid-segment,
+        # corrupting recordings. Route through the local cb_relay proxy
+        # (plain HTTP to 127.0.0.1; requests fetches upstream reliably).
+        import cb_relay
+        stream_url = cb_relay.wrap(stream_url, USER_AGENT)
+        headers = ""
     cmd = [
         ffmpeg_path,
         "-hide_banner", "-loglevel", "error",
-        "-headers", headers,
+    ]
+    if headers:
+        cmd += ["-headers", headers]
+    cmd += [
         "-reconnect", "1",
         "-reconnect_streamed", "1",
         "-reconnect_delay_max", "10",
+    ]
+    if site == "chaturbate":
+        cmd += ["-m3u8_hold_counters", "20"]
+    cmd += [
         "-i", stream_url,
         "-c", "copy",
         "-copyts",

@@ -470,7 +470,24 @@ class _TDLibClient:
                 fut.set_result(upd)
                 return
 
-        if t == "updateAuthorizationState":
+        if t == "error":
+            # Errors without @extra (e.g. failed auth requests) were silently
+            # dropped, leaving the pipeline stuck at "Connecting" — surface them.
+            msg = upd.get("message", "")
+            self._on_log(f"[tdlib] error {upd.get('code')}: {msg}")
+            # Wrong auth input leaves TDLib waiting in the same state without
+            # re-emitting it — re-prompt the user so login can be retried.
+            retry_state = {
+                "PHONE_CODE_INVALID":   "authorizationStateWaitCode",
+                "PHONE_CODE_EXPIRED":   "authorizationStateWaitCode",
+                "PASSWORD_HASH_INVALID": "authorizationStateWaitPassword",
+                "PHONE_NUMBER_INVALID": "authorizationStateWaitPhoneNumber",
+            }.get(msg)
+            if retry_state:
+                if retry_state == "authorizationStateWaitPhoneNumber":
+                    self._cfg.phone = ""  # force a fresh prompt
+                await self._on_auth({"@type": retry_state})
+        elif t == "updateAuthorizationState":
             await self._on_auth(upd["authorization_state"])
         elif t == "updateFile":
             f = upd["file"]
@@ -520,9 +537,21 @@ class _TDLibClient:
                 "application_version":   "1.0",
             })
         elif t == "authorizationStateWaitPhoneNumber":
+            phone = self._cfg.phone
+            if not phone:
+                # Fresh login (no cached session) — ask the user.
+                assert self._loop
+                phone = await self._loop.run_in_executor(
+                    None,
+                    lambda: self._prompt("Enter Telegram phone number (intl. format, e.g. +1555...):"),
+                )
+                if not phone:
+                    self._on_log("[tdlib] no phone number provided — login aborted.")
+                    return
+                self._cfg.phone = phone
             self._raw_send({
                 "@type":        "setAuthenticationPhoneNumber",
-                "phone_number": self._cfg.phone,
+                "phone_number": phone,
             })
         elif t == "authorizationStateWaitCode":
             assert self._loop

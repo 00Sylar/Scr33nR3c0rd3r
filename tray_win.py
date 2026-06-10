@@ -5,6 +5,12 @@ tray_win.py — Windows system tray icon (ctypes, no extra deps)
 import ctypes
 from ctypes import wintypes
 
+# Python 3.14+ removed LONG_PTR from ctypes.wintypes
+if hasattr(wintypes, "LONG_PTR"):
+    LONG_PTR = wintypes.LONG_PTR
+else:
+    LONG_PTR = ctypes.c_ssize_t
+
 user32 = ctypes.windll.user32
 shell32 = ctypes.windll.shell32
 
@@ -14,6 +20,8 @@ NIF_MESSAGE = 0x00000001
 NIF_ICON = 0x00000002
 NIF_TIP = 0x00000004
 
+WM_NULL = 0x0000
+WM_LBUTTONUP = 0x0202
 WM_LBUTTONDBLCLK = 0x0203
 WM_RBUTTONUP = 0x0205
 
@@ -26,6 +34,8 @@ MF_SEPARATOR = 0x00000800
 
 ID_SHOW = 1001
 ID_EXIT = 1002
+
+GWLP_WNDPROC = -4
 
 
 class NOTIFYICONDATAW(ctypes.Structure):
@@ -48,15 +58,31 @@ class NOTIFYICONDATAW(ctypes.Structure):
     ]
 
 
-class MSG(ctypes.Structure):
-    _fields_ = [
-        ("hwnd", wintypes.HWND),
-        ("message", wintypes.UINT),
-        ("wParam", wintypes.WPARAM),
-        ("lParam", wintypes.LPARAM),
-        ("time", wintypes.DWORD),
-        ("pt", wintypes.POINT),
-    ]
+WNDPROC = ctypes.WINFUNCTYPE(
+    LONG_PTR,
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+)
+
+if hasattr(user32, "SetWindowLongPtrW"):
+    _SetWindowLong = user32.SetWindowLongPtrW
+    _SetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int, LONG_PTR]
+    _SetWindowLong.restype = LONG_PTR
+else:
+    _SetWindowLong = user32.SetWindowLongW
+    _SetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    _SetWindowLong.restype = ctypes.c_long
+
+user32.CallWindowProcW.argtypes = [
+    LONG_PTR,
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+]
+user32.CallWindowProcW.restype = LONG_PTR
 
 
 class WinTray:
@@ -65,7 +91,9 @@ class WinTray:
     @classmethod
     def _tray_message_id(cls) -> int:
         if cls._registered_msg is None:
-            cls._registered_msg = user32.RegisterWindowMessageW("StreamRecorderTrayEvent")
+            cls._registered_msg = user32.RegisterWindowMessageW(
+                "StreamRecorderTrayEvent"
+            )
         return cls._registered_msg
 
     def __init__(self, hwnd: int, tooltip: str, on_show, on_quit):
@@ -76,6 +104,39 @@ class WinTray:
         self.uID = 1
         self._msg = self._tray_message_id()
         self._added = False
+        self._orig_wndproc = None
+        self._wndproc_cb = None
+
+    def _install_wndproc(self):
+        @WNDPROC
+        def wndproc(hWnd, uMsg, wParam, lParam):
+            if uMsg == self._msg:
+                if lParam in (WM_LBUTTONUP, WM_LBUTTONDBLCLK):
+                    self.on_show()
+                elif lParam == WM_RBUTTONUP:
+                    self._show_menu()
+                return 0
+            return user32.CallWindowProcW(
+                self._orig_wndproc, hWnd, uMsg, wParam, lParam
+            )
+
+        self._wndproc_cb = wndproc
+        old = _SetWindowLong(
+            self.hwnd,
+            GWLP_WNDPROC,
+            ctypes.cast(wndproc, ctypes.c_void_p).value,
+        )
+        if old == 0:
+            err = ctypes.get_last_error()
+            if err != 0:
+                raise OSError(f"SetWindowLongPtrW failed: error {err}")
+        self._orig_wndproc = old
+
+    def _restore_wndproc(self):
+        if self._orig_wndproc is not None:
+            _SetWindowLong(self.hwnd, GWLP_WNDPROC, self._orig_wndproc)
+            self._orig_wndproc = None
+        self._wndproc_cb = None
 
     def add(self):
         if self._added:
@@ -91,10 +152,12 @@ class WinTray:
         if not shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid)):
             raise OSError("Shell_NotifyIconW failed")
         self._added = True
+        self._install_wndproc()
 
     def remove(self):
         if not self._added:
             return
+        self._restore_wndproc()
         nid = NOTIFYICONDATAW()
         nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
         nid.hWnd = self.hwnd
@@ -119,6 +182,9 @@ class WinTray:
             self.hwnd,
             None,
         )
+        # Required after TrackPopupMenu with TPM_RETURNCMD so the menu closes
+        # correctly when the user clicks elsewhere (MSDN tray-menu quirk).
+        user32.PostMessageW(self.hwnd, WM_NULL, 0, 0)
         user32.DestroyMenu(menu)
         if cmd == ID_SHOW:
             self.on_show()
@@ -126,13 +192,4 @@ class WinTray:
             self.on_quit()
 
     def pump(self):
-        if not self._added:
-            return
-        msg = MSG()
-        PM_REMOVE = 0x0001
-        mid = self._msg
-        while user32.PeekMessageW(ctypes.byref(msg), self.hwnd, mid, mid, PM_REMOVE):
-            if msg.lParam == WM_LBUTTONDBLCLK:
-                self.on_show()
-            elif msg.lParam == WM_RBUTTONUP:
-                self._show_menu()
+        pass

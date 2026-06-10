@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>StreamRecorder</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 240px;
+      background: #0d0f12;
+      color: #e8ecf0;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 13px;
+    }
+
+    .header {
+      background: #13161b;
+      padding: 9px 14px;
+      border-bottom: 2px solid #00d4ff;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .header .dot  { color: #00d4ff; font-size: 15px; line-height: 1; }
+    .header .title { font-weight: 700; font-size: 12px; letter-spacing: 1px; color: #e8ecf0; }
+
+    .body { padding: 13px 14px 14px; }
+
+    .model-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .site-label {
+      font-size: 10px;
+      color: #4a5260;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 11px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      background: #1a1e26;
+      margin-bottom: 11px;
+    }
+    .status-badge.recording { color: #00d4ff; }
+    .status-badge.online    { color: #00e676; }
+    .status-badge.offline   { color: #4a5260; }
+    .status-badge.checking  { color: #ffd740; }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 7px 10px;
+      margin-bottom: 6px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: center;
+      transition: opacity 0.12s;
+    }
+    .btn:last-of-type { margin-bottom: 0; }
+    .btn:hover:not(:disabled) { opacity: 0.82; }
+    .btn:disabled { opacity: 0.38; cursor: default; }
+    .btn-rec   { background: #00e676; color: #0d0f12; }
+    .btn-saved { background: #00d4ff; color: #0d0f12; }
+    .btn-start { background: #00e676; color: #0d0f12; }
+    .btn-stop  { background: #ff3d57; color: #fff; }
+    .btn-ghost { background: #1a1e26; color: #a0a8b4; cursor: default; }
+    .btn-remove {
+      background: transparent;
+      color: #6a7380;
+      border: 1px solid #2a2f38;
+      font-size: 11px;
+      padding: 5px 10px;
+      margin-top: 2px;
+    }
+    .btn-remove:hover:not(:disabled) {
+      color: #ff3d57;
+      border-color: #ff3d57;
+      opacity: 1;
+    }
+
+    .msg {
+      text-align: center;
+      padding: 18px 0 14px;
+      color: #4a5260;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .msg .icon { font-size: 26px; display: block; margin-bottom: 6px; }
+
+    .feedback {
+      font-size: 11px;
+      text-align: center;
+      padding: 5px 8px;
+      border-radius: 3px;
+      margin-top: 7px;
+    }
+    .feedback.ok  { background: #0a2a18; color: #00e676; }
+    .feedback.err { background: #2a0a0a; color: #ff3d57; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="dot">⬤</span>
+    <span class="title">STREAM RECORDER</span>
+  </div>
+  <div class="body" id="root">
+    <div class="msg"><span class="icon">⏳</span>Loading…</div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
