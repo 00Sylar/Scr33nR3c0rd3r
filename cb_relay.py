@@ -1,5 +1,5 @@
 """
-cb_relay.py — local HTTP relay for Chaturbate LL-HLS streams.
+cb_relay.py — local HTTP relay for site HLS streams.
 
 Chaturbate's llhls CDN edges reset ffmpeg's TLS connections mid-segment
 (ffmpeg/Schannel "The specified session has been invalidated", error -10054),
@@ -9,6 +9,11 @@ relay on 127.0.0.1 (plain HTTP) and the relay fetches upstream via requests.
 
 Playlists are rewritten so every URI (segments, EXT-X-MAP, EXT-X-MEDIA,
 EXT-X-PART) also goes through the relay.
+
+A per-stream `mode` (carried in each wrapped URL) selects the playlist
+transform: "chaturbate" strips LL-HLS partial-segment tags; "stripchat"
+applies MOUFLON decryption (stripchat_native.rewrite_playlist) so plain
+ffmpeg can record Stripchat without a browser.
 """
 
 import re
@@ -30,26 +35,39 @@ _user_agent = _DEFAULT_UA
 _session = requests.Session()
 
 
-def _fetch(url: str) -> requests.Response:
+# doppiocdn (Stripchat) rejects segment requests without a matching Referer.
+_REFERERS = {
+    "stripchat":  "https://stripchat.com/",
+    "chaturbate": "https://chaturbate.com/",
+}
+
+
+def _fetch(url: str, mode: str = "chaturbate") -> requests.Response:
+    headers = {"User-Agent": _user_agent}
+    ref = _REFERERS.get(mode)
+    if ref:
+        headers["Referer"] = ref
+        headers["Origin"] = ref.rstrip("/")
     last_exc = None
     for _ in range(3):
         try:
-            return _session.get(
-                url, timeout=20, headers={"User-Agent": _user_agent}
-            )
+            return _session.get(url, timeout=20, headers=headers)
         except requests.RequestException as exc:
             last_exc = exc
     raise last_exc
 
 
-def _wrap_url(url: str) -> str:
+def _wrap_url(url: str, mode: str = "chaturbate") -> str:
     # ffmpeg's hls demuxer whitelists segment URLs by *path* extension, so
     # mirror the upstream extension in the relay path (/p.m4s, /p.m3u8, ...).
     upath = urllib.parse.urlparse(url).path
     ext = ""
     if "." in upath.rsplit("/", 1)[-1]:
         ext = "." + upath.rsplit(".", 1)[-1]
-    return f"http://127.0.0.1:{_port}/p{ext}?u={urllib.parse.quote(url, safe='')}"
+    return (
+        f"http://127.0.0.1:{_port}/p{ext}"
+        f"?m={mode}&u={urllib.parse.quote(url, safe='')}"
+    )
 
 
 # LL-HLS-only tags: stripped so ffmpeg records full segments only and never
@@ -62,25 +80,29 @@ _LL_TAGS = (
 )
 
 
-def _rewrite_playlist(text: str, base_url: str) -> str:
+def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate") -> str:
+    if mode == "stripchat":
+        # Resolve MOUFLON segment URLs / strip MOUFLON tags first, then wrap.
+        import stripchat_native
+        text = stripchat_native.rewrite_playlist(text)
     out = []
     for line in text.splitlines():
         s = line.strip()
         if not s:
             out.append(line)
-        elif s.startswith(_LL_TAGS):
+        elif mode == "chaturbate" and s.startswith(_LL_TAGS):
             continue
         elif s.startswith("#"):
             out.append(
                 re.sub(
                     r'URI="([^"]+)"',
                     lambda m: 'URI="%s"'
-                    % _wrap_url(urllib.parse.urljoin(base_url, m.group(1))),
+                    % _wrap_url(urllib.parse.urljoin(base_url, m.group(1)), mode),
                     line,
                 )
             )
         else:
-            out.append(_wrap_url(urllib.parse.urljoin(base_url, s)))
+            out.append(_wrap_url(urllib.parse.urljoin(base_url, s), mode))
     return "\n".join(out) + "\n"
 
 
@@ -99,12 +121,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
-        target = urllib.parse.parse_qs(parsed.query).get("u", [None])[0]
+        qs = urllib.parse.parse_qs(parsed.query)
+        target = qs.get("u", [None])[0]
+        mode = qs.get("m", ["chaturbate"])[0]
         if not parsed.path.startswith("/p") or not target:
             self.send_error(404)
             return
         try:
-            r = _fetch(target)
+            r = _fetch(target, mode)
         except Exception:
             self.send_error(502)
             return
@@ -112,7 +136,7 @@ class _Handler(BaseHTTPRequestHandler):
         ctype = r.headers.get("Content-Type", "application/octet-stream")
         if target.split("?")[0].endswith(".m3u8") or "mpegurl" in ctype.lower():
             body = _rewrite_playlist(
-                body.decode("utf-8", "replace"), target
+                body.decode("utf-8", "replace"), target, mode
             ).encode("utf-8")
             ctype = "application/vnd.apple.mpegurl"
         try:
@@ -125,8 +149,10 @@ class _Handler(BaseHTTPRequestHandler):
             pass  # ffmpeg dropped the connection; nothing to do
 
 
-def wrap(url: str, user_agent: str | None = None) -> str:
-    """Start the relay (once) and return a localhost URL proxying `url`."""
+def wrap(url: str, user_agent: str | None = None,
+         mode: str = "chaturbate") -> str:
+    """Start the relay (once) and return a localhost URL proxying `url`.
+    `mode` selects the playlist transform: "chaturbate" or "stripchat"."""
     global _server, _port, _user_agent
     with _lock:
         if user_agent:
@@ -138,4 +164,4 @@ def wrap(url: str, user_agent: str | None = None) -> str:
                 target=_server.serve_forever, daemon=True,
                 name="cb-relay",
             ).start()
-    return _wrap_url(url)
+    return _wrap_url(url, mode)

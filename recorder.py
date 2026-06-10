@@ -403,6 +403,26 @@ def launch_stripchat_playwright(model_name: str, output_path: str) -> subprocess
     )
 
 
+def launch_stripchat_native(model_name: str, output_path: str,
+                            ffmpeg_path: str) -> Optional[subprocess.Popen]:
+    """Browserless Stripchat path: resolve the MOUFLON-keyed variant, serve it
+    through the local relay, and record with plain ffmpeg -c copy (light,
+    single-quality). Returns None if the native path can't be used (model not
+    public, keys rotated, advert loop) — caller should fall back to Playwright.
+    """
+    import stripchat_native
+    import cb_relay
+    try:
+        keyed = stripchat_native.resolve(model_name)
+    except Exception:
+        return None
+    if not keyed:
+        return None
+    relay_url = cb_relay.wrap(keyed, USER_AGENT, mode="stripchat")
+    return launch_ffmpeg_hls(relay_url, output_path, ffmpeg_path,
+                             site="stripchat")
+
+
 # ── StreamRecorder ────────────────────────────────────────────────────────────
 
 class StreamRecorder:
@@ -591,6 +611,22 @@ class StreamRecorder:
                     self._set_status(cfg, ModelStatus.OFFLINE, "")
             time.sleep(5)
 
+    def _launch_proc(self, cfg: ModelConfig, output_path: str,
+                     stream_url: str) -> Optional[subprocess.Popen]:
+        """Start the recording process for a model. Stripchat tries the
+        browserless native path first and falls back to Playwright; other
+        sites use ffmpeg directly."""
+        if cfg.site == "stripchat":
+            proc = launch_stripchat_native(cfg.name, output_path,
+                                           self.ffmpeg_path)
+            if proc is not None:
+                self._log(f"{cfg.name}: native HLS path (no browser)")
+                return proc
+            self._log(f"{cfg.name}: native path unavailable — browser fallback")
+            return launch_stripchat_playwright(cfg.name, output_path)
+        return launch_ffmpeg_hls(stream_url, output_path, self.ffmpeg_path,
+                                 site=cfg.site)
+
     def _begin_recording(self, cfg: ModelConfig, stream_url: str):
         session = RecordingSession(
             model_name=cfg.name, site=cfg.site,
@@ -603,11 +639,7 @@ class StreamRecorder:
         session.last_size_change = time.time()
 
         try:
-            if cfg.site == "stripchat":
-                proc = launch_stripchat_playwright(cfg.name, output_path)
-            else:
-                proc = launch_ffmpeg_hls(stream_url, output_path, self.ffmpeg_path,
-                                         site=cfg.site)
+            proc = self._launch_proc(cfg, output_path, stream_url)
 
             if proc is None:
                 self._set_status(cfg, ModelStatus.ERROR, "Could not get stream URL")
@@ -692,11 +724,7 @@ class StreamRecorder:
             session.last_size    = 0
             session.last_size_change = time.time()
             try:
-                if cfg.site == "stripchat":
-                    proc = launch_stripchat_playwright(cfg.name, output_path)
-                else:
-                    proc = launch_ffmpeg_hls(url, output_path, self.ffmpeg_path,
-                                             site=cfg.site)
+                proc = self._launch_proc(cfg, output_path, url)
                 if proc:
                     session.process = proc
                     self._set_status(cfg, ModelStatus.RECORDING, output_path)
