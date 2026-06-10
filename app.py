@@ -261,7 +261,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
 class StreamRecorderApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("WebcamRecorder 0.10 Release Candidate")
+        self.title("Scr33nX")
         self.geometry("1060x700")
         self.minsize(900, 520)
         self.configure(bg=BG)
@@ -357,10 +357,10 @@ class StreamRecorderApp(tk.Tk):
         hdr.pack_propagate(False)
         tk.Label(hdr, text="⬤", fg=ACCENT, bg=BG2,
                  font=("Segoe UI", 17)).pack(side="left", padx=(16,4))
-        tk.Label(hdr, text="STREAM", fg=TEXT, bg=BG2,
+        tk.Label(hdr, text="Scr33n", fg=TEXT, bg=BG2,
                  font=("Segoe UI Black", 15)).pack(side="left")
-        tk.Label(hdr, text="RECORDER", fg=ACCENT, bg=BG2,
-                 font=("Segoe UI Black", 15)).pack(side="left", padx=(2,0))
+        tk.Label(hdr, text="X", fg=ACCENT, bg=BG2,
+                 font=("Segoe UI Black", 15)).pack(side="left", padx=(1,0))
         self._lbl_hdr_status = tk.Label(hdr, text="● IDLE", fg=TEXT3, bg=BG2,
                                          font=("Segoe UI Semibold", 10))
         self._lbl_hdr_status.pack(side="right", padx=12)
@@ -1756,7 +1756,7 @@ class StreamRecorderApp(tk.Tk):
             return
         if self._tray is None:
             self._tray = WinTray(
-                "WebcamRecorder",
+                "Scr33nX",
                 on_show=self._tray_show_evt.set,
                 on_quit=self._tray_quit_evt.set,
             )

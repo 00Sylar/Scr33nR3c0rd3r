@@ -221,7 +221,7 @@ class WinTray:
 
     def _show_menu(self, hwnd):
         menu = user32.CreatePopupMenu()
-        user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show WebcamRecorder")
+        user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show Scr33nX")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_EXIT, "Exit")
         pos = wintypes.POINT()

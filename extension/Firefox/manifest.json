@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "StreamRecorder v2 (TEST)",
+  "name": "Scr33nX",
   "version": "2.0",
-  "description": "Add Chaturbate / Stripchat / CamSoda models to StreamRecorder v2 with one click.",
+  "description": "Add Chaturbate / Stripchat / CamSoda models to Scr33nX with one click.",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["http://localhost:5200/*"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "StreamRecorder"
+    "default_title": "Scr33nX"
   },
   "browser_specific_settings": {
     "gecko": {
