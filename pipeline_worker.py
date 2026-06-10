@@ -386,15 +386,25 @@ def _start_global_recv_once(tdjson) -> bool:
     return True
 
 
+# Recording filenames tag Stripchat as "ST"; captions use "SC" per request.
+_CAPTION_SITE = {"CB": "CB", "ST": "SC", "CS": "CS"}
+
+
 def _extract_model(filename: str) -> str:
     base = re.sub(r'[_-]part\d+$', '',
                    os.path.splitext(filename)[0], flags=re.IGNORECASE)
-    m = re.match(r'^(.+?)_(?:CB|ST|CS)_\d{8}_\d{6}', base, re.IGNORECASE)
-    if not m:
+    site = ""
+    m = re.match(r'^(.+?)_(CB|ST|CS)_\d{8}_\d{6}', base, re.IGNORECASE)
+    if m:
+        site = _CAPTION_SITE.get(m.group(2).upper(), "")
+    else:
         m = re.match(r'^(.+?)-\d{4}_', base)
     name = (m.group(1) if m else base).strip('_')
     tag = re.sub(r'[^a-zA-Z0-9_]', '', name)
-    return f"#{tag}"
+    caption = f"#{tag}"
+    if site:
+        caption += f" #{site}"
+    return caption
 
 
 def _is_free(path: str) -> bool:
