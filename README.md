@@ -1,62 +1,107 @@
-# StreamRecorder v2
+# Scr33nX
 
-A lightweight Windows desktop app for automatically recording live streams from **Chaturbate**, **Stripchat**, and **Camsoda**.
+A lightweight Windows desktop app for automatically recording live streams from **Chaturbate**, **Stripchat**, and **Camsoda** — always at the **highest available quality**.
 
-v2 adds Stripchat support (via Playwright) and Camsoda support on top of the original Chaturbate recorder, plus a Telegram upload pipeline.
+Recordings are pulled through a local smart relay that prefetches HLS segments in parallel, so multiple simultaneous recordings stay smooth instead of dropping segments when bandwidth gets tight.
 
 ---
 
 ## Features
 
+### Recording
 - ✅ Auto-detects when a model goes online and starts recording immediately
 - ✅ Record multiple models simultaneously across Chaturbate, Stripchat, and Camsoda
-- ✅ Configurable output folder and filename (includes model name, site, timestamp, part number)
+- ✅ **Highest-quality pinning** — the relay locks ffmpeg to the top-bitrate variant so it can never silently fall back to a lower resolution
+- ✅ **Parallel segment prefetching** — segments are downloaded ahead of ffmpeg in parallel; slow streams catch up instead of skipping 1–2 s chunks
 - ✅ **File splitting** — automatically starts a new file when the recording reaches your defined max size (e.g. 3070 MB)
-- ✅ Windows desktop notifications (recording started/stopped/split)
-- ✅ Clean dark GUI — no terminal needed
-- ✅ Settings saved between sessions (models list, output folder, max size, etc.)
+- ✅ Stripchat records browserless (native MOUFLON path) when possible, with automatic Playwright/Chromium fallback
+
+### Monitoring & UI
+- ✅ Clean black & red dark GUI — no terminal needed
+- ✅ **Live bandwidth meter** in the header (`↓ X.X Mbps`) showing Scr33nX's total download traffic — your indicator for when you're approaching your internet connection's limit
+- ✅ **Dropped-segment warnings** — get notified when a stream is losing segments because bandwidth can't keep up (toggle in Settings)
+- ✅ **Saved Models** tab — view-only watchlist with online/offline status
+- ✅ Windows desktop notifications (recording started/stopped/split/dropped segments)
+- ✅ Minimize to system tray
+- ✅ 🔒 Privacy Mode — idle screen cover
 - ✅ Activity log with timestamps
-- ✅ Chromium extension — one-click add from a model's page (port 5200)
-- ✅ Telegram upload pipeline (optional)
+- ✅ Settings saved between sessions (models, output folder, max size, etc.)
+
+### Integrations
+- ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page (local API, port 5200)
+- ✅ Telegram upload pipeline (optional) — converts finished recordings and uploads them to a Telegram group/topic
 
 ---
 
 ## Requirements
 
-- **Python 3.10+** — https://python.org (check "Add to PATH" during install)
+- **Windows 10/11**
+- **Python 3.10+** — https://python.org (check "Add Python to PATH" during install)
 - **ffmpeg** — https://ffmpeg.org/download.html
-- **Playwright Chromium** (for Stripchat) — installed automatically by `playwright install chromium`
+- **Playwright Chromium** — only needed as the Stripchat fallback recorder
 
 ---
 
-## Setup
+## Installation
 
 ### 1. Install Python
 Download from https://python.org. During install, **check "Add Python to PATH"**.
 
 ### 2. Install ffmpeg
-- Download a Windows build from https://www.gyan.dev/ffmpeg/builds/ (grab `ffmpeg-release-essentials.zip`)
-- Extract it and place `ffmpeg.exe` in the `StreamRecorder` folder
-  **OR** add ffmpeg to your system PATH so it's available globally.
+Pick one:
+- `winget install Gyan.FFmpeg` (easiest — the app finds the WinGet install automatically), **or**
+- Download `ffmpeg-release-essentials.zip` from https://www.gyan.dev/ffmpeg/builds/, extract it, and place `ffmpeg.exe` in the Scr33nX folder, **or**
+- Add ffmpeg to your system PATH.
 
 ### 3. Install Python dependencies
+From the Scr33nX folder:
 ```
 pip install -r requirements.txt
 playwright install chromium
 ```
+(`playwright install chromium` is only required for the Stripchat browser fallback — skip it if you don't record Stripchat.)
 
 ### 4. Run the app
-Double-click `StreamRecorder.bat`
+Double-click **`StreamRecorder.bat`** (launches the GUI with no console window).
+
+### 5. Install the browser extension (optional)
+
+The extension adds models to Scr33nX with one click while you're on their page. The app must be running (it listens on `http://localhost:5200`).
+
+**Chromium browsers (Chrome / Brave / Opera / Edge):**
+1. Open `chrome://extensions` (or `brave://extensions`, `opera://extensions`, `edge://extensions`)
+2. Enable **Developer mode** (toggle in the corner)
+3. Click **Load unpacked** and select the `extension/Chromium` folder
+
+**Firefox:**
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on…**
+3. Select `extension/Firefox/manifest.json`
+
+> Firefox removes temporary add-ons on restart; reload it after restarting, or package it as a signed add-on for a permanent install.
 
 ---
 
 ## Usage
 
-1. **Add models** using the left panel — enter the username (or paste a full model URL) and select the site: `chaturbate`, `stripchat`, or `camsoda`
-2. Click **▶ START MONITORING** — the app polls each model at the configured interval
+1. **Add models** using the left panel — enter the username (or paste a full model URL; the site is auto-detected) and select the site: `chaturbate`, `stripchat`, or `camsoda`
+2. Click **▶ START MONITOR** — the app polls each model at the configured interval
 3. When a model goes live, recording starts automatically and you'll get a notification
 4. When the model goes offline, the recording stops automatically
 5. If you set a **Max File Size**, the recording splits into numbered parts (e.g. `_part001`, `_part002`) automatically
+6. Watch the **↓ Mbps** meter in the header while recording several models — if your streams start dropping segments you'll also get a warning notification
+
+### Settings (left panel)
+
+| Setting | What it does |
+|---|---|
+| Output Folder | Where recordings are saved |
+| Max File Size (MB) | Split recordings into parts at this size (empty = unlimited) |
+| Check Interval (sec) | How often each model's status is polled (default 30) |
+| Minimize to SysTray | Hide to the tray instead of the taskbar |
+| Notifications | Master toggle for Windows toast notifications |
+| ⚠ Dropped-Segment Warnings | Toast when a recording is losing segments due to saturated bandwidth (always logged to the Activity Log regardless) |
+| 🔒 Privacy Mode | Idle screen cover |
 
 ---
 
@@ -89,11 +134,29 @@ This keeps individual files manageable while never missing a moment of the strea
 
 ---
 
-## Site Notes
+## Telegram Upload Pipeline (optional)
 
-- **Chaturbate / Camsoda**: public HLS resolver + ffmpeg `-c copy`
-- **Stripchat**: Playwright-driven Chromium session (`stripchat_live.py`) writes an MPEG-TS directly — no login required for public rooms
-- **Extension**: the bundled Chromium extension posts to the local API on **port 5200**
+The **Output / Upload** tab can convert finished `.ts` recordings to `.mp4` and upload them to a Telegram group/topic automatically.
+
+1. Get your `api_id` / `api_hash` from https://my.telegram.org
+2. Fill in the **Telegram / Pipeline settings** in the Output / Upload tab (group ID, optional topic ID)
+3. Save and enable the pipeline
+
+Settings are stored in `Pipeline/pipeline_settings.json`. Requires the `tdjson` package (installed via `requirements.txt`).
+
+---
+
+## How recording works (architecture notes)
+
+- **Local relay** (`cb_relay.py`): ffmpeg never talks to the CDN directly. All HLS traffic goes through a relay on `127.0.0.1` which:
+  - pins the **highest-bitrate variant** so quality can't downgrade mid-recording,
+  - **prefetches upcoming segments in parallel** (16 workers, in-memory cache) so ffmpeg is served instantly and falling behind the live window — the cause of 1–2 s timestamp jumps — is avoided,
+  - survives the CDN's mid-segment TLS resets that corrupt direct ffmpeg downloads,
+  - detects segments that expired before they could be downloaded and reports them (Activity Log + optional notification),
+  - feeds the **bandwidth meter** (counts every byte fetched upstream).
+- **Chaturbate / Camsoda**: public HLS resolver → relay → `ffmpeg -c copy`
+- **Stripchat**: native MOUFLON-decrypting path through the relay (no browser) when possible; otherwise a Playwright-driven Chromium session (`stripchat_live.py`) writes the MPEG-TS directly. *Note: the browser fallback doesn't pass through the relay, so it isn't counted by the bandwidth meter.*
+- **Extension API**: the app serves a small local HTTP API on **port 5200** used by the browser extensions
 
 ---
 
@@ -101,4 +164,5 @@ This keeps individual files manageable while never missing a moment of the strea
 
 - The app polls each model every N seconds (configurable, default 30s)
 - If a model is in a private show or temporarily offline, the app keeps checking and resumes when they go public/online
-- All settings are saved automatically when you click "Save Settings" or close the app
+- All settings are saved automatically when you click "💾 Save Settings"
+- If many simultaneous recordings still drop segments (watch for ⚠ warnings), your total internet bandwidth is the limit — record fewer models at once. Each 1080p stream needs roughly 5–6 Mbps sustained.

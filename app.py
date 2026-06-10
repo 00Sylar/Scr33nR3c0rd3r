@@ -301,6 +301,7 @@ class StreamRecorderApp(tk.Tk):
         self.recorder.on_status_change = self._cb_status
         self.recorder.on_log           = self._cb_log
         self.recorder.on_notification  = self._cb_notif
+        self.recorder.gap_warnings_enabled = self.settings.gap_warnings_enabled
 
         self._rows: dict[str, bool] = {}          # key → exists flag
         self._saved_rows: dict[str, bool] = {}    # saved-only models (view only)
@@ -319,6 +320,9 @@ class StreamRecorderApp(tk.Tk):
         self._restore_models()
         self._start_api_server()
         self._privacy_init()
+        self._bw_prev: Optional[tuple] = None   # (monotonic_ts, bytes_total)
+        self._bw_mbps = 0.0
+        self.after(1000, self._bw_tick)
         self.after(5000, self._sync_monitor_buttons)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         if WinTray is not None:
@@ -393,6 +397,11 @@ class StreamRecorderApp(tk.Tk):
         self._lbl_hdr_status = tk.Label(hdr, text="● IDLE", fg=TEXT3, bg=BG2,
                                          font=("Segoe UI Semibold", 10))
         self._lbl_hdr_status.pack(side="right", padx=12)
+        # Live bandwidth meter: download traffic of all active recordings,
+        # so the user can see when they approach their connection's limit.
+        self._lbl_bw = tk.Label(hdr, text="↓ 0.0 Mbps", fg=TEXT3, bg=BG2,
+                                font=("Segoe UI Semibold", 10))
+        self._lbl_bw.pack(side="right", padx=(0, 4))
 
         tk.Frame(self, bg=ACCENT, height=2).pack(fill="x")
 
@@ -467,6 +476,12 @@ class StreamRecorderApp(tk.Tk):
 
         self._v_notif = tk.BooleanVar(value=self.settings.notifications_enabled)
         tk.Checkbutton(p, text="Notifications", variable=self._v_notif,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                       activeforeground=TEXT, font=UI, relief="flat").pack(
+            anchor="w", padx=16, pady=(0,0))
+
+        self._v_gapwarn = tk.BooleanVar(value=self.settings.gap_warnings_enabled)
+        tk.Checkbutton(p, text="⚠ Dropped-Segment Warnings", variable=self._v_gapwarn,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,0))
@@ -1315,6 +1330,29 @@ class StreamRecorderApp(tk.Tk):
 
         self._update_stats()
 
+    def _bw_tick(self):
+        """Update the header bandwidth meter once a second from the relay's
+        upstream byte counter (covers all relay-routed recordings)."""
+        try:
+            import cb_relay
+            total = cb_relay.bytes_downloaded()
+        except Exception:
+            total = 0
+        now = time.monotonic()
+        if self._bw_prev is not None:
+            t0, b0 = self._bw_prev
+            dt = max(now - t0, 0.001)
+            cur = (total - b0) * 8 / dt / 1_000_000
+            # light smoothing so the number doesn't flicker
+            self._bw_mbps = 0.6 * self._bw_mbps + 0.4 * cur
+        self._bw_prev = (now, total)
+        mbps = self._bw_mbps
+        if mbps >= 0.05:
+            self._lbl_bw.configure(text=f"↓ {mbps:.1f} Mbps", fg=GREEN)
+        else:
+            self._lbl_bw.configure(text="↓ 0.0 Mbps", fg=TEXT3)
+        self.after(1000, self._bw_tick)
+
     def _cb_log(self, line: str):
         self.after(0, lambda: self._log_add(line))
 
@@ -1887,7 +1925,9 @@ class StreamRecorderApp(tk.Tk):
         self.settings.check_interval        = self._parse_int(self._v_interval.get(), 30)
         self.settings.minimize_to_tray       = self._v_tray.get()
         self.settings.notifications_enabled = self._v_notif.get()
+        self.settings.gap_warnings_enabled  = self._v_gapwarn.get()
         self.settings.privacy_mode_enabled  = self._v_privacy.get()
+        self.recorder.gap_warnings_enabled  = self.settings.gap_warnings_enabled
         self._persist_models()
         save_settings(self.settings)
         self.recorder.output_dir     = self.settings.output_dir

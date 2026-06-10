@@ -36,6 +36,7 @@ class AppSettings:
     check_interval: int = 30                   # seconds
     minimize_to_tray: bool = False
     notifications_enabled: bool = True
+    gap_warnings_enabled: bool = True          # toast when segments are dropped
     privacy_mode_enabled: bool = False         # idle screen cover (starfield)
     models: List[dict] = None                  # [{name, site, auto_rec}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list
@@ -95,6 +96,7 @@ def load_settings() -> AppSettings:
     s.check_interval = main.get("check_interval", s.check_interval)
     s.minimize_to_tray = main.get("minimize_to_tray", s.minimize_to_tray)
     s.notifications_enabled = main.get("notifications_enabled", s.notifications_enabled)
+    s.gap_warnings_enabled = main.get("gap_warnings_enabled", s.gap_warnings_enabled)
     s.privacy_mode_enabled = main.get("privacy_mode_enabled", s.privacy_mode_enabled)
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
@@ -128,6 +130,7 @@ def save_settings(s: AppSettings):
         "check_interval": s.check_interval,
         "minimize_to_tray": s.minimize_to_tray,
         "notifications_enabled": s.notifications_enabled,
+        "gap_warnings_enabled": s.gap_warnings_enabled,
         "privacy_mode_enabled": s.privacy_mode_enabled,
         "models": s.models,
         "saved_models": s.saved_models,

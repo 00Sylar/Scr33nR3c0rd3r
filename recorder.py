@@ -432,7 +432,7 @@ def graceful_stop(proc: subprocess.Popen, timeout: float = 10.0) -> None:
 
 
 def launch_ffmpeg_hls(stream_url: str, output_path: str, ffmpeg_path: str,
-                      site: str = "") -> subprocess.Popen:
+                      site: str = "", label: str = "") -> subprocess.Popen:
     """Launch ffmpeg to record an HLS stream.
     Adds flags that prevent corrupt-packet propagation and reconnect on drop —
     fixes truncated .ts files seen in the wild."""
@@ -456,7 +456,8 @@ def launch_ffmpeg_hls(stream_url: str, output_path: str, ffmpeg_path: str,
         # and (for CB) survives the edge's mid-segment TLS resets. Plain HTTP
         # to 127.0.0.1; requests fetches upstream reliably.
         import cb_relay
-        stream_url = cb_relay.wrap(stream_url, USER_AGENT, mode=site)
+        stream_url = cb_relay.wrap(stream_url, USER_AGENT, mode=site,
+                                   label=label)
         headers = ""
     cmd = [
         ffmpeg_path,
@@ -523,7 +524,8 @@ def launch_stripchat_native(model_name: str, output_path: str,
         return None
     if not keyed:
         return None
-    relay_url = cb_relay.wrap(keyed, USER_AGENT, mode="stripchat")
+    relay_url = cb_relay.wrap(keyed, USER_AGENT, mode="stripchat",
+                              label=f"stripchat:{model_name}")
     return launch_ffmpeg_hls(relay_url, output_path, ffmpeg_path,
                              site="stripchat")
 
@@ -543,12 +545,34 @@ class StreamRecorder:
         self.on_notification:  Optional[Callable[[str, str], None]] = None
         self.on_log:           Optional[Callable[[str], None]] = None
 
+        # Relay reports segments that expired before they could be downloaded
+        # (bandwidth saturated). Always logged; notification is opt-out.
+        self.gap_warnings_enabled: bool = True
+        self._gap_warn_ts: dict[str, float] = {}
+        import cb_relay
+        cb_relay.set_gap_callback(self._on_relay_gap)
+
         self._lock    = threading.Lock()
         # Per-group monitor flags — one thread per group ("recorder", "saved")
         self._running: dict[str, bool] = {"recorder": False, "saved": False}
         # Always-on session watcher — handles split/stall/exit even when the
         # monitor is off (e.g. user clicked REC without starting monitoring).
         self._session_watcher_started = False
+
+    def _on_relay_gap(self, label: str, missed: int, seconds: float):
+        """Relay callback (prefetch thread): segments expired unfetched."""
+        self._log(f"⚠ {label}: {missed} segment(s) (~{seconds:.0f}s) lost — "
+                  f"download can't keep up with the live stream")
+        if not self.gap_warnings_enabled or not self.on_notification:
+            return
+        now = time.time()
+        if now - self._gap_warn_ts.get(label, 0.0) < 60:
+            return  # at most one toast per stream per minute
+        self._gap_warn_ts[label] = now
+        self.on_notification(
+            "Dropped segments",
+            f"{label}: ~{seconds:.0f}s of video lost — your internet "
+            f"bandwidth can't keep up with all active recordings.")
 
     def add_model(self, name: str, site: str, group: str = "recorder"):
         key = f"{site}:{name.lower()}"
@@ -755,7 +779,8 @@ class StreamRecorder:
             self._log(f"{cfg.name}: native path unavailable — browser fallback")
             return launch_stripchat_playwright(cfg.name, output_path)
         return launch_ffmpeg_hls(stream_url, output_path, self.ffmpeg_path,
-                                 site=cfg.site)
+                                 site=cfg.site,
+                                 label=f"{cfg.site}:{cfg.name}")
 
     def _saved_monitor_loop(self):
         """Saved-group monitor: 5s session housekeeping tick + a bulk status
