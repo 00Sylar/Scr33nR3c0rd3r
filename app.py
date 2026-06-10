@@ -23,19 +23,21 @@ else:
     WinTray = None  # type: ignore
 
 # ── Palette ───────────────────────────────────────────────────────────────────
-BG      = "#0d0f12"
-BG2     = "#13161b"
-BG3     = "#1a1e26"
-BORDER  = "#252b36"
-ACCENT  = "#00d4ff"
-ACCENT2 = "#0099bb"
-GREEN   = "#00e676"
-RED     = "#ff3d57"
-ORANGE  = "#ffab40"
-YELLOW  = "#ffd740"
-TEXT    = "#e8ecf0"
-TEXT2   = "#7a8494"
-TEXT3   = "#4a5260"
+# Elegant black & red — minimalist. Red is the single signature accent;
+# supporting colors are muted so red and near-black carry the design.
+BG      = "#0a0a0b"   # deep near-black (canvas)
+BG2     = "#101011"   # header / elevated surfaces
+BG3     = "#17171a"   # inputs, rows, cards
+BORDER  = "#272729"   # hairline borders
+ACCENT  = "#ff2b3d"   # signature red (brand, recording, primary actions)
+ACCENT2 = "#c81f2e"   # deep red (hover / pressed)
+GREEN   = "#3ecf8e"   # refined emerald (online / go)
+RED     = "#ff2b3d"   # destructive — same red family as accent
+ORANGE  = "#ff8a3d"   # warm amber (private / warnings)
+YELLOW  = "#ffc14d"   # soft gold (checking)
+TEXT    = "#f2f2f4"   # near-white
+TEXT2   = "#8a8a90"   # muted grey
+TEXT3   = "#56565c"   # dim grey
 MONO    = ("Consolas", 10)
 UI      = ("Segoe UI", 10)
 
@@ -305,8 +307,8 @@ class StreamRecorderApp(tk.Tk):
 
         for name, bg, fg, abg in [
             ("Accent.TButton", ACCENT, BG,    ACCENT2),
-            ("Green.TButton",  GREEN,  BG,    "#00b35a"),
-            ("Red.TButton",    RED,    TEXT,  "#cc2e42"),
+            ("Green.TButton",  GREEN,  BG,    "#32a877"),
+            ("Red.TButton",    RED,    TEXT,  ACCENT2),
             ("Ghost.TButton",  BG3,    TEXT,  BORDER),
             ("Flat.TButton",   BG2,    TEXT2, BG3),
         ]:
