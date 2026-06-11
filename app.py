@@ -54,6 +54,22 @@ if sys.platform == "win32":
 else:
     WinTray = None  # type: ignore
 
+# ── Stream quality caps ───────────────────────────────────────────────────────
+# Display label ↔ max variant height (px); 0 = no cap (highest available).
+QUALITY_OPTIONS = {
+    "Unlimited (highest)": 0,
+    "1080p": 1080,
+    "720p":  720,
+    "480p":  480,
+}
+
+
+def _quality_label(height: int) -> str:
+    for lbl, h in QUALITY_OPTIONS.items():
+        if h == height:
+            return lbl
+    return f"{height}p" if height else "Unlimited (highest)"
+
 # ── Palette ───────────────────────────────────────────────────────────────────
 # Elegant black & red — minimalist. Red is the single signature accent;
 # supporting colors are muted so red and near-black carry the design.
@@ -314,6 +330,13 @@ class StreamRecorderApp(tk.Tk):
         self._rows: dict[str, bool] = {}          # key → exists flag
         self._saved_rows: dict[str, bool] = {}    # saved-only models (view only)
         self._auto_rec: dict[str, bool] = {}      # key → auto-rec state (recorder tab)
+        self._model_q: dict[str, int] = {}        # key → per-model quality cap (height px, 0 = default)
+        # The relay asks for the cap each time a master playlist is fetched
+        # (i.e. on recording start/restart): per-model override beats global.
+        import cb_relay
+        cb_relay.set_quality_callback(
+            lambda label: self._model_q.get(label, 0)
+            or (self.settings.max_quality or 0))
         self._monitoring_recorder = False
         self._monitoring_saved    = False
         self._tray: Optional[WinTray] = None
@@ -509,6 +532,11 @@ class StreamRecorderApp(tk.Tk):
         tk.Label(p, text="Check Interval (sec)", fg=TEXT2, bg=BG2, font=UI).pack(anchor="w", padx=16)
         self._v_interval = tk.StringVar(value=str(self.settings.check_interval))
         ttk.Entry(p, textvariable=self._v_interval).pack(fill="x", padx=16, pady=(2,8))
+
+        tk.Label(p, text="Max Quality (all models)", fg=TEXT2, bg=BG2, font=UI).pack(anchor="w", padx=16)
+        self._v_quality = tk.StringVar(value=_quality_label(self.settings.max_quality))
+        ttk.Combobox(p, textvariable=self._v_quality, state="readonly",
+                     values=list(QUALITY_OPTIONS)).pack(fill="x", padx=16, pady=(2,8))
 
         self._v_tray = tk.BooleanVar(value=self.settings.minimize_to_tray)
         tk.Checkbutton(p, text="⤵ Minimize to SysTray", variable=self._v_tray,
@@ -753,6 +781,8 @@ class StreamRecorderApp(tk.Tk):
             auto = self._auto_rec.get(iid, False)
             m.add_command(label=f"{'☑' if auto else '☐'}  Auto-Record",
                           command=lambda: self._toggle_auto_single(iid))
+            m.add_cascade(label=f"🎞  Max Quality  ({self._quality_text(iid)})",
+                          menu=self._build_quality_menu([iid]))
             sid_check = self._saved_key(name, site)
             if sid_check in self._saved_rows:
                 m.add_command(label="✕  Remove from Saved Models",
@@ -776,6 +806,8 @@ class StreamRecorderApp(tk.Tk):
             m.add_separator()
             m.add_command(label=f"☑  Toggle AUTO  ({n} selected)",
                           command=self._toggle_auto_selected)
+            m.add_cascade(label=f"🎞  Max Quality  ({n} selected)",
+                          menu=self._build_quality_menu(sel))
             m.add_separator()
             m.add_command(label="📁  Open Output Folder",
                           command=lambda: os.startfile(self.settings.output_dir))
@@ -783,6 +815,34 @@ class StreamRecorderApp(tk.Tk):
                           command=self._remove_selected)
 
         m.tk_popup(event.x_root, event.y_root)
+
+    def _quality_text(self, key: str) -> str:
+        h = self._model_q.get(key, 0)
+        return _quality_label(h) if h else "Default"
+
+    def _build_quality_menu(self, keys: list[str]) -> tk.Menu:
+        sub = tk.Menu(self._ctx, tearoff=0, bg=BG3, fg=TEXT, activebackground=BG2,
+                      activeforeground=ACCENT, font=UI, relief="flat", bd=0)
+        cur = self._model_q.get(keys[0], 0) if len(keys) == 1 else None
+        opts = [("Default (use global setting)", 0)] + \
+               [(lbl, h) for lbl, h in QUALITY_OPTIONS.items() if h]
+        for lbl, h in opts:
+            mark = "●  " if cur == h else "    "
+            sub.add_command(label=f"{mark}{lbl}",
+                            command=lambda h=h, ks=keys: self._set_quality(ks, h))
+        return sub
+
+    def _set_quality(self, keys: list[str], height: int):
+        for key in keys:
+            if height:
+                self._model_q[key] = height
+            else:
+                self._model_q.pop(key, None)
+        self._persist_models()
+        names = ", ".join(k.split(":", 1)[1] for k in keys)
+        lbl = _quality_label(height) if height else "Default"
+        self._log_add(f"Max quality → {lbl}: {names} "
+                      f"(applies on next recording start)", "accent")
 
     def _toggle_auto_single(self, key: str):
         self._set_auto(key, not self._auto_rec.get(key, False))
@@ -959,6 +1019,7 @@ class StreamRecorderApp(tk.Tk):
             self._tree.delete(key)
         self._rows.pop(key, None)
         self._auto_rec.pop(key, None)
+        self._model_q.pop(key, None)
         site_id = f"_site_{site}"
         if self._tree.exists(site_id) and not self._tree.get_children(site_id):
             self._tree.delete(site_id)
@@ -986,6 +1047,7 @@ class StreamRecorderApp(tk.Tk):
                 self._tree.delete(key)
             self._rows.pop(key, None)
             self._auto_rec.pop(key, None)
+            self._model_q.pop(key, None)
             site_id = f"_site_{site}"
             if self._tree.exists(site_id) and not self._tree.get_children(site_id):
                 self._tree.delete(site_id)
@@ -1419,7 +1481,12 @@ class StreamRecorderApp(tk.Tk):
             dt = max(now - t0, 0.001)
             # counter resets when the pipeline restarts → ignore negative deltas
             cur = max(0.0, (ul_total - b0) * 8 / dt / 1_000_000)
-            self._ul_mbps = 0.6 * self._ul_mbps + 0.4 * cur
+            # TDLib's uploaded_size jumps to the full file size instantly when
+            # Telegram dedupes a file it already has or resumes a partial
+            # upload — not real wire traffic. Drop physically implausible
+            # samples instead of showing a multi-hundred-Mbps spike.
+            if cur <= 500.0:
+                self._ul_mbps = 0.6 * self._ul_mbps + 0.4 * cur
         self._ul_prev = (now, ul_total)
         if self._ul_mbps >= 0.05:
             self._lbl_bw_up.configure(text=f"↑ {self._ul_mbps:.1f} Mbps", fg=ORANGE)
@@ -2001,6 +2068,7 @@ class StreamRecorderApp(tk.Tk):
         self.settings.minimize_to_tray       = self._v_tray.get()
         self.settings.notifications_enabled = self._v_notif.get()
         self.settings.gap_warnings_enabled  = self._v_gapwarn.get()
+        self.settings.max_quality = QUALITY_OPTIONS.get(self._v_quality.get(), 0)
         self.settings.privacy_mode_enabled  = self._v_privacy.get()
         self.recorder.gap_warnings_enabled  = self.settings.gap_warnings_enabled
         self._persist_models()
@@ -2017,6 +2085,7 @@ class StreamRecorderApp(tk.Tk):
                 "name": k.split(":")[1],
                 "site": k.split(":")[0],
                 "auto_rec": self._auto_rec.get(k, False),
+                "max_q": self._model_q.get(k, 0),
             }
             for k in self._rows
         ]
@@ -2035,6 +2104,9 @@ class StreamRecorderApp(tk.Tk):
             if n and s:
                 self.recorder.add_model(n, s, "recorder")
                 self._insert_model(n, s, auto_rec=bool(m.get("auto_rec", False)))
+                q = int(m.get("max_q", 0) or 0)
+                if q:
+                    self._model_q[f"{s}:{n}"] = q
         self._update_stats()
 
     def _update_stats(self):

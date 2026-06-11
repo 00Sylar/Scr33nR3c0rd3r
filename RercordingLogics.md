@@ -66,7 +66,7 @@ fetches upstream using Python's `requests`. This solves four problems at once:
    if a download is slower than the segment duration it falls permanently behind
    the live window and segments expire (causing 1–2 s timestamp jumps). The
    relay already knows upcoming segment URLs (it rewrote the playlist), so it
-   prefetches them with **16 worker threads** into an in-memory cache and serves
+   prefetches them with **64 worker threads** into an in-memory cache and serves
    ffmpeg instantly.
 4. **Bandwidth metering + drop detection** — every byte fetched upstream is
    counted (`bytes_downloaded()` drives the `↓ Mbps` meter). Segments that

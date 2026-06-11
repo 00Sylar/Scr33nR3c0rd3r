@@ -96,10 +96,20 @@ _streams: dict[str, dict] = {}         # stream key → {"segs": [...], "dur": a
 _gap_cb = None
 _last_cap_warn = 0.0
 
+# Called as fn(stream_label) → max variant height in pixels (0 = unlimited)
+# when a master playlist is fetched; lets the app cap stream quality globally
+# or per model. Applies when a recording (re)starts, not mid-stream.
+_quality_cb = None
+
 
 def set_gap_callback(fn):
     global _gap_cb
     _gap_cb = fn
+
+
+def set_quality_callback(fn):
+    global _quality_cb
+    _quality_cb = fn
 
 
 class _Entry:
@@ -258,20 +268,30 @@ _LL_TAGS = (
 )
 
 
-def _select_highest_variant(text: str) -> str:
+def _select_highest_variant(text: str, max_height: int = 0) -> str:
     """For a master playlist, keep only the highest-BANDWIDTH video variant
     (and its referenced audio rendition) so ffmpeg can't fall back to a lower
-    bitrate. Media playlists (no EXT-X-STREAM-INF) pass through unchanged."""
+    bitrate. With `max_height` set (e.g. 720), pick the highest-bandwidth
+    variant whose RESOLUTION height is ≤ the cap; if every variant is above
+    the cap, fall back to the smallest one so the stream still records.
+    Media playlists (no EXT-X-STREAM-INF) pass through unchanged."""
     lines = text.splitlines()
-    best_i, best_bw = -1, -1
+    variants = []  # (line_index, bandwidth, height — 0 if no RESOLUTION attr)
     for i, line in enumerate(lines):
         if line.startswith("#EXT-X-STREAM-INF"):
             m = re.search(r"BANDWIDTH=(\d+)", line)
             bw = int(m.group(1)) if m else 0
-            if bw > best_bw:
-                best_i, best_bw = i, bw
-    if best_i < 0:
+            r = re.search(r"RESOLUTION=\d+x(\d+)", line)
+            h = int(r.group(1)) if r else 0
+            variants.append((i, bw, h))
+    if not variants:
         return text  # not a master playlist
+    cands = variants
+    if max_height > 0 and any(v[2] > 0 for v in variants):
+        sized = [v for v in variants if v[2] > 0]
+        cands = [v for v in sized if v[2] <= max_height] \
+            or [min(sized, key=lambda v: v[2])]
+    best_i = max(cands, key=lambda v: v[1])[0]
     inf = lines[best_i]
     url = lines[best_i + 1] if best_i + 1 < len(lines) else ""
     am = re.search(r'AUDIO="([^"]+)"', inf)
@@ -302,8 +322,15 @@ def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate",
         import stripchat_native
         text = stripchat_native.rewrite_playlist(text)
     elif mode in ("chaturbate", "camsoda", "myfreecams"):
-        # Pin the highest-bitrate variant on the master playlist.
-        text = _select_highest_variant(text)
+        # Pin the highest-bitrate variant (within the quality cap, if any)
+        # on the master playlist.
+        cap = 0
+        if _quality_cb:
+            try:
+                cap = int(_quality_cb(label) or 0)
+            except Exception:
+                cap = 0
+        text = _select_highest_variant(text, cap)
     # Kick off parallel segment prefetch (no-op for master playlists).
     _track_media_playlist(text, base_url, mode,
                           label or urllib.parse.urlparse(base_url).path)
@@ -331,6 +358,10 @@ def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate",
 
 class _QuietServer(ThreadingHTTPServer):
     daemon_threads = True
+    # Default listen backlog is 5; with dozens of ffmpeg processes opening
+    # connections to this one port, bursts overflow it and connections get
+    # refused (ffmpeg "Error number -138").
+    request_queue_size = 128
 
     def handle_error(self, request, client_address):
         pass  # ffmpeg resets idle keep-alive sockets; not an error for us
