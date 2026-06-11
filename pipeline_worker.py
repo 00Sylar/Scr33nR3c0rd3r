@@ -396,14 +396,14 @@ def _start_global_recv_once(tdjson) -> bool:
 
 
 # Recording filenames tag Stripchat as "ST"; captions use "SC" per request.
-_CAPTION_SITE = {"CB": "CB", "ST": "SC", "CS": "CS"}
+_CAPTION_SITE = {"CB": "CB", "ST": "SC", "CS": "CS", "MFC": "MFC"}
 
 
 def _extract_model(filename: str) -> str:
     base = re.sub(r'[_-]part\d+$', '',
                    os.path.splitext(filename)[0], flags=re.IGNORECASE)
     site = ""
-    m = re.match(r'^(.+?)_(CB|ST|CS)_\d{8}_\d{6}', base, re.IGNORECASE)
+    m = re.match(r'^(.+?)_(CB|ST|CS|MFC)_\d{8}_\d{6}', base, re.IGNORECASE)
     if m:
         site = _CAPTION_SITE.get(m.group(2).upper(), "")
     else:
