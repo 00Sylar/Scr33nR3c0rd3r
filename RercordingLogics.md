@@ -389,9 +389,9 @@ traffic (relay-routed sites only).
 
 ## 6. Beta logging
 
-`streamrecorder.log` (app directory, rotating 5 MB × 3, UTF-8) receives
-everything: Activity Log lines, per-stream ffmpeg stderr, relay warnings
-(including "prefetch cache full"), and background-thread tracebacks — with
-thread names. `streamrecorder_crash.log` captures hard interpreter crashes
-via `faulthandler`. Both are gitignored. When something misbehaves, start
-there.
+`streamrecorder.log` (in `%LOCALAPPDATA%\Scr33nX`, rotating 5 MB × 3, UTF-8)
+receives everything: Activity Log lines, per-stream ffmpeg stderr, relay
+warnings (including "prefetch cache full"), and background-thread tracebacks —
+with thread names. `streamrecorder_crash.log` (same folder, reset at startup
+once it exceeds 1 MB) captures hard interpreter crashes via `faulthandler`.
+When something misbehaves, start there.

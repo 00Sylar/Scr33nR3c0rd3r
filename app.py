@@ -1,6 +1,8 @@
 """
-app.py — WebcamRecorder 0.10 RC — GUI
+app.py — Scr33nX V1.0 — GUI
 """
+
+APP_VERSION = "1.0"
 
 import os
 import sys
@@ -10,6 +12,7 @@ import math
 import random
 import threading
 import tkinter as tk
+from collections import deque
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 from typing import Optional
@@ -23,14 +26,23 @@ from notifier import send_notification
 # ── File logging ──────────────────────────────────────────────────────────────
 # pythonw has no console (stderr is discarded), so without this any background
 # thread error vanishes. Everything recorder.py / cb_relay.py logs — including
-# monitor-crash tracebacks — lands in streamrecorder.log next to app.py, with
-# the thread name. Falls back to the home directory if the app dir is read-only.
+# monitor-crash tracebacks — lands in %LOCALAPPDATA%\Scr33nX\streamrecorder.log,
+# with the thread name. Falls back to the home directory when unavailable.
 import logging
 import faulthandler
 from logging.handlers import RotatingFileHandler
 
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(_APP_DIR, "streamrecorder.log")
+# Logs live under %LOCALAPPDATA%\Scr33nX, NOT next to app.py: the app dir is
+# often cloud-synced (OneDrive), where sync file locks break the rotating
+# handler's rollover rename and every log write causes sync churn.
+_LOG_DIR = os.path.join(os.environ.get("LOCALAPPDATA")
+                        or os.path.expanduser("~"), "Scr33nX")
+try:
+    os.makedirs(_LOG_DIR, exist_ok=True)
+except OSError:
+    _LOG_DIR = os.path.expanduser("~")
+LOG_FILE = os.path.join(_LOG_DIR, "streamrecorder.log")
 try:
     _handler = RotatingFileHandler(LOG_FILE, maxBytes=5_000_000, backupCount=3,
                                    encoding="utf-8")
@@ -42,12 +54,39 @@ _handler.setFormatter(logging.Formatter(
     "%(asctime)s %(threadName)-16s %(levelname)-7s %(message)s"))
 logging.getLogger().addHandler(_handler)
 logging.getLogger().setLevel(logging.INFO)
+CRASH_FILE = os.path.join(os.path.dirname(LOG_FILE), "streamrecorder_crash.log")
 try:
-    _crash_f = open(os.path.join(os.path.dirname(LOG_FILE),
-                                 "streamrecorder_crash.log"), "a")
+    # faulthandler appends forever — start fresh once it grows past 1 MB
+    _crash_mode = "a"
+    try:
+        if os.path.getsize(CRASH_FILE) > 1_000_000:
+            _crash_mode = "w"
+    except OSError:
+        pass
+    _crash_f = open(CRASH_FILE, _crash_mode)
     faulthandler.enable(_crash_f)
 except OSError:
     pass
+
+
+def _is_cloud_synced(path: str) -> bool:
+    """True when `path` sits inside a OneDrive/Dropbox/Google Drive folder —
+    cloud sync competes with recording bandwidth and its file locks interfere
+    with file splitting and pipeline renames."""
+    try:
+        p = os.path.realpath(path).lower()
+    except OSError:
+        return False
+    for env in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        root = os.environ.get(env)
+        if root:
+            try:
+                if p.startswith(os.path.realpath(root).lower().rstrip("\\") + "\\"):
+                    return True
+            except OSError:
+                pass
+    return ("\\onedrive" in p or "\\dropbox" in p
+            or "\\google drive" in p or "\\googledrive" in p)
 
 if sys.platform == "win32":
     from tray_win import WinTray
@@ -345,15 +384,47 @@ class StreamRecorderApp(tk.Tk):
         self._tray_show_evt = threading.Event()
         self._tray_quit_evt = threading.Event()
         self._tray_poll_id: Optional[str] = None
+        # Worker-thread log lines arrive at a high rate when many recordings
+        # struggle (ffmpeg stderr + relay warnings). Queue them and insert in
+        # one batch per 250 ms tick — one Tk event per LINE flooded the event
+        # loop and made the privacy starfield (and the whole UI) stutter.
+        # MUST exist before any add_model/_restore_models call: the recorder's
+        # on_log callback appends here.
+        self._log_queue: deque = deque()
+        # Status callbacks mark stats dirty; one 500 ms tick recomputes them
+        # instead of a full row scan per status event.
+        self._stats_dirty = False
+        # File sizes are polled by ONE worker thread (os.path.getsize off the
+        # Tk thread — it can block on cloud-synced folders) and applied in a
+        # single batched UI update; replaces the old per-model after() chains.
+        self._size_cache: dict[str, str] = {}
+        # Saved Models is lazy: _saved_data (sid → {name, site}) is the source
+        # of truth, loaded from settings at startup. Treeview rows are built on
+        # the first tab visit; engine registration happens at scanner start.
+        # A 1500+ watchlist otherwise costs startup time, Tk memory, and makes
+        # every engine scan iterate the full list even when the tab is unused.
+        self._saved_data: dict[str, dict] = {}
+        self._saved_built = False
+        self._filter_jobs: dict[str, Optional[str]] = {"rec": None, "saved": None}
         self._build_styles()
         self._build_ui()
         self._restore_models()
         self._start_api_server()
         self._privacy_init()
+        if _is_cloud_synced(self.settings.output_dir):
+            self._log_add("⚠ Output folder is inside a cloud-synced directory "
+                          "(OneDrive/Dropbox) — sync uploads compete with "
+                          "recording bandwidth and file locks can break "
+                          "splitting. A local folder is strongly recommended.",
+                          "warn")
         self._bw_prev: Optional[tuple] = None   # (monotonic_ts, bytes_total)
         self._bw_mbps = 0.0
         self._ul_prev: Optional[tuple] = None   # (monotonic_ts, bytes_uploaded)
         self._ul_mbps = 0.0
+        threading.Thread(target=self._size_sweep_loop, daemon=True,
+                         name="size-sweep").start()
+        self.after(250, self._drain_logs)
+        self.after(500, self._stats_tick)
         self.after(1000, self._bw_tick)
         self.after(5000, self._sync_monitor_buttons)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -579,6 +650,7 @@ class StreamRecorderApp(tk.Tk):
     def _build_right(self, p):
         nb = ttk.Notebook(p)
         nb.pack(fill="both", expand=True)
+        self._nb = nb
 
         # Recorder tab
         tab_m = ttk.Frame(nb)
@@ -589,6 +661,9 @@ class StreamRecorderApp(tk.Tk):
         tab_s = ttk.Frame(nb)
         nb.add(tab_s, text="  Saved Models  ")
         self._build_saved_tab(tab_s)
+        self._tab_saved = tab_s
+        # Saved rows are built lazily on the first visit to the tab
+        nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Output / Upload tab (Pipeline integration)
         tab_o = ttk.Frame(nb)
@@ -626,6 +701,13 @@ class StreamRecorderApp(tk.Tk):
         self._btn_saved = ttk.Button(bar, text="★ Add to Saved", style="Flat.TButton",
                                      command=self._toggle_saved_selected, state="disabled")
         self._btn_saved.pack(side="left", padx=(0,4), pady=5)
+        tk.Label(bar, text="🔎", fg=TEXT3, bg=BG2,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(6, 0))
+        self._v_filter_rec = tk.StringVar()
+        ttk.Entry(bar, textvariable=self._v_filter_rec, width=14
+                  ).pack(side="left", padx=(2, 0), pady=8)
+        self._v_filter_rec.trace_add(
+            "write", lambda *a: self._schedule_filter("rec"))
 
         self._btn_monitor_rec = ttk.Button(bar, text="▶  START MONITOR",
                                             style="Green.TButton",
@@ -721,7 +803,7 @@ class StreamRecorderApp(tk.Tk):
             return
         self._btn_saved.configure(state="normal")
         site, name = keys[0].split(":", 1)
-        if self._saved_key(name, site) in self._saved_rows:
+        if self._saved_key(name, site) in self._saved_data:
             self._btn_saved.configure(text="★ Remove from Saved")
         else:
             self._btn_saved.configure(text="★ Add to Saved")
@@ -732,7 +814,7 @@ class StreamRecorderApp(tk.Tk):
         if not keys:
             return
         site, name = keys[0].split(":", 1)
-        if self._saved_key(name, site) in self._saved_rows:
+        if self._saved_key(name, site) in self._saved_data:
             for key in keys:
                 s, n = key.split(":", 1)
                 self._remove_saved(self._saved_key(n, s))
@@ -1008,13 +1090,14 @@ class StreamRecorderApp(tk.Tk):
         self._ensure_site(site)
         parent = f"_site_{site}"
         auto_text  = "☑" if auto_rec else "☐"
-        saved_text = "✔️" if self._saved_key(name, site) in self._saved_rows else "❌"
+        saved_text = "✔️" if self._saved_key(name, site) in self._saved_data else "❌"
         self._tree.insert(parent, "end", iid=key, text=f"  {name}",
                           values=("●  OFFLINE", "—", "—", auto_text, saved_text),
                           tags=("s_offline",))
         self._rows[key] = True
         self._auto_rec[key] = auto_rec
-        self._poll_size(key)
+        if self._v_filter_rec.get().strip():
+            self._schedule_filter("rec")  # respect an active filter
 
     def _do_remove_from_recorder(self, name: str, site: str):
         """Remove a model from the Recorder tab without a confirm dialog.
@@ -1106,25 +1189,49 @@ class StreamRecorderApp(tk.Tk):
         for key in keys:
             self._toggle_auto_single(key)
 
-    def _poll_size(self, key: str):
-        # Stop polling if model is in neither list
-        in_rec = key in self._rows and self._tree.exists(key)
-        sid = f"saved:{key}"
-        in_saved = sid in self._saved_rows and self._stree.exists(sid)
-        if not in_rec and not in_saved:
-            return
-        cfg = self.recorder.models.get(key)
-        if cfg and cfg.session and cfg.session.current_file:
+    def _size_sweep_loop(self):
+        """Worker thread: every 3 s stat all recording files at once and post
+        ONE batched UI update (replaces a per-model after() chain that did
+        blocking getsize calls on the Tk thread)."""
+        while True:
+            time.sleep(3)
+            with self.recorder._lock:
+                snap = [(k, c.session.current_file)
+                        for k, c in self.recorder.models.items()
+                        if c.session and c.session.current_file]
+            sizes = {}
+            for key, path in snap:
+                try:
+                    sizes[key] = os.path.getsize(path)
+                except OSError:
+                    pass
+            if not sizes:
+                continue
             try:
-                mb = os.path.getsize(cfg.session.current_file) / (1024*1024)
-                txt = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
-                if in_rec:
-                    self._tree.set(key, "size", txt)
-                if in_saved:
-                    self._stree.set(sid, "size", txt)
-            except OSError:
-                pass
-        self.after(3000, lambda k=key: self._poll_size(k))
+                self.after(0, lambda s=sizes: self._apply_sizes(s))
+            except (tk.TclError, RuntimeError):
+                return  # app is shutting down
+
+    def _apply_sizes(self, sizes: dict):
+        for key, size in sizes.items():
+            mb = size / (1024 * 1024)
+            txt = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
+            if self._size_cache.get(key) == txt:
+                continue  # unchanged — skip the Treeview write
+            self._size_cache[key] = txt
+            if key in self._rows and self._tree.exists(key):
+                self._tree.set(key, "size", txt)
+            sid = f"saved:{key}"
+            if sid in self._saved_rows and self._stree.exists(sid):
+                self._stree.set(sid, "size", txt)
+
+    def _stats_tick(self):
+        try:
+            if self._stats_dirty:
+                self._stats_dirty = False
+                self._update_stats()
+        finally:
+            self.after(500, self._stats_tick)
 
     # ── Record toggle (per model) ─────────────────────────────────────────────
 
@@ -1180,7 +1287,7 @@ class StreamRecorderApp(tk.Tk):
                 self._log_add("Recorder monitor started.", "success")
             else:
                 self._log_add("Recorder monitor FAILED to start — "
-                              "see ~/.streamrecorder.log", "error")
+                              "see streamrecorder.log (%LOCALAPPDATA%\\Scr33nX)", "error")
         self._refresh_hdr_status()
 
     def _toggle_monitor_saved(self):
@@ -1193,13 +1300,17 @@ class StreamRecorderApp(tk.Tk):
             self._log_add("Saved Models scanner stopped.", "warn")
         else:
             self._sync_recorder_settings()
+            # Lazy saved tab: make sure the rows exist and the engine knows
+            # the watchlist before the scanner starts.
+            self._populate_saved_tab()
+            self._register_saved_models()
             if self.recorder.start_monitor("saved"):
                 self._monitoring_saved = True
                 self._btn_monitor_saved.configure(text="⏹  STOP SCANNER", style="Red.TButton")
                 self._log_add("Saved Models scanner started.", "success")
             else:
                 self._log_add("Saved Models scanner FAILED to start — "
-                              "see ~/.streamrecorder.log", "error")
+                              "see streamrecorder.log (%LOCALAPPDATA%\\Scr33nX)", "error")
         self._refresh_hdr_status()
 
     def _sync_monitor_buttons(self):
@@ -1315,7 +1426,8 @@ class StreamRecorderApp(tk.Tk):
                                     random.uniform(-0.35, 0.35),
                                     random.uniform(-0.25, 0.25), r])
         # Stars: warp streaks in centered unit coords with depth z, per-star
-        # speed (parallax) and color temperature, plus a twinkle phase
+        # speed (parallax) and color temperature, plus a twinkle phase and
+        # the last width written (so unchanged widths skip itemconfigure)
         self._star_items = []
         palette = ("#ffffff", "#ffffff", "#dfe8ff", "#cfd8f5",
                    "#ffe9d0", "#bcd2ff", "#f5d7e3")
@@ -1327,25 +1439,40 @@ class StreamRecorderApp(tk.Tk):
                                      random.uniform(-1, 1),
                                      random.uniform(0.05, 1.0),
                                      random.uniform(0.003, 0.010),
-                                     random.uniform(0, math.tau)])
+                                     random.uniform(0, math.tau),
+                                     1.0])
         # One shooting star, reused between flights
         self._comet = c.create_line(0, 0, 0, 0, fill="#eaf2ff",
                                     width=2, capstyle="round")
         self._comet_state = None
-        self._privacy_frame = 0
+        self._privacy_frame = 0.0
+        self._privacy_last = time.monotonic()
 
     def _privacy_animate(self):
         c = self._privacy_canvas
         if c is None:
             return
+        # Window minimized/hidden: skip the rendering work entirely, keep a
+        # slow heartbeat so the scene resumes when the window comes back.
+        if self.state() not in ("normal", "zoomed"):
+            self._privacy_last = time.monotonic()
+            self._privacy_anim_job = self.after(500, self._privacy_animate)
+            return
+        # Time-based motion: when the event loop is busy and frames arrive
+        # late, advance the scene by elapsed time instead of one fixed step
+        # per frame — late frames no longer make the stars freeze-and-jump.
+        now = time.monotonic()
+        dt = min(now - self._privacy_last, 0.2)
+        self._privacy_last = now
+        step = dt / 0.033 if dt > 0 else 1.0
         w = max(c.winfo_width(), 2)
         h = max(c.winfo_height(), 2)
         cx, cy = w / 2, h / 2
-        self._privacy_frame += 1
+        self._privacy_frame += step
         f = self._privacy_frame
         for s in self._star_items:
-            item, x, y, z, spd, ph = s
-            z -= spd
+            item, x, y, z, spd, ph, last_w = s
+            z -= spd * step
             if z <= 0.03:
                 x, y, z = random.uniform(-1, 1), random.uniform(-1, 1), 1.0
             px = cx + (x / z) * cx * 0.85
@@ -1362,18 +1489,20 @@ class StreamRecorderApp(tk.Tk):
             depth = 1.0 - z
             width = max(1.0, 3.2 * depth + 0.7 * math.sin(f * 0.18 + ph))
             c.coords(item, qx, qy, px, py)
-            c.itemconfigure(item, width=width)
+            if abs(width - last_w) >= 0.2:
+                c.itemconfigure(item, width=width)
+                s[6] = width
             s[1], s[2], s[3] = x, y, z
         # Shooting star: rare, fast diagonal streak with a long tail
         if self._comet_state is None:
-            if random.random() < 0.006:
+            if random.random() < 0.006 * step:
                 self._comet_state = [random.uniform(0.1, 0.9) * w, -12.0,
                                      random.uniform(-7, 7),
                                      random.uniform(8, 13)]
         else:
             st = self._comet_state
-            st[0] += st[2]
-            st[1] += st[3]
+            st[0] += st[2] * step
+            st[1] += st[3] * step
             c.coords(self._comet, st[0] - st[2] * 5, st[1] - st[3] * 5,
                      st[0], st[1])
             if st[0] < -80 or st[0] > w + 80 or st[1] > h + 80:
@@ -1381,8 +1510,8 @@ class StreamRecorderApp(tk.Tk):
                 self._comet_state = None
         for n in self._neb_items:
             outer, inner, dx, dy, r = n
-            c.move(outer, dx, dy)
-            c.move(inner, dx, dy)
+            c.move(outer, dx * step, dy * step)
+            c.move(inner, dx * step, dy * step)
             x0, y0, x1, y1 = c.coords(outer)
             mx = my = 0
             if x1 < 0:
@@ -1441,6 +1570,7 @@ class StreamRecorderApp(tk.Tk):
         elif status == ModelStatus.ONLINE:
             self._tree.set(key, "file", "—")
             self._tree.set(key, "size", "—")
+            self._size_cache.pop(key, None)
             # Auto-record when the Recorder monitor is active and AUTO is checked
             if self._monitoring_recorder and self._auto_rec.get(key, False):
                 site, name = key.split(":", 1)
@@ -1450,10 +1580,13 @@ class StreamRecorderApp(tk.Tk):
         elif status in (ModelStatus.OFFLINE, ModelStatus.CHECKING, ModelStatus.PRIVATE):
             self._tree.set(key, "file", "—")
             self._tree.set(key, "size", "—")
+            self._size_cache.pop(key, None)
         elif status == ModelStatus.ERROR:
             self._tree.set(key, "file", detail[:50] if detail else "error")
 
-        self._update_stats()
+        # Coalesced: _stats_tick recomputes at most twice a second instead of
+        # one full row scan per status callback.
+        self._stats_dirty = True
 
     def _bw_tick(self):
         """Update the header bandwidth meter once a second from the relay's
@@ -1501,7 +1634,39 @@ class StreamRecorderApp(tk.Tk):
         self.after(1000, self._bw_tick)
 
     def _cb_log(self, line: str):
-        self.after(0, lambda: self._log_add(line))
+        # Called from worker threads — just queue; _drain_logs batches the
+        # Tk work (deque.append is thread-safe, no Tk call needed here).
+        self._log_queue.append(("app", line, "info"))
+
+    def _drain_logs(self):
+        try:
+            if self._log_queue:
+                app_lines, pipe_lines = [], []
+                while self._log_queue:
+                    dest, msg, tag = self._log_queue.popleft()
+                    (app_lines if dest == "app" else pipe_lines).append((msg, tag))
+                if app_lines:
+                    self._bulk_insert(self._log, app_lines, 2000)
+                if pipe_lines:
+                    self._bulk_insert(self._pipe_log, pipe_lines, 1000)
+        finally:
+            self.after(250, self._drain_logs)
+
+    def _bulk_insert(self, widget, lines, max_lines: int):
+        widget.configure(state="normal")
+        ts = datetime.now().strftime("%H:%M:%S")
+        for msg, tag in lines:
+            line = msg if msg.startswith("[") else f"[{ts}]  {msg}"
+            widget.insert("end", line + "\n", tag)
+        n = int(widget.index("end-1c").split(".")[0])
+        if n > max_lines:
+            widget.delete("1.0", f"{n - max_lines}.0")
+        # Autoscroll only when someone can actually see it — see() forces
+        # layout work that's wasted while the tab is hidden or the privacy
+        # cover is up.
+        if self._privacy_canvas is None and widget.winfo_viewable():
+            widget.see("end")
+        widget.configure(state="disabled")
 
     def _cb_notif(self, title: str, body: str):
         if self.settings.notifications_enabled and self._v_notif.get():
@@ -1516,6 +1681,16 @@ class StreamRecorderApp(tk.Tk):
 
         tk.Label(bar, text="Saved Models  ·  view-only status watchlist",
                  fg=TEXT3, bg=BG2, font=("Segoe UI", 9)).pack(side="left", padx=12)
+        self._lbl_saved_count = tk.Label(bar, text="0 model(s)", fg=TEXT2,
+                                         bg=BG2, font=("Segoe UI Semibold", 9))
+        self._lbl_saved_count.pack(side="left", padx=(0, 8))
+        tk.Label(bar, text="🔎", fg=TEXT3, bg=BG2,
+                 font=("Segoe UI", 9)).pack(side="left")
+        self._v_filter_saved = tk.StringVar()
+        ttk.Entry(bar, textvariable=self._v_filter_saved, width=16
+                  ).pack(side="left", padx=(2, 0), pady=8)
+        self._v_filter_saved.trace_add(
+            "write", lambda *a: self._schedule_filter("saved"))
         self._btn_monitor_saved = ttk.Button(bar, text="▶  START SCANNER",
                                               style="Green.TButton",
                                               command=self._toggle_monitor_saved)
@@ -1566,12 +1741,114 @@ class StreamRecorderApp(tk.Tk):
                               activebackground=BG2, activeforeground=ACCENT,
                               font=UI, relief="flat", bd=0)
 
-        # Restore persisted saved models
+        # Restore persisted saved models as DATA only — rows are built on the
+        # first tab visit (_populate_saved_tab), engine registration happens
+        # at scanner start (_register_saved_models).
         for m in getattr(self.settings, "saved_models", []) or []:
             n, s = m.get("name"), m.get("site")
             if n and s:
-                self.recorder.add_model(n, s, "saved")
-                self._insert_saved_model(n, s)
+                self._saved_data[self._saved_key(n, s)] = {"name": n, "site": s}
+        self._update_saved_count()
+
+    def _populate_saved_tab(self):
+        """Build the Treeview rows for the saved watchlist on first use, then
+        sync each row's status from the recorder — a model that is already
+        recording in the Recorder tab shows RECORDING here immediately, and
+        live mirroring (_apply_status) takes over once the rows exist."""
+        if self._saved_built:
+            return
+        self._saved_built = True
+        for d in self._saved_data.values():
+            # _insert_saved_model skips existing rows and ends with
+            # _saved_sync_from_recorder (status/file mirror)
+            self._insert_saved_model(d["name"], d["site"])
+        self._update_saved_count()
+        if self._v_filter_saved.get().strip():
+            self._filter_saved()
+
+    def _register_saved_models(self):
+        """Register the watchlist in the recording engine — needed only when
+        the scanner actually runs. add_model is idempotent: models that are
+        also in the Recorder tab just gain the 'saved' group."""
+        for d in self._saved_data.values():
+            self.recorder.add_model(d["name"], d["site"], "saved", quiet=True)
+        if self._saved_data:
+            self._log_add(f"Registered {len(self._saved_data)} saved model(s) "
+                          f"for scanning.")
+
+    def _update_saved_count(self, visible: Optional[int] = None):
+        total = len(self._saved_data)
+        if visible is not None and visible < total:
+            txt = f"{visible} / {total} shown"
+        else:
+            txt = f"{total} model(s)"
+        self._lbl_saved_count.configure(text=txt)
+
+    # ── Tree filtering ────────────────────────────────────────────────────────
+
+    _SITE_ORDER = ("chaturbate", "stripchat", "camsoda", "myfreecams")
+
+    def _on_tab_changed(self, event=None):
+        if self._nb.select() == str(self._tab_saved):
+            self._populate_saved_tab()
+
+    def _schedule_filter(self, which: str):
+        """Debounce filter keystrokes — a full pass over 1500 rows per
+        keypress is wasted work while the user is still typing."""
+        job = self._filter_jobs.get(which)
+        if job:
+            self.after_cancel(job)
+        fn = self._filter_recorder if which == "rec" else self._filter_saved
+        self._filter_jobs[which] = self.after(250, fn)
+
+    def _filter_recorder(self):
+        self._filter_jobs["rec"] = None
+        self._filter_tree(self._tree, list(self._rows),
+                          self._v_filter_rec.get(), "_site_")
+
+    def _filter_saved(self):
+        self._filter_jobs["saved"] = None
+        if not self._saved_built:
+            return  # rows not built yet — _populate_saved_tab applies it
+        visible = self._filter_tree(self._stree, list(self._saved_rows),
+                                    self._v_filter_saved.get(), "_ssite_")
+        self._update_saved_count(visible)
+
+    def _filter_tree(self, tree, row_iids, query, hdr_prefix) -> int:
+        """Show only rows whose model name contains `query`; the rest are
+        detached (hidden, not deleted — values keep updating and reattach
+        when the filter clears). Site headers with no visible rows are hidden
+        too. Returns the number of visible rows."""
+        q = query.strip().lower()
+        sites_seen: list[str] = []
+        sites_visible: set[str] = set()
+        shown = 0
+        for iid in row_iids:
+            parts = iid.split(":")
+            site, name = parts[-2], parts[-1]
+            hdr = f"{hdr_prefix}{site}"
+            if site not in sites_seen:
+                sites_seen.append(site)
+            if not tree.exists(iid) or not tree.exists(hdr):
+                continue
+            if not q or q in name.lower():
+                tree.move(iid, hdr, "end")
+                sites_visible.add(site)
+                shown += 1
+            else:
+                tree.selection_remove(iid)  # never leave hidden rows selected
+                tree.detach(iid)
+        order = [s for s in self._SITE_ORDER if s in sites_seen] + \
+                [s for s in sites_seen if s not in self._SITE_ORDER]
+        for idx, site in enumerate(order):
+            hdr = f"{hdr_prefix}{site}"
+            if not tree.exists(hdr):
+                continue
+            if site in sites_visible:
+                tree.move(hdr, "", idx)
+            else:
+                tree.detach(hdr)
+        return shown
 
     def _saved_ensure_site(self, site: str):
         site_id = f"_ssite_{site}"
@@ -1599,6 +1876,8 @@ class StreamRecorderApp(tk.Tk):
         self._saved_rows[sid] = True
         # Refresh initial size/status
         self._saved_sync_from_recorder(name, site)
+        if self._saved_built and self._v_filter_saved.get().strip():
+            self._schedule_filter("saved")  # respect an active filter
 
     def _saved_sync_from_recorder(self, name: str, site: str):
         key = f"{site}:{name.lower()}"
@@ -1617,12 +1896,17 @@ class StreamRecorderApp(tk.Tk):
 
     def _add_to_saved(self, name: str, site: str):
         sid = self._saved_key(name, site)
-        if sid in self._saved_rows:
+        if sid in self._saved_data:
             messagebox.showerror("Already saved",
                                  f"{name} ({site}) is already in Saved Models.")
             return
-        self.recorder.add_model(name, site, "saved")
+        self._saved_data[sid] = {"name": name, "site": site}
+        # Engine registration is only needed while the scanner runs; otherwise
+        # it happens in bulk at scanner start.
+        if self._monitoring_saved:
+            self.recorder.add_model(name, site, "saved")
         self._insert_saved_model(name, site)
+        self._update_saved_count()
         self._persist_models()
         self._log_add(f"⭐  Added to Saved Models: {name} ({site})", "accent")
         key = f"{site}:{name.lower()}"
@@ -1643,15 +1927,19 @@ class StreamRecorderApp(tk.Tk):
         self._log_add(f"Added to Recorder: {name} ({site})", "accent")
 
     def _remove_saved(self, sid: str):
-        if not self._stree.exists(sid):
+        # The row may not exist yet (lazy tab) — the data entry is what counts
+        if sid not in self._saved_data and not self._stree.exists(sid):
             return
+        self._saved_data.pop(sid, None)
         _, site, name = sid.split(":", 2)
-        self._stree.delete(sid)
+        if self._stree.exists(sid):
+            self._stree.delete(sid)
         self._saved_rows.pop(sid, None)
         site_id = f"_ssite_{site}"
         if self._stree.exists(site_id) and not self._stree.get_children(site_id):
             self._stree.delete(site_id)
         self.recorder.remove_model(name, site, "saved")
+        self._update_saved_count()
         rec_key = f"{site}:{name}"
         if self._tree.exists(rec_key):
             self._tree.set(rec_key, "saved", "❌")
@@ -1692,7 +1980,7 @@ class StreamRecorderApp(tk.Tk):
         self._add_to_saved(name, site)
 
     def _saved_export(self):
-        if not self._saved_rows:
+        if not self._saved_data:
             messagebox.showinfo("Nothing to export", "Saved Models list is empty.")
             return
         path = filedialog.asksaveasfilename(
@@ -1703,11 +1991,8 @@ class StreamRecorderApp(tk.Tk):
         )
         if not path:
             return
-        items = []
-        for sid in self._saved_rows:
-            # sid format: "saved:<site>:<name>"
-            _, site, name = sid.split(":", 2)
-            items.append({"name": name, "site": site})
+        items = [{"name": d["name"], "site": d["site"]}
+                 for d in self._saved_data.values()]
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"version": 1, "saved_models": items}, f, indent=2)
@@ -1745,13 +2030,16 @@ class StreamRecorderApp(tk.Tk):
             if not n or not s:
                 invalid += 1
                 continue
-            if self._saved_key(n, s) in self._saved_rows:
+            if self._saved_key(n, s) in self._saved_data:
                 skipped += 1
                 continue
-            self.recorder.add_model(n, s, "saved")
+            self._saved_data[self._saved_key(n, s)] = {"name": n, "site": s}
+            if self._monitoring_saved:
+                self.recorder.add_model(n, s, "saved", quiet=True)
             self._insert_saved_model(n, s)
             added += 1
         if added:
+            self._update_saved_count()
             self._persist_models()
         self._log_add(
             f"Import: added {added}, skipped {skipped} duplicate(s)" +
@@ -1914,7 +2202,7 @@ class StreamRecorderApp(tk.Tk):
 
         self.pipeline = self._PipelineWorker(
             cfg,
-            on_log=lambda line: self.after(0, lambda: self._pipe_log_add(line)),
+            on_log=lambda line: self._log_queue.append(("pipe", line, "info")),
             on_state=lambda st: self.after(0, lambda: self._pipeline_state_changed(st)),
             on_progress=lambda k, n, p, s=0.0: self.after(0,
                 lambda: self._pipeline_progress(k, n, p, s)),
@@ -2086,6 +2374,10 @@ class StreamRecorderApp(tk.Tk):
         self.recorder.max_size_mb    = self.settings.max_size_mb
         self.recorder.check_interval = self.settings.check_interval
         os.makedirs(self.settings.output_dir, exist_ok=True)
+        if _is_cloud_synced(self.settings.output_dir):
+            self._log_add("⚠ Output folder is inside a cloud-synced directory "
+                          "(OneDrive/Dropbox) — a local folder is strongly "
+                          "recommended.", "warn")
         self._log_add("Settings saved.", "success")
 
     def _persist_models(self):
@@ -2098,12 +2390,12 @@ class StreamRecorderApp(tk.Tk):
             }
             for k in self._rows
         ]
+        # From _saved_data (source of truth), NOT the UI rows — with the lazy
+        # tab the rows may not exist yet, and persisting from them would wipe
+        # the whole watchlist on the first save.
         self.settings.saved_models = [
-            {
-                "name": sid.split(":")[2],
-                "site": sid.split(":")[1],
-            }
-            for sid in self._saved_rows
+            {"name": d["name"], "site": d["site"]}
+            for d in self._saved_data.values()
         ]
         save_settings(self.settings)
 
@@ -2194,17 +2486,19 @@ class StreamRecorderApp(tk.Tk):
                 on_show=self._tray_show_evt.set,
                 on_quit=self._tray_quit_evt.set,
             )
-            try:
-                self._tray.add()
-            except OSError:
-                self._tray = None
-                self.deiconify()
-                return
+            # Asynchronous — failure is picked up by _poll_tray, so the Tk
+            # thread never blocks waiting for the tray thread.
+            self._tray.add()
         if self._tray_poll_id is None:
             self._tray_poll_id = self.after(150, self._poll_tray)
 
     def _poll_tray(self):
         self._tray_poll_id = None
+        if self._tray is not None and self._tray.failed():
+            # Tray icon couldn't be created — bring the window back
+            self._remove_tray()
+            self.deiconify()
+            return
         if self._tray_quit_evt.is_set():
             self._tray_quit_evt.clear()
             self._on_close()
@@ -2244,25 +2538,61 @@ class StreamRecorderApp(tk.Tk):
             self._tray = None
 
     def _on_close(self):
+        if getattr(self, "_closing", False):
+            return
         recording = any(
             self.recorder.models.get(k) and
             self.recorder.models[k].status == ModelStatus.RECORDING
             for k in self._rows
         )
         if recording:
+            # Quitting from the tray menu: the window is withdrawn, so the
+            # confirm dialog needs a visible parent first.
+            if self.state() == "withdrawn":
+                self._do_restore_from_tray()
             if not messagebox.askyesno("Quit", "Recordings are active. Stop and exit?"):
                 return
-        self.recorder.stop_monitor()
-        if hasattr(self, "pipeline"):
-            try:
-                self.pipeline.stop()
-            except Exception:
-                pass
+        self._closing = True
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
+        self._lbl_hdr_status.configure(text="● STOPPING…", fg=ORANGE)
         self._stop_api_server()
         self._remove_tray()
         self._save_settings()
-        self.destroy()
+
+        # Flushing every active ffmpeg takes up to ~20 s with many
+        # recordings — run it off the Tk thread so the window doesn't
+        # freeze, then destroy from the Tk thread.
+        def _shutdown():
+            try:
+                self.recorder.stop_monitor()
+            except Exception:
+                pass
+            if hasattr(self, "pipeline"):
+                try:
+                    self.pipeline.stop()
+                except Exception:
+                    pass
+            try:
+                self.after(0, self.destroy)
+            except (tk.TclError, RuntimeError):
+                pass
+        threading.Thread(target=_shutdown, daemon=True, name="shutdown").start()
 
 
 if __name__ == "__main__":
-    StreamRecorderApp().mainloop()
+    try:
+        StreamRecorderApp().mainloop()
+    except Exception:
+        # pythonw discards stderr — without this, a startup crash is an
+        # invisible flash. Log it and tell the user where to look.
+        logging.getLogger().exception("Fatal error — app crashed")
+        try:
+            _root = tk.Tk(); _root.withdraw()
+            messagebox.showerror(
+                "Scr33nX crashed",
+                "A fatal error occurred.\n\nDetails: streamrecorder.log in "
+                "%LOCALAPPDATA%\\Scr33nX")
+            _root.destroy()
+        except Exception:
+            pass
+        raise

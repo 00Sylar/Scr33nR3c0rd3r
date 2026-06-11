@@ -15,7 +15,7 @@ import threading
 import subprocess
 import requests
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait as _futures_wait
 from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass, field
@@ -73,6 +73,9 @@ class ModelConfig:
     stream_url: str = ""
     restart_count: int = 0
     groups: set = field(default_factory=set)  # {"recorder", "saved"}
+    # True after an explicit user stop (stop button / stop monitor) — blocks
+    # the delayed auto-restart from resurrecting a recording the user ended.
+    stop_requested: bool = False
 
 
 # ── Chaturbate ────────────────────────────────────────────────────────────────
@@ -393,7 +396,9 @@ def _popen_ffmpeg(cmd: list) -> subprocess.Popen:
     return subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
+        # stdout is never read — a PIPE would silently fill and block the
+        # child; stderr IS drained (see StreamRecorder._drain_stderr)
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         creationflags=flags,
     )
@@ -511,7 +516,9 @@ def launch_stripchat_playwright(model_name: str, output_path: str) -> subprocess
     return subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
+        # stdout is never read — a PIPE would silently fill and block the
+        # recorder script; stderr IS drained by _drain_stderr
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         creationflags=flags,
     )
@@ -664,7 +671,10 @@ class StreamRecorder:
         # _handle_ffmpeg_exit auto-restarts; the relay then asks
         # effective_quality() again and picks the lower variant.
 
-    def add_model(self, name: str, site: str, group: str = "recorder"):
+    def add_model(self, name: str, site: str, group: str = "recorder",
+                  quiet: bool = False):
+        """`quiet` skips the log line — used when bulk-registering a large
+        saved-models watchlist (1500+ lines would flood the Activity Log)."""
         key = f"{site}:{name.lower()}"
         with self._lock:
             cfg = self.models.get(key)
@@ -672,7 +682,8 @@ class StreamRecorder:
                 cfg = ModelConfig(name=name.lower(), site=site)
                 self.models[key] = cfg
             cfg.groups.add(group)
-        self._log(f"Added {site}/{name} [{group}]")
+        if not quiet:
+            self._log(f"Added {site}/{name} [{group}]")
 
     def remove_model(self, name: str, site: str, group: str = "recorder"):
         key = f"{site}:{name.lower()}"
@@ -732,6 +743,7 @@ class StreamRecorder:
                 if cfg.groups.issubset(set(groups)) or not cfg.groups:
                     victims.append(cfg.session)
                     cfg.session = None
+                    cfg.stop_requested = True
         # Kill OUTSIDE the lock (so monitor/GUI threads aren't blocked) and in
         # parallel — graceful_stop waits up to ~15 s per process, so a serial
         # loop over many recordings froze the app for minutes.
@@ -789,6 +801,7 @@ class StreamRecorder:
                 return
             session = cfg.session
             cfg.session = None
+            cfg.stop_requested = True
             # Always set OFFLINE after explicit stop to avoid triggering
             # auto-rec again in the GUI (user intentionally stopped)
             cfg.stream_url = ""
@@ -797,50 +810,75 @@ class StreamRecorder:
         self._kill_session(session)
         self._log(f"Stopped recording {name} ({site})")
 
+    # Online checks for due models run in a small shared pool: the old serial
+    # pass meant one slow site response delayed every other model's check AND
+    # the split/stall housekeeping of active sessions. CB calls stay globally
+    # serialized by _CB_API_LOCK, so this doesn't hammer Cloudflare.
+    _CHECK_POOL_SIZE = 8
+
     def _monitor_loop(self, group: str):
-        """Old-style sequential monitor: one pass per tick, in-loop session
-        management, 5s base cadence, per-model check_interval gating.
+        """One pass per 5s tick: session housekeeping for every model
+        (serial, local, fast), then online checks for the models whose
+        check_interval is due — those run in parallel in a small pool.
 
         The 'saved' group uses a bulk scanner instead — per-model checks don't
         scale to watchlists with hundreds of models (Cloudflare rate-limits the
         hammering and everything reports as a false OFFLINE)."""
+        pool = None
         try:
             if group == "saved":
                 self._saved_monitor_loop()
                 return
+            pool = ThreadPoolExecutor(max_workers=self._CHECK_POOL_SIZE,
+                                      thread_name_prefix=f"chk-{group}")
             while self._running.get(group):
                 with self._lock:
                     configs = [c for c in self.models.values() if group in c.groups]
+                now = time.time()
+                due = []
                 for cfg in configs:
                     if not self._running.get(group):
                         break
                     # One bad model/session must never kill the whole loop
                     try:
-                        self._monitor_check_one(cfg)
+                        self._session_housekeeping(cfg)
                     except Exception:
-                        logger.exception(f"[mon-{group}] check failed for "
-                                         f"{cfg.site}/{cfg.name}")
+                        logger.exception(f"[mon-{group}] housekeeping failed "
+                                         f"for {cfg.site}/{cfg.name}")
+                    if (not cfg.session
+                            and now - cfg.last_checked >= self.check_interval):
+                        cfg.last_checked = now   # claim before submitting
+                        due.append(cfg)
+                if due and self._running.get(group):
+                    futs = [pool.submit(self._check_online_safe, c) for c in due]
+                    _futures_wait(futs, timeout=90)
                 time.sleep(5)
         except Exception as e:
             logger.exception(f"Monitor [{group}] crashed")
-            self._log(f"Monitor [{group}] CRASHED: {e!r} — see ~/.streamrecorder.log")
+            self._log(f"Monitor [{group}] CRASHED: {e!r} — see streamrecorder.log (%LOCALAPPDATA%\\Scr33nX)")
         finally:
             self._running[group] = False
+            if pool is not None:
+                pool.shutdown(wait=False, cancel_futures=True)
 
-    def _monitor_check_one(self, cfg: ModelConfig):
-        """One recorder-loop pass for a single model: session housekeeping +
-        (when due) an online check."""
-        now = time.time()
-        if cfg.session:
-            self._check_split(cfg)
-            if cfg.session and cfg.session.process:
-                if cfg.session.process.poll() is not None:
-                    self._handle_ffmpeg_exit(cfg)
-                else:
-                    self._check_stall(cfg)
-        if now - cfg.last_checked < self.check_interval:
+    def _session_housekeeping(self, cfg: ModelConfig):
+        """Split/stall/exit handling for an active session (fast, no network)."""
+        if not cfg.session:
             return
-        cfg.last_checked = now
+        self._check_split(cfg)
+        if cfg.session and cfg.session.process:
+            if cfg.session.process.poll() is not None:
+                self._handle_ffmpeg_exit(cfg)
+            else:
+                self._check_stall(cfg)
+
+    def _check_online_safe(self, cfg: ModelConfig):
+        try:
+            self._check_online(cfg)
+        except Exception:
+            logger.exception(f"online check failed for {cfg.site}/{cfg.name}")
+
+    def _check_online(self, cfg: ModelConfig):
         if cfg.session:
             return
         self._set_status(cfg, ModelStatus.CHECKING, "")
@@ -865,6 +903,24 @@ class StreamRecorder:
                     return
             self._set_status(cfg, ModelStatus.OFFLINE, "")
 
+    def _drain_stderr(self, proc: Optional[subprocess.Popen], name: str):
+        """Forward a recorder process's stderr to the log from a daemon
+        thread. EVERY launch path needs one: an undrained stderr pipe fills
+        up (~64 KB) and blocks ffmpeg mid-write, which stalls the recording
+        until the stall detector kills it."""
+        if proc is None or proc.stderr is None:
+            return
+        def _pump(p=proc, n=name):
+            try:
+                for line in p.stderr:
+                    decoded = line.decode("utf-8", errors="replace").strip()
+                    if decoded:
+                        self._log(f"[ffmpeg/{n}] {decoded}")
+            except Exception:
+                pass
+        threading.Thread(target=_pump, daemon=True,
+                         name=f"stderr-{name}").start()
+
     def _launch_proc(self, cfg: ModelConfig, output_path: str,
                      stream_url: str) -> Optional[subprocess.Popen]:
         """Start the recording process for a model. Stripchat tries the
@@ -875,12 +931,15 @@ class StreamRecorder:
                                            self.ffmpeg_path)
             if proc is not None:
                 self._log(f"{cfg.name}: native HLS path (no browser)")
-                return proc
-            self._log(f"{cfg.name}: native path unavailable — browser fallback")
-            return launch_stripchat_playwright(cfg.name, output_path)
-        return launch_ffmpeg_hls(stream_url, output_path, self.ffmpeg_path,
-                                 site=cfg.site,
-                                 label=f"{cfg.site}:{cfg.name}")
+            else:
+                self._log(f"{cfg.name}: native path unavailable — browser fallback")
+                proc = launch_stripchat_playwright(cfg.name, output_path)
+        else:
+            proc = launch_ffmpeg_hls(stream_url, output_path, self.ffmpeg_path,
+                                     site=cfg.site,
+                                     label=f"{cfg.site}:{cfg.name}")
+        self._drain_stderr(proc, cfg.name)
+        return proc
 
     def _saved_monitor_loop(self):
         """Saved-group monitor: 5s session housekeeping tick + a bulk status
@@ -917,7 +976,7 @@ class StreamRecorder:
                 time.sleep(5)
         except Exception as e:
             logger.exception("Monitor [saved] crashed")
-            self._log(f"Monitor [saved] CRASHED: {e!r} — see ~/.streamrecorder.log")
+            self._log(f"Monitor [saved] CRASHED: {e!r} — see streamrecorder.log (%LOCALAPPDATA%\\Scr33nX)")
         finally:
             self._running["saved"] = False
 
@@ -926,7 +985,7 @@ class StreamRecorder:
             self._scan_saved_pass_inner()
         except Exception as e:
             logger.exception("Saved scan crashed")
-            self._log(f"Saved scan CRASHED: {e!r} — see ~/.streamrecorder.log")
+            self._log(f"Saved scan CRASHED: {e!r} — see streamrecorder.log (%LOCALAPPDATA%\\Scr33nX)")
 
     def _scan_saved_pass_inner(self):
         """One bulk status pass over all saved-group models:
@@ -981,7 +1040,7 @@ class StreamRecorder:
             except Exception as e:
                 logger.exception("Saved scan (Stripchat/Camsoda) crashed")
                 self._log(f"Saved scan (SC/CS) CRASHED: {e!r} "
-                          f"— see ~/.streamrecorder.log")
+                          f"— see streamrecorder.log (%LOCALAPPDATA%\\Scr33nX)")
 
         # MyFreeCams: one websocket connection per sweep, sequential lookups
         def scan_mfc():
@@ -1000,7 +1059,7 @@ class StreamRecorder:
             except Exception as e:
                 logger.exception("Saved scan (MyFreeCams) crashed")
                 self._log(f"Saved scan (MFC) CRASHED: {e!r} "
-                          f"— see ~/.streamrecorder.log")
+                          f"— see streamrecorder.log (%LOCALAPPDATA%\\Scr33nX)")
 
         t_others = None
         if others and running():
@@ -1061,6 +1120,7 @@ class StreamRecorder:
                 self._set_status(cfg, new, "")
 
     def _begin_recording(self, cfg: ModelConfig, stream_url: str):
+        cfg.stop_requested = False
         session = RecordingSession(
             model_name=cfg.name, site=cfg.site,
             output_dir=self.output_dir, max_size_mb=self.max_size_mb,
@@ -1077,17 +1137,6 @@ class StreamRecorder:
             if proc is None:
                 self._set_status(cfg, ModelStatus.ERROR, "Could not get stream URL")
                 return
-
-            # Log stderr in background
-            def _log_stderr(p=proc, name=cfg.name):
-                try:
-                    for line in p.stderr:
-                        decoded = line.decode('utf-8', errors='replace').strip()
-                        if decoded:
-                            self._log(f"[ffmpeg/{name}] {decoded}")
-                except Exception:
-                    pass
-            threading.Thread(target=_log_stderr, daemon=True).start()
 
             session.process = proc
             cfg.session     = session
@@ -1195,7 +1244,6 @@ class StreamRecorder:
         if not cfg.session:
             return
         rc  = cfg.session.process.returncode if cfg.session.process else -1
-        url = cfg.session.stream_url
         self._log(f"ffmpeg exited for {cfg.name} (rc={rc})")
 
         # Stripchat: rc 4 = idle (no segments), rc 5 = ticket/private/group show
@@ -1228,14 +1276,25 @@ class StreamRecorder:
             # re-checking this model during the restart delay window
             cfg.last_checked = time.time() + 10
 
-            def _delayed_restart(c=cfg, u=url):
+            def _delayed_restart(c=cfg):
                 time.sleep(3)
-                if not self._running:
+                # Don't resurrect a session the user stopped or removed.
+                # (The old guard `if not self._running:` was dead code —
+                # _running is a dict, which is always truthy.)
+                if c.stop_requested or self.models.get(f"{c.site}:{c.name}") is not c:
                     return
                 # Another recording may have been started while we waited
                 if c.session:
                     return
-                new_url = get_stream_url(c.site, c.name) or u
+                # Re-resolve the URL — after an ffmpeg exit the old one is
+                # usually expired, and starting on a stale URL just burns a
+                # restart attempt on a guaranteed failure. Retry once.
+                new_url = get_stream_url(c.site, c.name)
+                if not new_url:
+                    time.sleep(3)
+                    if c.stop_requested or c.session:
+                        return
+                    new_url = get_stream_url(c.site, c.name)
                 if new_url:
                     c.stream_url = new_url
                     self._begin_recording(c, new_url)

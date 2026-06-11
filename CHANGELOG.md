@@ -3,14 +3,77 @@
 All notable changes to **Scr33nX** are documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/).
-Dates are `YYYY-MM-DD`. This project does not yet use formal version numbers, so
-entries are grouped by date / milestone.
+Dates are `YYYY-MM-DD`. Versioning starts at **V1.0**; earlier entries are
+grouped by date / milestone.
 
 ---
 
-## [Unreleased]
+## V1.0 — 2026-06-11
 
-_Nothing yet._
+### Added
+- **Filter boxes on the Recorder and Saved Models tabs.** Type to show only
+  matching model names (debounced; hidden rows keep updating and reappear
+  when the filter clears). The Saved tab shows a "X / Y shown" counter.
+- **Lazy Saved Models tab.** With a large watchlist (1500+ models) the tab
+  used to cost startup time, Tk memory, and engine overhead even when never
+  opened. Rows are now built on the first visit to the tab, and models are
+  registered in the recording engine only when the scanner starts. Status
+  mirroring is preserved: a model recording in the Recorder tab shows
+  RECORDING in Saved Models the moment the rows are built, and live updates
+  take over from there. Export/import/persistence now read from the data
+  list, so nothing is lost even if the tab is never opened.
+
+### Fixed
+- **Tray-icon hard crashes (access violations).** Two combined causes: several
+  Win32 calls lacked 64-bit `restype` declarations, so ctypes truncated
+  pointer-sized handles (`GetModuleHandleW`/`LoadIconW`/`CreatePopupMenu`),
+  and the tray window class was re-registered on every minimize with a fresh
+  WNDPROC trampoline while the previous one could still be referenced by a
+  live window. The class is now registered once per process with a single
+  persistent trampoline, and tray creation no longer blocks the UI thread
+  (the old code could freeze the window for up to 5 s).
+- **Recordings stalled after the first file split.** Split parts relaunched
+  ffmpeg without a stderr-drain thread; once the pipe buffer filled, ffmpeg
+  blocked mid-write until the stall detector killed it. Every launch path now
+  drains stderr.
+- **Auto-restart could resurrect a stopped recording.** The guard intended to
+  block restarts after a stop was dead code (`if not self._running:` on a
+  dict that is always truthy). Explicit stops now set a per-model flag the
+  delayed restart respects. Restarts also re-resolve the stream URL instead
+  of falling back to the expired one (which burned a restart attempt on a
+  guaranteed failure).
+- **Quit no longer freezes the window.** Closing with many active recordings
+  ran the full ffmpeg flush (up to ~20 s) on the UI thread; it now runs in
+  the background while the header shows STOPPING…, and quitting from the
+  tray first restores the window so the confirm dialog is visible.
+
+### Changed — UI smoothness with many recordings
+- **Privacy-mode starfield (and the whole UI) no longer stutters under load.**
+  Worker-thread log lines (ffmpeg stderr, relay warnings) were posted as one
+  Tk event per line and flooded the event loop; they are now queued and
+  inserted in one batch per 250 ms tick, and the log only autoscrolls when
+  actually visible. Per-model file-size timers (blocking `getsize` calls on
+  the UI thread) were replaced by a single worker-thread sweep that posts one
+  batched update. Header stats are recomputed at most twice per second
+  instead of on every status callback.
+- **Starfield is time-based and cheaper.** Motion now advances by elapsed
+  time (late frames no longer freeze-and-jump the stars), star widths are
+  only rewritten when they visibly change, and the animation pauses while
+  the window is minimized.
+- **Monitor checks run in parallel.** Due online checks go through a small
+  thread pool (8 workers) instead of one serial pass, so one slow site no
+  longer delays every other model's check and the split/stall housekeeping.
+  Chaturbate API calls remain globally rate-limited as before.
+- **Relay housekeeping.** The prefetch cache size is tracked incrementally
+  (the old per-refresh full-cache scan ran under the global lock), and a
+  janitor thread prunes expired segments — previously, stopping all
+  recordings could leave up to 768 MB of cached segments in RAM forever.
+- **Logs moved out of the app folder** to `%LOCALAPPDATA%\Scr33nX`
+  (`streamrecorder.log`, `streamrecorder_crash.log`). The app folder is often
+  cloud-synced (OneDrive), where sync locks break log rotation. The crash log
+  also restarts once it exceeds 1 MB instead of growing forever. The app now
+  warns when the recordings output folder itself is inside a cloud-synced
+  directory.
 
 ---
 

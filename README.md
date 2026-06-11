@@ -21,7 +21,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 ### Monitoring & UI
 - ✅ Clean black & red dark GUI — no terminal needed
 - ✅ **Live bandwidth meter** in the header (`↓ X.X Mbps` download / `↑` Telegram upload) showing Scr33nX's total traffic — your indicator for when you're approaching your internet connection's limit
-- ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `streamrecorder.log` next to the app (rotating, 5 MB × 3)
+- ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)
 - ✅ **Dropped-segment warnings** — get notified when a stream is losing segments because bandwidth can't keep up (toggle in Settings)
 - ✅ **Saved Models** tab — view-only watchlist with online/offline status
 - ✅ Windows desktop notifications (recording started/stopped/split/dropped segments)
@@ -179,4 +179,4 @@ Settings are stored in `Pipeline/pipeline_settings.json`. Requires the `tdjson` 
 - If a model is in a private show or temporarily offline, the app keeps checking and resumes when they go public/online
 - All settings are saved automatically when you click "💾 Save Settings"
 - If many simultaneous recordings drop segments (watch for ⚠ warnings), your total internet bandwidth is the limit. Each 1080p stream needs roughly 5–6 Mbps sustained. In order of preference: set a global **Max Quality** cap (720p roughly halves usage vs. unlimited), enable **⬇ Auto-Downgrade** so only struggling streams lose quality, or record fewer models at once.
-- For bug reports during beta, attach `streamrecorder.log` (next to `app.py`) — it contains everything the Activity Log shows plus ffmpeg/relay internals.
+- For bug reports during beta, attach `streamrecorder.log` (in `%LOCALAPPDATA%\Scr33nX`) — it contains everything the Activity Log shows plus ffmpeg/relay internals.

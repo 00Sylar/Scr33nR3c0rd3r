@@ -23,6 +23,22 @@ user32 = ctypes.windll.user32
 shell32 = ctypes.windll.shell32
 kernel32 = ctypes.windll.kernel32
 
+# 64-bit safety: ctypes defaults every restype to a 32-bit c_int, which
+# silently truncates pointer-sized handles (HMODULE/HICON/HMENU) on Win64.
+# Feeding a truncated hInstance to RegisterClassW/CreateWindowExW is
+# undefined behavior — the access-violation crashes captured in
+# streamrecorder_crash.log originated here.
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+user32.LoadIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPVOID]
+user32.LoadIconW.restype = wintypes.HICON
+user32.CreatePopupMenu.restype = wintypes.HMENU
+user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT,
+                               ctypes.c_size_t, wintypes.LPCWSTR]
+user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT,
+                                  ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                  wintypes.HWND, ctypes.c_void_p]
+
 NIM_ADD = 0x00000000
 NIM_DELETE = 0x00000002
 NIF_MESSAGE = 0x00000001
@@ -107,6 +123,47 @@ user32.CreateWindowExW.argtypes = [
 user32.CreateWindowExW.restype = wintypes.HWND
 
 
+# ── Window class: registered once per process ─────────────────────────────────
+# The WNDPROC trampoline below must stay alive for the whole process: if it
+# were freed (the old code re-registered the class with a fresh callback on
+# every add(), dropping the previous one) while a window of the class still
+# existed, the next message would jump into freed memory — access violation.
+
+_current = None  # WinTray instance receiving tray callbacks
+
+
+@WNDPROC
+def _wndproc(hWnd, uMsg, wParam, lParam):
+    tray = _current
+    if uMsg == WM_APP_TRAY:
+        if tray is not None:
+            if lParam in (WM_LBUTTONUP, WM_LBUTTONDBLCLK):
+                tray.on_show()
+            elif lParam == WM_RBUTTONUP:
+                tray._show_menu(hWnd)
+        return 0
+    if uMsg == WM_DESTROY:
+        user32.PostQuitMessage(0)
+        return 0
+    return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam)
+
+
+_class_lock = threading.Lock()
+_class_ok: bool | None = None  # None = not registered yet
+
+
+def _ensure_class() -> bool:
+    global _class_ok
+    with _class_lock:
+        if _class_ok is None:
+            wc = WNDCLASSW()
+            wc.lpfnWndProc = _wndproc
+            wc.hInstance = kernel32.GetModuleHandleW(None)
+            wc.lpszClassName = _CLASS_NAME
+            _class_ok = bool(user32.RegisterClassW(ctypes.byref(wc)))
+        return _class_ok
+
+
 class WinTray:
     """System tray icon on a dedicated thread.
 
@@ -123,30 +180,38 @@ class WinTray:
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self._failed = threading.Event()
-        self._wndproc_cb = None  # keep callback alive
 
     # ── public API ────────────────────────────────────────────────────────────
 
     def add(self):
+        """Create the tray icon asynchronously. Never blocks the caller —
+        the old synchronous wait held the Tk main loop hostage for up to 5 s.
+        Poll failed() (the GUI's 150 ms tray poll already runs) to detect
+        creation failure."""
+        global _current
         if self._thread and self._thread.is_alive():
             return
         self._ready.clear()
         self._failed.clear()
+        _current = self
         self._thread = threading.Thread(
             target=self._thread_main, daemon=True, name="win-tray"
         )
         self._thread.start()
-        self._ready.wait(timeout=5)
-        if self._failed.is_set() or not self._ready.is_set():
-            raise OSError("tray icon could not be created")
+
+    def failed(self) -> bool:
+        return self._failed.is_set()
 
     def remove(self):
+        global _current
         if self.hwnd:
             user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
         self.hwnd = None
+        if _current is self:
+            _current = None
 
     @staticmethod
     def _load_app_icon():
@@ -168,28 +233,7 @@ class WinTray:
         try:
             hinst = kernel32.GetModuleHandleW(None)
 
-            @WNDPROC
-            def wndproc(hWnd, uMsg, wParam, lParam):
-                if uMsg == WM_APP_TRAY:
-                    if lParam in (WM_LBUTTONUP, WM_LBUTTONDBLCLK):
-                        self.on_show()
-                    elif lParam == WM_RBUTTONUP:
-                        self._show_menu(hWnd)
-                    return 0
-                if uMsg == WM_DESTROY:
-                    user32.PostQuitMessage(0)
-                    return 0
-                return user32.DefWindowProcW(hWnd, uMsg, wParam, lParam)
-
-            self._wndproc_cb = wndproc
-
-            wc = WNDCLASSW()
-            wc.lpfnWndProc = wndproc
-            wc.hInstance = hinst
-            wc.lpszClassName = _CLASS_NAME
-            # Re-register fresh so the class always points at THIS callback
-            user32.UnregisterClassW(_CLASS_NAME, hinst)
-            if not user32.RegisterClassW(ctypes.byref(wc)):
+            if not _ensure_class():
                 self._failed.set()
                 self._ready.set()
                 return

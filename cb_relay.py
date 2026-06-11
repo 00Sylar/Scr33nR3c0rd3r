@@ -88,6 +88,10 @@ _executor = ThreadPoolExecutor(max_workers=_PREFETCH_WORKERS,
                                thread_name_prefix="relay-prefetch")
 _state_lock = threading.Lock()
 _cache: dict[str, "_Entry"] = {}       # upstream URL → in-flight/ready segment
+_cache_bytes = 0                       # running total of cached payload bytes
+                                       # (counted on successful fetch, subtracted
+                                       # on pop — replaces summing the whole
+                                       # cache under the lock per refresh)
 _fetched: dict[str, float] = {}        # upstream URL → ts of successful fetch
 _streams: dict[str, dict] = {}         # stream key → {"segs": [...], "dur": avg}
 
@@ -125,6 +129,7 @@ class _Entry:
 
 
 def _prefetch_one(url: str, mode: str, entry: _Entry):
+    global _cache_bytes
     try:
         # Tight budget: a live segment only exists for ~10-20 s, and a worker
         # stuck on one stalled download starves every other stream. Better to
@@ -137,6 +142,8 @@ def _prefetch_one(url: str, mode: str, entry: _Entry):
         if 200 <= r.status_code < 300:
             with _state_lock:
                 _fetched[url] = time.monotonic()
+                if _cache.get(url) is entry:
+                    _cache_bytes += len(entry.data)
         else:
             entry.error = True
     except Exception:
@@ -146,6 +153,7 @@ def _prefetch_one(url: str, mode: str, entry: _Entry):
         entry.event.set()
         if entry.error:
             # Drop failed entries so the next playlist refresh retries them.
+            # (Never counted into _cache_bytes — only the success path adds.)
             with _state_lock:
                 _cache.pop(url, None)
 
@@ -183,8 +191,9 @@ def _track_media_playlist(text: str, base_url: str, mode: str, key: str):
         st["segs"] = segs
         st["dur"] = avg
 
-        total = sum(len(e.data) for e in _cache.values())
-        if total < _CACHE_MAX_BYTES:
+        # _cache_bytes is maintained incrementally; expired entries are pruned
+        # by the janitor thread — no O(cache) work under the lock per refresh.
+        if _cache_bytes < _CACHE_MAX_BYTES:
             for u in segs:
                 if u not in _cache and u not in _fetched:
                     e = _Entry()
@@ -197,13 +206,7 @@ def _track_media_playlist(text: str, base_url: str, mode: str, key: str):
                 logger.warning(
                     "relay prefetch cache full (%d MB, %d entries) — "
                     "prefetch suspended, streams will fall behind",
-                    total // (1024 * 1024), len(_cache))
-        for u, e in list(_cache.items()):
-            if e.event.is_set() and now - e.ts > _ENTRY_TTL:
-                _cache.pop(u, None)
-        for u, t in list(_fetched.items()):
-            if now - t > _FETCHED_TTL:
-                _fetched.pop(u, None)
+                    _cache_bytes // (1024 * 1024), len(_cache))
     for u, e in submit:
         _executor.submit(_prefetch_one, u, mode, e)
     if missed and _gap_cb:
@@ -211,6 +214,26 @@ def _track_media_playlist(text: str, base_url: str, mode: str, key: str):
             _gap_cb(key, missed, missed * avg)
         except Exception:
             pass
+
+
+def _janitor_loop():
+    """Prune expired cache entries / fetched-URL records on a fixed cadence.
+    Pruning used to happen only inside playlist refreshes — O(cache) work
+    under the state lock on every refresh, and once all recordings stopped
+    (no more refreshes) the full cache stayed in RAM indefinitely."""
+    global _cache_bytes
+    while True:
+        time.sleep(15)
+        now = time.monotonic()
+        with _state_lock:
+            for u, e in list(_cache.items()):
+                if e.event.is_set() and now - e.ts > _ENTRY_TTL:
+                    _cache.pop(u, None)
+                    if not e.error:
+                        _cache_bytes -= len(e.data)
+            for u, t in list(_fetched.items()):
+                if now - t > _FETCHED_TTL:
+                    _fetched.pop(u, None)
 
 
 # doppiocdn (Stripchat) rejects segment requests without a matching Referer.
@@ -392,8 +415,11 @@ class _Handler(BaseHTTPRequestHandler):
             if entry is not None:
                 entry.event.wait(timeout=30)
                 if entry.event.is_set() and not entry.error:
+                    global _cache_bytes
                     with _state_lock:
-                        _cache.pop(target, None)  # ffmpeg fetches each URL once
+                        # ffmpeg fetches each URL once — drop after serving
+                        if _cache.pop(target, None) is entry:
+                            _cache_bytes -= len(entry.data)
                     self._send(entry.status, entry.ctype, entry.data)
                     return
             self._proxy_stream(target, mode)
@@ -466,5 +492,9 @@ def wrap(url: str, user_agent: str | None = None,
             threading.Thread(
                 target=_server.serve_forever, daemon=True,
                 name="cb-relay",
+            ).start()
+            threading.Thread(
+                target=_janitor_loop, daemon=True,
+                name="relay-janitor",
             ).start()
     return _wrap_url(url, mode, label)
