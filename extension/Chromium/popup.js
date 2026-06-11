@@ -10,13 +10,23 @@ function extractModelInfo() {
   if (host.includes('chaturbate.com')) site = 'chaturbate';
   else if (host.includes('stripchat.com')) site = 'stripchat';
   else if (host.includes('camsoda.com'))    site = 'camsoda';
+  else if (host.includes('myfreecams.com')) site = 'myfreecams';
   if (!site) return null;
-  const parts = path.split('/').filter(Boolean);
-  const name  = parts[0] || '';
+  let name;
+  if (site === 'myfreecams') {
+    // SPA: the model lives in the hash fragment (#name, #/name, #/model/<id>),
+    // with a /models/<name> path fallback.
+    let h = window.location.hash.replace(/^#\/?/, '');
+    if (h.startsWith('model/')) h = h.slice('model/'.length);
+    name = h.split(/[/?]/).filter(Boolean)[0] || '';
+    if (!name) name = path.split('/').filter(Boolean).pop() || '';
+  } else {
+    name = path.split('/').filter(Boolean)[0] || '';
+  }
   const skip  = ['tags','search','following','discover','login','register',
                  'promo','affiliates','p','trending','new-cams','female','male'];
   if (!name || skip.includes(name.toLowerCase())) return null;
-  return { name, site };
+  return { name: name.toLowerCase(), site };
 }
 
 async function getPageModel() {

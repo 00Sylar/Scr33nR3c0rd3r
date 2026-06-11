@@ -187,6 +187,7 @@ _REFERERS = {
     "stripchat":  "https://stripchat.com/",
     "chaturbate": "https://chaturbate.com/",
     "camsoda":    "https://www.camsoda.com/",
+    "myfreecams": "https://www.myfreecams.com/",
 }
 
 
@@ -278,7 +279,7 @@ def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate",
         # Resolve MOUFLON segment URLs / strip MOUFLON tags first, then wrap.
         import stripchat_native
         text = stripchat_native.rewrite_playlist(text)
-    elif mode in ("chaturbate", "camsoda"):
+    elif mode in ("chaturbate", "camsoda", "myfreecams"):
         # Pin the highest-bitrate variant on the master playlist.
         text = _select_highest_variant(text)
     # Kick off parallel segment prefetch (no-op for master playlists).
@@ -289,7 +290,7 @@ def _rewrite_playlist(text: str, base_url: str, mode: str = "chaturbate",
         s = line.strip()
         if not s:
             out.append(line)
-        elif mode in ("chaturbate", "camsoda") and s.startswith(_LL_TAGS):
+        elif mode in ("chaturbate", "camsoda", "myfreecams") and s.startswith(_LL_TAGS):
             continue
         elif s.startswith("#"):
             out.append(

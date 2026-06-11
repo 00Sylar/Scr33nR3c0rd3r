@@ -158,7 +158,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if not name or not site:
             self._json({"ok": False, "error": "missing name or site"}, 400)
             return
-        if site not in ("chaturbate", "stripchat", "camsoda"):
+        if site not in ("chaturbate", "stripchat", "camsoda", "myfreecams"):
             self._json({"ok": False, "error": f"unsupported site: {site}"}, 400)
             return
         app = self._app
@@ -470,7 +470,8 @@ class StreamRecorderApp(tk.Tk):
         self._e_name.bind("<KeyRelease>", lambda e: self._auto_detect_site())
 
         tk.Label(p, text="Site", fg=TEXT2, bg=BG2, font=UI).pack(anchor="w", padx=16)
-        self._c_site = ttk.Combobox(p, values=["chaturbate","stripchat","camsoda"],
+        self._c_site = ttk.Combobox(p,
+                                     values=["chaturbate","stripchat","camsoda","myfreecams"],
                                      state="readonly")
         self._c_site.set("chaturbate")
         self._c_site.pack(fill="x", padx=16, pady=(2,12))
@@ -655,7 +656,8 @@ class StreamRecorderApp(tk.Tk):
         if self._tree.exists(site_id):
             return
         label = {"chaturbate": "CHATURBATE", "stripchat": "STRIPCHAT",
-                 "camsoda": "CAMSODA"}.get(site, site.upper())
+                 "camsoda": "CAMSODA",
+                 "myfreecams": "MYFREECAMS"}.get(site, site.upper())
         self._tree.insert("", "end", iid=site_id, text=f"  {label}",
                           values=("", "", "", ""), tags=("site_hdr",), open=True)
 
@@ -865,6 +867,7 @@ class StreamRecorderApp(tk.Tk):
           chaturbate.com/username/
           stripchat.com/username/
           camsoda.com/username/
+          myfreecams.com/#username   (model lives in the URL hash fragment)
           plain username (uses the site dropdown)
         """
         raw = raw.strip().lower()
@@ -872,6 +875,16 @@ class StreamRecorderApp(tk.Tk):
         for prefix in ("https://", "http://", "www."):
             if raw.startswith(prefix):
                 raw = raw[len(prefix):]
+
+        # MyFreeCams profiles are single-page-app URLs: the model name is in
+        # the hash fragment (myfreecams.com/#name), not the path.
+        if raw.startswith("myfreecams.com"):
+            frag = raw.split("#", 1)[1] if "#" in raw else ""
+            frag = frag.lstrip("/")
+            if frag.startswith("model/"):
+                frag = frag[len("model/"):]
+            username = frag.split("/")[0].split("?")[0]
+            return username.strip("/"), "myfreecams"
 
         # Detect site from domain
         for domain, site in (("chaturbate.com", "chaturbate"),
@@ -894,6 +907,8 @@ class StreamRecorderApp(tk.Tk):
             self._c_site.set("stripchat")
         elif "camsoda.com" in text:
             self._c_site.set("camsoda")
+        elif "myfreecams.com" in text:
+            self._c_site.set("myfreecams")
 
     def _add_model(self):
         raw = self._e_name.get().strip()
@@ -976,6 +991,7 @@ class StreamRecorderApp(tk.Tk):
         "chaturbate": "https://chaturbate.com/{}/",
         "stripchat":  "https://stripchat.com/{}",
         "camsoda":    "https://www.camsoda.com/{}",
+        "myfreecams": "https://www.myfreecams.com/#{}",
     }
 
     def _copy_model_url(self, name: str, site: str):
@@ -1482,7 +1498,8 @@ class StreamRecorderApp(tk.Tk):
         if self._stree.exists(site_id):
             return
         label = {"chaturbate": "CHATURBATE", "stripchat": "STRIPCHAT",
-                 "camsoda": "CAMSODA"}.get(site, site.upper())
+                 "camsoda": "CAMSODA",
+                 "myfreecams": "MYFREECAMS"}.get(site, site.upper())
         self._stree.insert("", "end", iid=site_id, text=f"  {label}",
                            values=("", "", ""), tags=("site_hdr",), open=True)
 
@@ -1584,7 +1601,7 @@ class StreamRecorderApp(tk.Tk):
         # Quick helper: pop a small dialog to add a username/URL into Saved Models
         from tkinter import simpledialog
         raw = simpledialog.askstring("Add to Saved Models",
-                                      "Username or URL (chaturbate / stripchat / camsoda):",
+                                      "Username or URL (chaturbate / stripchat / camsoda / myfreecams):",
                                       parent=self)
         if not raw:
             return

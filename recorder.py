@@ -327,6 +327,9 @@ def get_stream_url(site: str, model_name: str, thorough: bool = False) -> Option
         return get_stripchat_stream_url(model_name)
     elif site == "camsoda":
         return get_camsoda_stream_url(model_name)
+    elif site == "myfreecams":
+        import mfc
+        return mfc.get_stream_url(model_name, max_retries=3 if thorough else 1)
     return None
 
 
@@ -368,7 +371,8 @@ def find_ffmpeg(override: str = "") -> str:
         f"~/.streamrecorder_config.json")
 
 
-SITE_TAGS = {"chaturbate": "CB", "stripchat": "ST", "camsoda": "CS"}
+SITE_TAGS = {"chaturbate": "CB", "stripchat": "ST", "camsoda": "CS",
+             "myfreecams": "MFC"}
 
 
 def build_output_path(session: RecordingSession) -> str:
@@ -449,9 +453,13 @@ def launch_ffmpeg_hls(stream_url: str, output_path: str, ffmpeg_path: str,
             f"User-Agent: {USER_AGENT}\r\n"
             "Origin: https://www.camsoda.com\r\nReferer: https://www.camsoda.com/\r\n"
         ),
+        "myfreecams": (
+            f"User-Agent: {USER_AGENT}\r\n"
+            "Origin: https://www.myfreecams.com\r\nReferer: https://www.myfreecams.com/\r\n"
+        ),
     }
     headers = headers_map.get(site, f"User-Agent: {USER_AGENT}\r\n")
-    if site in ("chaturbate", "camsoda"):
+    if site in ("chaturbate", "camsoda", "myfreecams"):
         # Route through the local relay: it pins the highest-bitrate variant
         # and (for CB) survives the edge's mid-segment TLS resets. Plain HTTP
         # to 127.0.0.1; requests fetches upstream reliably.
@@ -470,11 +478,11 @@ def launch_ffmpeg_hls(stream_url: str, output_path: str, ffmpeg_path: str,
         "-reconnect_streamed", "1",
         "-reconnect_delay_max", "10",
     ]
-    if site in ("chaturbate", "camsoda"):
+    if site in ("chaturbate", "camsoda", "myfreecams"):
         # Relay segment URLs may use extensions outside ffmpeg's HLS default
         # whitelist (e.g. Camsoda's .fmp4) — accept them all.
         cmd += ["-allowed_extensions", "ALL"]
-    if site == "chaturbate":
+    if site in ("chaturbate", "myfreecams"):
         cmd += ["-m3u8_hold_counters", "20"]
     cmd += [
         "-i", stream_url,
@@ -763,6 +771,15 @@ class StreamRecorder:
             self._set_status(cfg, ModelStatus.ONLINE, "")
         else:
             cfg.stream_url = ""
+            if cfg.site == "myfreecams":
+                # The lookup already told us the video state — show PRIVATE
+                # (with a 5-min cooldown) instead of OFFLINE when she's in a
+                # private/group show or away.
+                import mfc
+                if mfc.last_status(cfg.name) in ("private", "away"):
+                    cfg.last_checked = time.time() + 300
+                    self._set_status(cfg, ModelStatus.PRIVATE, "")
+                    return
             self._set_status(cfg, ModelStatus.OFFLINE, "")
 
     def _launch_proc(self, cfg: ModelConfig, output_path: str,
@@ -840,10 +857,12 @@ class StreamRecorder:
             configs = [c for c in self.models.values() if "saved" in c.groups]
         cb = [c for c in configs if c.site == "chaturbate"]
         others = [c for c in configs if c.site in ("stripchat", "camsoda")]
+        mfcs = [c for c in configs if c.site == "myfreecams"]
         if not configs:
             return
         self._log(f"Saved scan started ({len(configs)} models)…")
-        counts = {"chaturbate": 0, "stripchat": 0, "camsoda": 0}
+        counts = {"chaturbate": 0, "stripchat": 0, "camsoda": 0,
+                  "myfreecams": 0}
 
         # Stripchat/Camsoda per-model checks run CONCURRENTLY with the long
         # Chaturbate sweep so the first statuses appear within seconds
@@ -881,11 +900,35 @@ class StreamRecorder:
                 self._log(f"Saved scan (SC/CS) CRASHED: {e!r} "
                           f"— see ~/.streamrecorder.log")
 
+        # MyFreeCams: one websocket connection per sweep, sequential lookups
+        def scan_mfc():
+            try:
+                import mfc
+                self._log(f"Saved scan: checking {len(mfcs)} MyFreeCams models…")
+                res = mfc.lookup_models([c.name for c in mfcs])
+                for cfg in mfcs:
+                    if not running():
+                        break
+                    live = res.get(cfg.name.lower())
+                    if live is None:
+                        continue  # lookup failed — keep previous status
+                    counts["myfreecams"] += live
+                    self._apply_scan_status(cfg, live)
+            except Exception as e:
+                logger.exception("Saved scan (MyFreeCams) crashed")
+                self._log(f"Saved scan (MFC) CRASHED: {e!r} "
+                          f"— see ~/.streamrecorder.log")
+
         t_others = None
         if others and running():
             t_others = threading.Thread(target=scan_others, daemon=True,
                                         name="saved-scan-others")
             t_others.start()
+        t_mfc = None
+        if mfcs and running():
+            t_mfc = threading.Thread(target=scan_mfc, daemon=True,
+                                     name="saved-scan-mfc")
+            t_mfc.start()
 
         if cb and running():
             rooms = get_chaturbate_online_rooms(
@@ -906,6 +949,8 @@ class StreamRecorder:
 
         if t_others is not None:
             t_others.join()
+        if t_mfc is not None:
+            t_mfc.join()
 
         if running():
             n_sc = sum(1 for c in others if c.site == "stripchat")
@@ -917,6 +962,8 @@ class StreamRecorder:
                 parts.append(f"SC {counts['stripchat']}/{n_sc} online")
             if n_cs:
                 parts.append(f"CS {counts['camsoda']}/{n_cs} online")
+            if mfcs:
+                parts.append(f"MFC {counts['myfreecams']}/{len(mfcs)} online")
             self._log(f"Saved scan done: {', '.join(parts)} "
                       f"({time.time() - t0:.0f}s)")
 
