@@ -1,6 +1,6 @@
 # Scr33nX
 
-A lightweight Windows desktop app for automatically recording live streams from **Chaturbate**, **Stripchat**, and **Camsoda** — always at the **highest available quality**.
+A lightweight Windows desktop app for automatically recording live streams from **Chaturbate**, **Stripchat**, **Camsoda**, and **MyFreeCams** — always at the **highest available quality**.
 
 Recordings are pulled through a local smart relay that prefetches HLS segments in parallel, so multiple simultaneous recordings stay smooth instead of dropping segments when bandwidth gets tight.
 
@@ -10,7 +10,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 
 ### Recording
 - ✅ Auto-detects when a model goes online and starts recording immediately
-- ✅ Record multiple models simultaneously across Chaturbate, Stripchat, and Camsoda
+- ✅ Record multiple models simultaneously across Chaturbate, Stripchat, Camsoda, and MyFreeCams
 - ✅ **Highest-quality pinning** — the relay locks ffmpeg to the top-bitrate variant so it can never silently fall back to a lower resolution
 - ✅ **Parallel segment prefetching** — segments are downloaded ahead of ffmpeg in parallel; slow streams catch up instead of skipping 1–2 s chunks
 - ✅ **File splitting** — automatically starts a new file when the recording reaches your defined max size (e.g. 3070 MB)
@@ -30,6 +30,10 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 ### Integrations
 - ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page (local API, port 5200)
 - ✅ Telegram upload pipeline (optional) — converts finished recordings and uploads them to a Telegram group/topic
+
+---
+
+> 📜 See **[CHANGELOG.md](CHANGELOG.md)** for a running history of changes, and **[RercordingLogics.md](RercordingLogics.md)** for the deep technical recording reference.
 
 ---
 
@@ -84,7 +88,7 @@ The extension adds models to Scr33nX with one click while you're on their page. 
 
 ## Usage
 
-1. **Add models** using the left panel — enter the username (or paste a full model URL; the site is auto-detected) and select the site: `chaturbate`, `stripchat`, or `camsoda`
+1. **Add models** using the left panel — enter the username (or paste a full model URL; the site is auto-detected) and select the site: `chaturbate`, `stripchat`, `camsoda`, or `myfreecams`
 2. Click **▶ START MONITOR** — the app polls each model at the configured interval
 3. When a model goes live, recording starts automatically and you'll get a notification
 4. When the model goes offline, the recording stops automatically
@@ -114,9 +118,10 @@ Files are saved to the configured output folder (default: `~/Videos/StreamRecord
 modelname_CB_20240515_143022_part001.ts
 modelname_ST_20240515_143022.ts
 modelname_CS_20240515_143022_part001.ts
+modelname_MFC_20240515_143022.ts
 ```
 
-- `CB` = Chaturbate, `ST` = Stripchat, `CS` = Camsoda
+- `CB` = Chaturbate, `ST` = Stripchat, `CS` = Camsoda, `MFC` = MyFreeCams
 - `.ts` container — plays in VLC, MPV, or any player that supports MPEG-TS
 - Convert to `.mp4` with: `ffmpeg -i input.ts -c copy output.mp4`
 
@@ -148,6 +153,8 @@ Settings are stored in `Pipeline/pipeline_settings.json`. Requires the `tdjson` 
 
 ## How recording works (architecture notes)
 
+> 📄 **Full technical reference:** see **[RercordingLogics.md](RercordingLogics.md)** for the complete, per-site "how to make it work" documentation — resolver protocols, the relay internals, the Stripchat MOUFLON/Playwright paths, the MyFreeCams FCS websocket, exit codes, and a troubleshooting map. That file is written so another engineer (or LLM) can pick up the recording pipeline cold.
+
 - **Local relay** (`cb_relay.py`): ffmpeg never talks to the CDN directly. All HLS traffic goes through a relay on `127.0.0.1` which:
   - pins the **highest-bitrate variant** so quality can't downgrade mid-recording,
   - **prefetches upcoming segments in parallel** (16 workers, in-memory cache) so ffmpeg is served instantly and falling behind the live window — the cause of 1–2 s timestamp jumps — is avoided,
@@ -155,6 +162,7 @@ Settings are stored in `Pipeline/pipeline_settings.json`. Requires the `tdjson` 
   - detects segments that expired before they could be downloaded and reports them (Activity Log + optional notification),
   - feeds the **bandwidth meter** (counts every byte fetched upstream).
 - **Chaturbate / Camsoda**: public HLS resolver → relay → `ffmpeg -c copy`
+- **MyFreeCams**: no public API — a guest login over MFC's FCS websocket (`mfc.py`) resolves the model's video state + HLS edge, then relay → `ffmpeg -c copy`
 - **Stripchat**: native MOUFLON-decrypting path through the relay (no browser) when possible; otherwise a Playwright-driven Chromium session (`stripchat_live.py`) writes the MPEG-TS directly. *Note: the browser fallback doesn't pass through the relay, so it isn't counted by the bandwidth meter.*
 - **Extension API**: the app serves a small local HTTP API on **port 5200** used by the browser extensions
 
