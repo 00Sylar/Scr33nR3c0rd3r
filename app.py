@@ -336,6 +336,13 @@ class StreamRecorderApp(tk.Tk):
     def _set_app_icon(self):
         base = os.path.dirname(os.path.abspath(__file__))
         self._hdr_icon = None
+        # Own AppUserModelID so the taskbar shows our window icon
+        # instead of grouping under python.exe's rocket icon.
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Scr33nX.App")
+        except Exception:
+            pass
         try:
             self.iconbitmap(os.path.join(base, "icons", "devil.ico"))
         except Exception:
