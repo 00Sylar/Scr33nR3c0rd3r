@@ -331,12 +331,11 @@ class StreamRecorderApp(tk.Tk):
         self._saved_rows: dict[str, bool] = {}    # saved-only models (view only)
         self._auto_rec: dict[str, bool] = {}      # key → auto-rec state (recorder tab)
         self._model_q: dict[str, int] = {}        # key → per-model quality cap (height px, 0 = default)
-        # The relay asks for the cap each time a master playlist is fetched
-        # (i.e. on recording start/restart): per-model override beats global.
-        import cb_relay
-        cb_relay.set_quality_callback(
-            lambda label: self._model_q.get(label, 0)
-            or (self.settings.max_quality or 0))
+        # The recorder answers the relay's per-stream quality queries; the app
+        # just feeds it the global cap and shares the per-model override dict.
+        self.recorder.quality_global = self.settings.max_quality
+        self.recorder.quality_overrides = self._model_q
+        self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self._monitoring_recorder = False
         self._monitoring_saved    = False
         self._tray: Optional[WinTray] = None
@@ -552,6 +551,13 @@ class StreamRecorderApp(tk.Tk):
 
         self._v_gapwarn = tk.BooleanVar(value=self.settings.gap_warnings_enabled)
         tk.Checkbutton(p, text="⚠ Dropped-Segment Warnings", variable=self._v_gapwarn,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                       activeforeground=TEXT, font=UI, relief="flat").pack(
+            anchor="w", padx=16, pady=(0,0))
+
+        self._v_autodown = tk.BooleanVar(value=self.settings.auto_downgrade_enabled)
+        tk.Checkbutton(p, text="⬇ Auto-Downgrade Quality",
+                       variable=self._v_autodown,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,0))
@@ -2069,6 +2075,9 @@ class StreamRecorderApp(tk.Tk):
         self.settings.notifications_enabled = self._v_notif.get()
         self.settings.gap_warnings_enabled  = self._v_gapwarn.get()
         self.settings.max_quality = QUALITY_OPTIONS.get(self._v_quality.get(), 0)
+        self.settings.auto_downgrade_enabled = self._v_autodown.get()
+        self.recorder.quality_global = self.settings.max_quality
+        self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self.settings.privacy_mode_enabled  = self._v_privacy.get()
         self.recorder.gap_warnings_enabled  = self.settings.gap_warnings_enabled
         self._persist_models()

@@ -557,8 +557,22 @@ class StreamRecorder:
         # (bandwidth saturated). Always logged; notification is opt-out.
         self.gap_warnings_enabled: bool = True
         self._gap_warn_ts: dict[str, float] = {}
+
+        # Quality caps: the relay asks effective_quality(label) for the max
+        # variant height each time a master playlist is fetched (recording
+        # start/restart). Per-model override beats global; an auto-downgrade
+        # (session-only) beats both but never applies to models the user
+        # capped manually.
+        self.quality_global: int = 0                 # 0 = unlimited
+        self.quality_overrides: dict[str, int] = {}  # label → height (app-owned)
+        self.auto_downgrade_enabled: bool = False
+        self._session_q: dict[str, int] = {}         # label → downgraded height
+        self._gap_window: dict[str, list] = {}       # label → [start_ts, sec_lost]
+        self._downgrade_ts: dict[str, float] = {}    # label → last downgrade time
+
         import cb_relay
         cb_relay.set_gap_callback(self._on_relay_gap)
+        cb_relay.set_quality_callback(self.effective_quality)
 
         self._lock    = threading.Lock()
         # Per-group monitor flags — one thread per group ("recorder", "saved")
@@ -571,6 +585,7 @@ class StreamRecorder:
         """Relay callback (prefetch thread): segments expired unfetched."""
         self._log(f"⚠ {label}: {missed} segment(s) (~{seconds:.0f}s) lost — "
                   f"download can't keep up with the live stream")
+        self._maybe_downgrade(label, seconds)
         if not self.gap_warnings_enabled or not self.on_notification:
             return
         now = time.time()
@@ -581,6 +596,73 @@ class StreamRecorder:
             "Dropped segments",
             f"{label}: ~{seconds:.0f}s of video lost — your internet "
             f"bandwidth can't keep up with all active recordings.")
+
+    # ── Quality caps & auto-downgrade ─────────────────────────────────────────
+
+    # Downgrade ladder, thresholds: a stream losing ≥10 s of video within a
+    # 60 s window steps down one rung; 2 min cooldown after each step so the
+    # restart's own instability doesn't immediately trigger the next one.
+    _DOWNGRADE_STEPS = (720, 480, 240)
+    _DOWNGRADE_WINDOW = 60.0
+    _DOWNGRADE_THRESHOLD = 10.0
+    _DOWNGRADE_COOLDOWN = 120.0
+
+    def effective_quality(self, label: str) -> int:
+        """Max variant height for a stream (relay callback). 0 = unlimited."""
+        ov = self.quality_overrides
+        return (self._session_q.get(label)
+                or ov.get(label) or ov.get(label.lower())
+                or self.quality_global or 0)
+
+    def _reset_session_quality(self, cfg):
+        """Forget any auto-downgrade when a recording ends naturally — the
+        next session starts fresh at the configured quality."""
+        label = f"{cfg.site}:{cfg.name}"
+        self._session_q.pop(label, None)
+        self._gap_window.pop(label, None)
+
+    def _maybe_downgrade(self, label: str, seconds: float):
+        """Accumulate segment losses; if a stream persistently can't keep up,
+        restart it one quality step lower (session-only, opt-in)."""
+        if not self.auto_downgrade_enabled:
+            return
+        ov = self.quality_overrides
+        if label in ov or label.lower() in ov:
+            return  # user pinned a quality manually — respect it
+        if label.startswith("stripchat:"):
+            return  # stripchat bypasses variant selection — nothing to cap
+        now = time.time()
+        if now - self._downgrade_ts.get(label, 0.0) < self._DOWNGRADE_COOLDOWN:
+            return
+        w = self._gap_window.get(label)
+        if not w or now - w[0] > self._DOWNGRADE_WINDOW:
+            w = [now, 0.0]
+            self._gap_window[label] = w
+        w[1] += seconds
+        if w[1] < self._DOWNGRADE_THRESHOLD:
+            return
+        self._gap_window.pop(label, None)
+        self._downgrade_ts[label] = now
+        cur = self._session_q.get(label) or self.quality_global or 0
+        nxt = next((s for s in self._DOWNGRADE_STEPS if not cur or s < cur), None)
+        if nxt is None:
+            self._log(f"⬇ {label}: already at lowest quality and still "
+                      f"losing segments — bandwidth is saturated")
+            return
+        cfg = self.models.get(label)
+        if not cfg or not cfg.session or not cfg.session.process:
+            return
+        self._session_q[label] = nxt
+        cfg.restart_count = 0  # quality restarts don't burn the crash budget
+        self._log(f"⬇ Auto-downgrading {label} to {nxt}p — kept losing "
+                  f"segments; restarting recording")
+        if self.on_notification:
+            self.on_notification(
+                "Quality downgraded",
+                f"{label} kept losing segments — restarting at {nxt}p.")
+        graceful_stop(cfg.session.process, timeout=5)
+        # _handle_ffmpeg_exit auto-restarts; the relay then asks
+        # effective_quality() again and picks the lower variant.
 
     def add_model(self, name: str, site: str, group: str = "recorder"):
         key = f"{site}:{name.lower()}"
@@ -710,6 +792,7 @@ class StreamRecorder:
             # Always set OFFLINE after explicit stop to avoid triggering
             # auto-rec again in the GUI (user intentionally stopped)
             cfg.stream_url = ""
+            self._reset_session_quality(cfg)
             self._set_status(cfg, ModelStatus.OFFLINE, "")
         self._kill_session(session)
         self._log(f"Stopped recording {name} ({site})")
@@ -1129,6 +1212,7 @@ class StreamRecorder:
             cfg.restart_count = 0
             cfg.session       = None
             cfg.stream_url    = ""
+            self._reset_session_quality(cfg)
             # 5-minute cooldown so the monitor doesn't immediately flip back to ONLINE
             cfg.last_checked  = time.time() + 300
             label = "ticket/private show" if rc == 5 else "no public segments"
@@ -1164,6 +1248,7 @@ class StreamRecorder:
         cfg.restart_count = 0
         cfg.session    = None
         cfg.stream_url = ""
+        self._reset_session_quality(cfg)
         self._set_status(cfg, ModelStatus.OFFLINE, "")
         if self.on_notification:
             self.on_notification("Recording Stopped",

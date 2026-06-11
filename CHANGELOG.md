@@ -10,6 +10,46 @@ entries are grouped by date / milestone.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## 2026-06-11 — High-concurrency fixes & quality control
+
+### Added
+- **Quality caps.** Global "Max Quality (all models)" dropdown in Settings
+  (Unlimited / 1080p / 720p / 480p) plus a per-model override in the model
+  right-click menu (single and multi-select). Resolution order:
+  per-model → global → unlimited. Applied by the relay when a recording
+  (re)starts; if a stream has no variant at/below the cap, the lowest
+  available is used. Stripchat is not capped (it bypasses variant selection).
+- **⬇ Auto-Downgrade Struggling Streams** (Settings checkbox, off by default).
+  A stream that loses ≥10 s of video within a 60 s window is restarted one
+  quality step lower (720p → 480p → 240p), with a 2-minute cooldown between
+  steps. Only the struggling stream is touched; models with a manual quality
+  override are never auto-downgraded. The downgrade is session-only — it
+  resets when the model's recording ends.
+- **Beta log file in the app directory.** `streamrecorder.log` (rotating,
+  5 MB × 3) next to `app.py` captures the Activity Log, ffmpeg stderr, relay
+  warnings, and thread tracebacks; crash dumps go to
+  `streamrecorder_crash.log`. Previously a 1 MB hidden file in the home dir.
+
+### Fixed
+- **Mass segment loss with many concurrent recordings.** The relay's shared
+  prefetch pool starved at ~10–15 simultaneous streams: 16 workers, each
+  stallable for up to 60 s (3 × 20 s retries), and a 300 MB cache cap that
+  silently disabled prefetching entirely. Now 64 workers, fail-fast segment
+  fetches (2 tries, 5 s connect / 10 s read), 768 MB cache cap with a logged
+  warning when hit, and a larger upstream connection pool (32/128).
+- **ffmpeg "Error number -138" connecting to the relay.** The relay's listen
+  backlog was the Python default of 5 pending connections; raised to 128 so
+  dozens of concurrent ffmpeg processes don't get connection-refused.
+- **Bogus upload-meter spikes** (e.g. ↑760 Mbps on a 200 Mbps line): TDLib
+  reports a file as instantly uploaded when Telegram dedupes or resumes it;
+  such physically implausible samples are now discarded.
+
+## 2026-06 — Documentation
+
 ### Added
 - **`RercordingLogics.md`** — full per-site technical reference ("how to make it
   work") covering the relay, resolvers, Stripchat MOUFLON/Playwright paths, the

@@ -39,6 +39,7 @@ class AppSettings:
     gap_warnings_enabled: bool = True          # toast when segments are dropped
     privacy_mode_enabled: bool = False         # idle screen cover (starfield)
     max_quality: int = 0                       # global cap: variant height px (0 = unlimited)
+    auto_downgrade_enabled: bool = False       # step struggling streams down a quality rung
     models: List[dict] = None                  # [{name, site, auto_rec, max_q}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list
     # Pipeline / Telegram upload — persisted to PIPELINE_CONFIG_FILE
@@ -100,6 +101,7 @@ def load_settings() -> AppSettings:
     s.gap_warnings_enabled = main.get("gap_warnings_enabled", s.gap_warnings_enabled)
     s.privacy_mode_enabled = main.get("privacy_mode_enabled", s.privacy_mode_enabled)
     s.max_quality = main.get("max_quality", s.max_quality)
+    s.auto_downgrade_enabled = main.get("auto_downgrade_enabled", s.auto_downgrade_enabled)
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
 
@@ -135,6 +137,7 @@ def save_settings(s: AppSettings):
         "gap_warnings_enabled": s.gap_warnings_enabled,
         "privacy_mode_enabled": s.privacy_mode_enabled,
         "max_quality": s.max_quality,
+        "auto_downgrade_enabled": s.auto_downgrade_enabled,
         "models": s.models,
         "saved_models": s.saved_models,
     }

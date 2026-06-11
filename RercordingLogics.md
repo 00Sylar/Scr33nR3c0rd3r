@@ -59,9 +59,12 @@ fetches upstream using Python's `requests`. This solves four problems at once:
    mid-segment (Schannel error -10054, "session has been invalidated"), which
    truncates fMP4 segments and corrupts the `.ts`. `requests` downloads the same
    bytes reliably.
-2. **Quality pinning** — the relay rewrites the master playlist to keep **only
-   the highest-BANDWIDTH variant** (`_select_highest_variant`), so ffmpeg
-   physically cannot fall back to a lower resolution mid-recording.
+2. **Quality pinning & caps** — the relay rewrites the master playlist to keep
+   **only one variant** (`_select_highest_variant`), so ffmpeg physically
+   cannot fall back to a lower resolution mid-recording. By default that's the
+   highest-BANDWIDTH variant; if a quality cap applies (see §1b), it's the
+   highest-bandwidth variant whose `RESOLUTION` height is ≤ the cap (lowest
+   available as fallback if every variant is above the cap).
 3. **Parallel prefetch** — ffmpeg's HLS demuxer fetches segments one at a time;
    if a download is slower than the segment duration it falls permanently behind
    the live window and segments expire (causing 1–2 s timestamp jumps). The
@@ -72,6 +75,22 @@ fetches upstream using Python's `requests`. This solves four problems at once:
    counted (`bytes_downloaded()` drives the `↓ Mbps` meter). Segments that
    expire from the playlist before they could be fetched are reported via a gap
    callback (Activity Log + optional toast).
+
+### Concurrency sizing (learned the hard way)
+
+The prefetch pool is **shared by all streams**: with N concurrent recordings
+and ~2 s segments it must complete ~N/2 downloads per second. The original
+16 workers — each stallable for up to 60 s (3 × 20 s retries) — starved at
+~10–15 streams, making *every* stream drop segments at once. Current sizing,
+validated at ~50 concurrent recordings:
+
+| Knob | Value | Why |
+|---|---|---|
+| `_PREFETCH_WORKERS` | 64 | ~N/2 downloads/s for N≈50 streams with headroom |
+| prefetch fetch budget | 2 tries, 5 s connect / 10 s read | a live segment only exists ~10–20 s; fail fast, next playlist refresh retries |
+| `_CACHE_MAX_BYTES` | 768 MB | 300 MB silently disabled prefetching at high N; a warning now logs if the cap is hit |
+| HTTP pool | 32 hosts / 128 connections | workers must never block on a free connection |
+| `request_queue_size` | 128 | listen-backlog default of 5 refused bursts of ffmpeg connections (ffmpeg "Error number -138") |
 
 ### How wrapping works
 
@@ -99,6 +118,45 @@ belt-and-suspenders measure.
 doppiocdn (Stripchat) and the other CDNs reject segment requests without a
 matching `Referer`/`Origin`. The relay injects the correct ones per `mode`
 (see `_REFERERS` in `cb_relay.py`).
+
+---
+
+## 1b. Quality caps & auto-downgrade
+
+The relay calls `cb_relay.set_quality_callback(fn)` — registered by
+`StreamRecorder` as `effective_quality(label)` — each time it fetches a
+**master** playlist (i.e. on recording start/restart, never mid-stream).
+The returned int is the max variant height in pixels (0 = unlimited).
+
+**Resolution order** (`recorder.effective_quality`):
+
+```
+session auto-downgrade  >  per-model override  >  global setting  >  unlimited
+   (recorder._session_q)   (app right-click menu)  (Settings dropdown)
+```
+
+- The per-model overrides live in the app (`_model_q`, persisted per model as
+  `max_q` in the config JSON) and are shared with the recorder by reference.
+- Caps only apply to `chaturbate` / `camsoda` / `myfreecams` modes —
+  **Stripchat bypasses `_select_highest_variant`** (its native path resolves a
+  keyed variant directly; the Playwright path bypasses the relay entirely).
+
+**Auto-downgrade** (`recorder._maybe_downgrade`, opt-in via the Settings
+checkbox → `auto_downgrade_enabled`): driven by the relay's gap callback. If a
+stream loses ≥ `10 s` of video within a `60 s` window, the recorder:
+
+1. picks the next rung below the current effective cap from `(720, 480, 240)`,
+2. records it in `_session_q[label]` (session-only),
+3. gracefully stops ffmpeg — the normal exit handler restarts it, the relay
+   re-queries `effective_quality()`, and the lower variant gets pinned.
+
+Guards: 2-minute cooldown per stream after each step (the restart itself is
+briefly unstable); models with a per-model override are **never** touched
+(explicit user choice); stripchat labels are skipped; at the bottom rung it
+just logs. `_session_q` is cleared when the recording ends naturally (offline,
+private, manual stop) so the next session starts back at configured quality.
+A downgrade restart resets `restart_count` so it doesn't consume the
+3-attempt crash-restart budget.
 
 ---
 
@@ -310,8 +368,12 @@ cached video state so the recorder can show `PRIVATE` without a second round-tri
 | Camsoda "extension not whitelisted" | Relay extension-normalize regressed | `_wrap_url` (.m4s) + `-allowed_extensions ALL` |
 | MFC always OFFLINE | serverconfig/protocol drift, or no playlist candidate answered | `mfc._candidate_urls`, `mfc.lookup` |
 | `.ts` files corrupt/unplayable | ffmpeg killed instead of graceful 'q' | `graceful_stop` |
-| Recording drops segments (⚠ warnings) | Total bandwidth saturated | relay gap callback; record fewer models |
+| Recording drops segments (⚠ warnings) | Total bandwidth saturated | set a Max Quality cap / enable auto-downgrade; relay gap callback |
+| ALL streams drop segments at once | Prefetch pool starved or cache cap hit | §1 concurrency sizing; look for "prefetch cache full" in `streamrecorder.log` |
+| ffmpeg "Error number -138" to 127.0.0.1 | Relay listen backlog overflow | `_QuietServer.request_queue_size` |
 | Quality silently dropped mid-recording | `_select_highest_variant` not applied | relay `mode` not set, or master not pinned |
+| Stream records at lower quality than expected | Quality cap or session auto-downgrade active | §1b; Activity Log "⬇" lines; right-click → Max Quality |
+| Upload meter shows impossible speeds | TDLib dedupe/resume reports instant upload | `_bw_tick` spike filter in `app.py` |
 
 ---
 
@@ -319,5 +381,17 @@ cached video state so the recorder can show `PRIVATE` without a second round-tri
 
 Each 1080p stream needs roughly **5–6 Mbps sustained**. If many simultaneous
 recordings drop segments (watch for ⚠ warnings), the total internet connection
-is the bottleneck — record fewer models at once. The `↓ Mbps` header meter shows
-Scr33nX's total upstream download traffic (relay-routed sites only).
+is the bottleneck. Remedies, in order: set a global **Max Quality** cap
+(720p roughly halves usage vs. unlimited), enable **⬇ Auto-Downgrade** so only
+the streams that can't keep up lose quality (§1b), or record fewer models at
+once. The `↓ Mbps` header meter shows Scr33nX's total upstream download
+traffic (relay-routed sites only).
+
+## 6. Beta logging
+
+`streamrecorder.log` (app directory, rotating 5 MB × 3, UTF-8) receives
+everything: Activity Log lines, per-stream ffmpeg stderr, relay warnings
+(including "prefetch cache full"), and background-thread tracebacks — with
+thread names. `streamrecorder_crash.log` captures hard interpreter crashes
+via `faulthandler`. Both are gitignored. When something misbehaves, start
+there.
