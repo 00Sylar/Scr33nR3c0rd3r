@@ -5,9 +5,21 @@
   "description": "Add Chaturbate / Stripchat / CamSoda models to Scr33nX with one click.",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["http://localhost:5200/*"],
+  "icons": {
+    "16": "icons/devil16.png",
+    "32": "icons/devil32.png",
+    "48": "icons/devil48.png",
+    "128": "icons/devil128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Scr33nX"
+    "default_title": "Scr33nX",
+    "default_icon": {
+      "16": "icons/devil16.png",
+      "32": "icons/devil32.png",
+      "48": "icons/devil48.png",
+      "128": "icons/devil128.png"
+    }
   },
   "browser_specific_settings": {
     "gecko": {
