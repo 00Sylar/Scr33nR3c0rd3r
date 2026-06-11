@@ -65,11 +65,17 @@ class PipelineWorker:
         self.prompt_cb = prompt_cb or (lambda label: "")
 
         self._shutdown = False
+        self._ul_done = 0            # bytes of fully-uploaded files
+        self._ul_inflight: dict = {} # upload slot → bytes sent of current file
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._clients: list = []
 
     # ── Public control ───────────────────────────────────────────────────────
+
+    def bytes_uploaded(self) -> int:
+        """Total bytes sent to Telegram (completed files + in-flight progress)."""
+        return self._ul_done + sum(self._ul_inflight.values())
 
     @property
     def running(self) -> bool:
@@ -260,11 +266,13 @@ class PipelineWorker:
                     _st["last_sent"] = sent
                     _st["last_ts"] = now
                 pct = min(100.0, sent * 100.0 / _fs)
+                self._ul_inflight[_k] = sent
                 self.on_progress(_k, _n, pct, _st["speed"])
 
             caption = _extract_model(name)
             try:
                 await td.send_video(path, caption=caption, progress_cb=_cb)
+                self._ul_done += file_size
                 self._mark_uploaded(name)
                 try:
                     os.remove(path)
@@ -276,6 +284,7 @@ class PipelineWorker:
             except Exception as e:
                 self.on_log(f"[upload #{slot}] ✗ {name}: {e}")
             finally:
+                self._ul_inflight[kind] = 0
                 upload_queue.task_done()
 
     # ── Conversion ───────────────────────────────────────────────────────────

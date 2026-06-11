@@ -289,6 +289,7 @@ class StreamRecorderApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Scr33nX")
+        self._set_app_icon()
         self.geometry("1060x700")
         self.minsize(900, 520)
         self.configure(bg=BG)
@@ -322,11 +323,30 @@ class StreamRecorderApp(tk.Tk):
         self._privacy_init()
         self._bw_prev: Optional[tuple] = None   # (monotonic_ts, bytes_total)
         self._bw_mbps = 0.0
+        self._ul_prev: Optional[tuple] = None   # (monotonic_ts, bytes_uploaded)
+        self._ul_mbps = 0.0
         self.after(1000, self._bw_tick)
         self.after(5000, self._sync_monitor_buttons)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         if WinTray is not None:
             self.bind("<Unmap>", self._on_window_unmap)
+
+    # ── App icon ──────────────────────────────────────────────────────────────
+
+    def _set_app_icon(self):
+        base = os.path.dirname(os.path.abspath(__file__))
+        self._hdr_icon = None
+        try:
+            self.iconbitmap(os.path.join(base, "icons", "devil.ico"))
+        except Exception:
+            pass
+        try:
+            png = tk.PhotoImage(file=os.path.join(base, "icons", "devil.png"))
+            self.iconphoto(True, png)
+            # 512px source → ~28px header logo
+            self._hdr_icon = png.subsample(18, 18)
+        except Exception:
+            pass
 
     # ── Styles ────────────────────────────────────────────────────────────────
 
@@ -388,8 +408,12 @@ class StreamRecorderApp(tk.Tk):
         hdr = tk.Frame(self, bg=BG2, height=54)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        tk.Label(hdr, text="⬤", fg=ACCENT, bg=BG2,
-                 font=("Segoe UI", 17)).pack(side="left", padx=(16,4))
+        if self._hdr_icon is not None:
+            tk.Label(hdr, image=self._hdr_icon, bg=BG2
+                     ).pack(side="left", padx=(16, 6))
+        else:
+            tk.Label(hdr, text="⬤", fg=ACCENT, bg=BG2,
+                     font=("Segoe UI", 17)).pack(side="left", padx=(16,4))
         tk.Label(hdr, text="Scr33n", fg=TEXT, bg=BG2,
                  font=("Segoe UI Black", 15)).pack(side="left")
         tk.Label(hdr, text="X", fg=ACCENT, bg=BG2,
@@ -397,11 +421,14 @@ class StreamRecorderApp(tk.Tk):
         self._lbl_hdr_status = tk.Label(hdr, text="● IDLE", fg=TEXT3, bg=BG2,
                                          font=("Segoe UI Semibold", 10))
         self._lbl_hdr_status.pack(side="right", padx=12)
-        # Live bandwidth meter: download traffic of all active recordings,
-        # so the user can see when they approach their connection's limit.
+        # Live bandwidth meter: ↓ download of all active recordings,
+        # ↑ upload of the pipeline pushing to Telegram.
+        self._lbl_bw_up = tk.Label(hdr, text="↑ 0.0 Mbps", fg=TEXT3, bg=BG2,
+                                   font=("Segoe UI Semibold", 10))
+        self._lbl_bw_up.pack(side="right", padx=(0, 4))
         self._lbl_bw = tk.Label(hdr, text="↓ 0.0 Mbps", fg=TEXT3, bg=BG2,
                                 font=("Segoe UI Semibold", 10))
-        self._lbl_bw.pack(side="right", padx=(0, 4))
+        self._lbl_bw.pack(side="right", padx=(0, 10))
 
         tk.Frame(self, bg=ACCENT, height=2).pack(fill="x")
 
@@ -469,13 +496,13 @@ class StreamRecorderApp(tk.Tk):
         ttk.Entry(p, textvariable=self._v_interval).pack(fill="x", padx=16, pady=(2,8))
 
         self._v_tray = tk.BooleanVar(value=self.settings.minimize_to_tray)
-        tk.Checkbutton(p, text="Minimize to SysTray", variable=self._v_tray,
+        tk.Checkbutton(p, text="⤵ Minimize to SysTray", variable=self._v_tray,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,4))
 
         self._v_notif = tk.BooleanVar(value=self.settings.notifications_enabled)
-        tk.Checkbutton(p, text="Notifications", variable=self._v_notif,
+        tk.Checkbutton(p, text="🔔 Notifications", variable=self._v_notif,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,0))
@@ -1351,6 +1378,23 @@ class StreamRecorderApp(tk.Tk):
             self._lbl_bw.configure(text=f"↓ {mbps:.1f} Mbps", fg=GREEN)
         else:
             self._lbl_bw.configure(text="↓ 0.0 Mbps", fg=TEXT3)
+
+        # Upload: pipeline → Telegram
+        try:
+            ul_total = self.pipeline.bytes_uploaded() if self.pipeline else 0
+        except Exception:
+            ul_total = 0
+        if self._ul_prev is not None:
+            t0, b0 = self._ul_prev
+            dt = max(now - t0, 0.001)
+            # counter resets when the pipeline restarts → ignore negative deltas
+            cur = max(0.0, (ul_total - b0) * 8 / dt / 1_000_000)
+            self._ul_mbps = 0.6 * self._ul_mbps + 0.4 * cur
+        self._ul_prev = (now, ul_total)
+        if self._ul_mbps >= 0.05:
+            self._lbl_bw_up.configure(text=f"↑ {self._ul_mbps:.1f} Mbps", fg=ORANGE)
+        else:
+            self._lbl_bw_up.configure(text="↑ 0.0 Mbps", fg=TEXT3)
         self.after(1000, self._bw_tick)
 
     def _cb_log(self, line: str):

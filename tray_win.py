@@ -148,6 +148,20 @@ class WinTray:
             self._thread = None
         self.hwnd = None
 
+    @staticmethod
+    def _load_app_icon():
+        import os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "icons", "devil.ico")
+        if not os.path.isfile(path):
+            return None
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x0010
+        LR_DEFAULTSIZE = 0x0040
+        user32.LoadImageW.restype = wintypes.HANDLE
+        return user32.LoadImageW(None, path, IMAGE_ICON, 0, 0,
+                                 LR_LOADFROMFILE | LR_DEFAULTSIZE)
+
     # ── tray thread ───────────────────────────────────────────────────────────
 
     def _thread_main(self):
@@ -192,7 +206,7 @@ class WinTray:
             nid = self._nid()
             nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
             nid.uCallbackMessage = WM_APP_TRAY
-            nid.hIcon = user32.LoadIconW(0, IDI_APPLICATION)
+            nid.hIcon = self._load_app_icon() or user32.LoadIconW(0, IDI_APPLICATION)
             nid.szTip = self.tooltip[:127]
             if not shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid)):
                 user32.DestroyWindow(self.hwnd)
