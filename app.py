@@ -139,6 +139,9 @@ STATUS_COLORS = {
     ModelStatus.PRIVATE:   (YELLOW, "🔒  PRIVATE / TICKET"),
 }
 
+# Reverse map: status-cell label text → ModelStatus (drives the status filter)
+STATUS_BY_LABEL = {label: st for st, (_c, label) in STATUS_COLORS.items()}
+
 # Status tag names used in the Treeview
 STATUS_TAGS = {
     ModelStatus.OFFLINE:   "s_offline",
@@ -406,6 +409,14 @@ class StreamRecorderApp(tk.Tk):
         self._saved_data: dict[str, dict] = {}
         self._saved_built = False
         self._filter_jobs: dict[str, Optional[str]] = {"rec": None, "saved": None}
+        # Row checkboxes (☐/☑ glyph in the name column): an explicit working
+        # set per tab. When any row is checked, bulk actions operate on the
+        # checked set instead of the click-selection.
+        self._checked: set[str] = set()
+        self._saved_checked: set[str] = set()
+        # Press-row per tree, drives drag-selection (press a row, drag down →
+        # the whole range gets selected, like a rubber band over a list)
+        self._drag_anchor: dict[str, Optional[str]] = {"rec": None, "saved": None}
         self._build_styles()
         self._build_ui()
         self._restore_models()
@@ -487,6 +498,10 @@ class StreamRecorderApp(tk.Tk):
               selectforeground=[("readonly", TEXT)])
         s.configure("Vertical.TScrollbar", background=BG3, troughcolor=BG2,
                     relief="flat", arrowcolor=TEXT3, borderwidth=0)
+        s.configure("TMenubutton", background=BG3, foreground=TEXT,
+                    arrowcolor=TEXT2, relief="flat", padding=(8, 4),
+                    font=("Segoe UI", 9))
+        s.map("TMenubutton", background=[("active", BORDER)])
         s.configure("TNotebook", background=BG, borderwidth=0, tabmargins=0)
         s.configure("TNotebook.Tab", background=BG2, foreground=TEXT2,
                     font=("Segoe UI Semibold", 10), padding=(16, 8), borderwidth=0)
@@ -686,6 +701,8 @@ class StreamRecorderApp(tk.Tk):
         self._lbl_selected = tk.Label(bar, text="0 selected",
             fg=TEXT3, bg=BG2, font=("Segoe UI", 9))
         self._lbl_selected.pack(side="left", padx=(12, 10))
+        # Clicking the counter clears the checked set
+        self._lbl_selected.bind("<Button-1>", lambda e: self._uncheck_all("rec"))
 
         ttk.Button(bar, text="▶ REC", style="Green.TButton",
                    command=self._rec_selected).pack(side="left", padx=(0,4), pady=5)
@@ -708,6 +725,8 @@ class StreamRecorderApp(tk.Tk):
                   ).pack(side="left", padx=(2, 0), pady=8)
         self._v_filter_rec.trace_add(
             "write", lambda *a: self._schedule_filter("rec"))
+        self._mb_status_rec = self._build_status_menubutton(bar, "rec")
+        self._mb_status_rec.pack(side="left", padx=(4, 0), pady=5)
 
         self._btn_monitor_rec = ttk.Button(bar, text="▶  START MONITOR",
                                             style="Green.TButton",
@@ -764,6 +783,9 @@ class StreamRecorderApp(tk.Tk):
 
         # Bindings
         self._tree.bind("<Button-1>", self._on_tree_click)
+        self._tree.bind("<B1-Motion>", lambda e: self._on_tree_drag(e, "rec"))
+        self._tree.bind("<ButtonRelease-1>",
+                        lambda e: self._end_tree_drag("rec"), add="+")
         self._tree.bind("<<TreeviewSelect>>", lambda e: self._on_tree_select())
         self._tree.bind("<Button-3>", self._on_tree_right_click)
         self._tree.bind("<Control-a>", lambda e: self._select_all(self._tree))
@@ -784,8 +806,115 @@ class StreamRecorderApp(tk.Tk):
         self._tree.insert("", "end", iid=site_id, text=f"  {label}",
                           values=("", "", "", ""), tags=("site_hdr",), open=True)
 
+    # ── Row checkboxes ────────────────────────────────────────────────────────
+    # Tk's Treeview has no native checkbox column, and nothing can sit left of
+    # the name column — so the checkbox is a ☐/☑ glyph prefixed to the name
+    # (same trick as the AUTO column). Clicking the glyph zone toggles it.
+
+    @staticmethod
+    def _row_name(tree, iid) -> str:
+        return tree.item(iid, "text").lstrip("☐☑ ")
+
+    def _set_row_glyph(self, tree, iid, checked: bool):
+        tree.item(iid, text=f"{'☑' if checked else '☐'}  {self._row_name(tree, iid)}")
+
+    def _toggle_check(self, tree, iid, checked: set):
+        if iid in checked:
+            checked.discard(iid)
+        else:
+            checked.add(iid)
+        self._set_row_glyph(tree, iid, iid in checked)
+        if tree is self._tree:
+            self._update_selection_label()
+        else:
+            self._update_saved_count()
+
+    def _check_all_visible(self, which: str):
+        """Check every row currently visible (respects active filters)."""
+        if which == "rec":
+            tree, rows, checked = self._tree, self._rows, self._checked
+        else:
+            tree, rows, checked = self._stree, self._saved_rows, self._saved_checked
+        for iid in rows:
+            # attached to a site header = visible (filters detach hidden rows)
+            if iid not in checked and tree.exists(iid) and tree.parent(iid):
+                checked.add(iid)
+                self._set_row_glyph(tree, iid, True)
+        self._update_selection_label()
+        self._update_saved_count()
+
+    def _uncheck_all(self, which: str):
+        if which == "rec":
+            tree, checked = self._tree, self._checked
+        else:
+            tree, checked = self._stree, self._saved_checked
+        for iid in list(checked):
+            if tree.exists(iid):
+                self._set_row_glyph(tree, iid, False)
+        checked.clear()
+        self._update_selection_label()
+        self._update_saved_count()
+
+    # ── Drag selection ────────────────────────────────────────────────────────
+    # ttk.Treeview has Shift+click (range) and Ctrl+click (toggle) built in,
+    # but no press-and-drag selection — added here: drag from a row across
+    # others to select the whole range, with edge auto-scroll.
+
+    @staticmethod
+    def _visible_rows(tree) -> list:
+        rows = []
+        for hdr in tree.get_children(""):
+            rows.extend(tree.get_children(hdr))
+        return rows
+
+    def _on_tree_drag(self, event, which: str):
+        anchor = self._drag_anchor.get(which)
+        tree = self._tree if which == "rec" else self._stree
+        if not anchor or not tree.exists(anchor):
+            return
+        h = tree.winfo_height()
+        if event.y < 12:
+            tree.yview_scroll(-1, "units")
+        elif event.y > h - 12:
+            tree.yview_scroll(1, "units")
+        cur = tree.identify_row(min(max(event.y, 1), h - 1))
+        prefix = "_site_" if which == "rec" else "_ssite_"
+        if not cur or cur.startswith(prefix):
+            return "break"
+        rows = self._visible_rows(tree)
+        try:
+            i0, i1 = rows.index(anchor), rows.index(cur)
+        except ValueError:
+            return "break"
+        if i0 > i1:
+            i0, i1 = i1, i0
+        tree.selection_set(rows[i0:i1 + 1])
+        return "break"
+
+    def _end_tree_drag(self, which: str):
+        self._drag_anchor[which] = None
+
+    def _check_selection(self, which: str):
+        """Convert the current click-selection into checked boxes."""
+        if which == "rec":
+            tree, checked, prefix = self._tree, self._checked, "_site_"
+        else:
+            tree, checked, prefix = self._stree, self._saved_checked, "_ssite_"
+        for iid in tree.selection():
+            if not iid.startswith(prefix) and iid not in checked:
+                checked.add(iid)
+                self._set_row_glyph(tree, iid, True)
+        self._update_selection_label()
+        self._update_saved_count()
+
     def _update_selection_label(self):
-        sel = self._get_selected_keys()
+        n_chk = len(self._checked)
+        if n_chk:
+            # Checked set takes priority — make that visible. Click to clear.
+            self._lbl_selected.configure(text=f"✓ {n_chk} checked", fg=ACCENT)
+            return
+        sel = [iid for iid in self._tree.selection()
+               if not iid.startswith("_site_")]
         n = len(sel)
         self._lbl_selected.configure(
             text=f"{n} selected" if n else "0 selected",
@@ -824,12 +953,15 @@ class StreamRecorderApp(tk.Tk):
                 self._add_to_saved(n, s)
 
     def _get_selected_keys(self) -> list[str]:
-        """Return selected model keys (skip site headers)."""
+        """Model keys for bulk actions: the checked set when any row is
+        checked, otherwise the click-selection (site headers skipped)."""
+        if self._checked:
+            return [k for k in self._checked if self._tree.exists(k)]
         return [iid for iid in self._tree.selection()
                 if not iid.startswith("_site_")]
 
     def _on_tree_click(self, event):
-        """Toggle AUTO when clicking the auto column."""
+        """Toggle the row checkbox (name-column glyph) or AUTO."""
         region = self._tree.identify_region(event.x, event.y)
         if region not in ("cell", "tree"):
             return
@@ -837,6 +969,15 @@ class StreamRecorderApp(tk.Tk):
         iid = self._tree.identify_row(event.y)
         if not iid or iid.startswith("_site_"):
             return
+        modified = event.state & 0x0005  # Shift (1) / Control (4) held
+        if col == "#0" and event.x <= 48 and not modified:
+            # Plain click on the glyph toggles the check; with Shift/Ctrl the
+            # click falls through so native range/toggle selection works
+            # everywhere in the row.
+            self._toggle_check(self._tree, iid, self._checked)
+            return "break"  # don't let the click also change the selection
+        if not modified:
+            self._drag_anchor["rec"] = iid  # start of a possible drag-select
         # col "#5" = the 4th data column = "auto" (since #0 is tree column,
         # #1=status, #2=file, #3=size, #4=auto)
         if col == "#4":
@@ -872,7 +1013,7 @@ class StreamRecorderApp(tk.Tk):
             m.add_cascade(label=f"🎞  Max Quality  ({self._quality_text(iid)})",
                           menu=self._build_quality_menu([iid]))
             sid_check = self._saved_key(name, site)
-            if sid_check in self._saved_rows:
+            if sid_check in self._saved_data:
                 m.add_command(label="✕  Remove from Saved Models",
                               command=lambda s=sid_check: self._remove_saved(s))
             else:
@@ -901,6 +1042,18 @@ class StreamRecorderApp(tk.Tk):
                           command=lambda: os.startfile(self.settings.output_dir))
             m.add_command(label=f"✕  Remove  ({n} selected)",
                           command=self._remove_selected)
+
+        m.add_separator()
+        raw_sel = [i for i in self._tree.selection()
+                   if not i.startswith("_site_")]
+        if raw_sel:
+            m.add_command(label=f"☑  Check Selected  ({len(raw_sel)})",
+                          command=lambda: self._check_selection("rec"))
+        m.add_command(label="☑  Check All Visible",
+                      command=lambda: self._check_all_visible("rec"))
+        if self._checked:
+            m.add_command(label=f"☐  Uncheck All  ({len(self._checked)})",
+                          command=lambda: self._uncheck_all("rec"))
 
         m.tk_popup(event.x_root, event.y_root)
 
@@ -978,8 +1131,9 @@ class StreamRecorderApp(tk.Tk):
             if not children:
                 continue
             if col == "#0":
+                # lstrip the checkbox glyph so checked rows don't sort apart
                 children.sort(
-                    key=lambda iid: tree.item(iid, "text").strip().lower(),
+                    key=lambda iid: tree.item(iid, "text").lstrip("☐☑ ").lower(),
                     reverse=reverse)
             elif col == "size":
                 children.sort(
@@ -1091,12 +1245,13 @@ class StreamRecorderApp(tk.Tk):
         parent = f"_site_{site}"
         auto_text  = "☑" if auto_rec else "☐"
         saved_text = "✔️" if self._saved_key(name, site) in self._saved_data else "❌"
-        self._tree.insert(parent, "end", iid=key, text=f"  {name}",
+        self._tree.insert(parent, "end", iid=key, text=f"☐  {name}",
                           values=("●  OFFLINE", "—", "—", auto_text, saved_text),
                           tags=("s_offline",))
         self._rows[key] = True
         self._auto_rec[key] = auto_rec
-        if self._v_filter_rec.get().strip():
+        if (self._v_filter_rec.get().strip()
+                or self._status_filter_set("rec") is not None):
             self._schedule_filter("rec")  # respect an active filter
 
     def _do_remove_from_recorder(self, name: str, site: str):
@@ -1109,6 +1264,7 @@ class StreamRecorderApp(tk.Tk):
         self._rows.pop(key, None)
         self._auto_rec.pop(key, None)
         self._model_q.pop(key, None)
+        self._checked.discard(key)
         site_id = f"_site_{site}"
         if self._tree.exists(site_id) and not self._tree.get_children(site_id):
             self._tree.delete(site_id)
@@ -1137,6 +1293,7 @@ class StreamRecorderApp(tk.Tk):
             self._rows.pop(key, None)
             self._auto_rec.pop(key, None)
             self._model_q.pop(key, None)
+            self._checked.discard(key)
             site_id = f"_site_{site}"
             if self._tree.exists(site_id) and not self._tree.get_children(site_id):
                 self._tree.delete(site_id)
@@ -1547,6 +1704,8 @@ class StreamRecorderApp(tk.Tk):
                             ModelStatus.CHECKING, ModelStatus.PRIVATE):
                 self._stree.set(sid, "file", "—")
                 self._stree.set(sid, "size", "—")
+            if self._status_filter_set("saved") is not None:
+                self._schedule_filter("saved")  # status changed → re-filter
 
         if key not in self._rows or not self._tree.exists(key):
             return
@@ -1587,6 +1746,8 @@ class StreamRecorderApp(tk.Tk):
         # Coalesced: _stats_tick recomputes at most twice a second instead of
         # one full row scan per status callback.
         self._stats_dirty = True
+        if self._status_filter_set("rec") is not None:
+            self._schedule_filter("rec")  # status changed → re-filter (debounced)
 
     def _bw_tick(self):
         """Update the header bandwidth meter once a second from the relay's
@@ -1684,13 +1845,17 @@ class StreamRecorderApp(tk.Tk):
         self._lbl_saved_count = tk.Label(bar, text="0 model(s)", fg=TEXT2,
                                          bg=BG2, font=("Segoe UI Semibold", 9))
         self._lbl_saved_count.pack(side="left", padx=(0, 8))
+        self._lbl_saved_count.bind("<Button-1>",
+                                   lambda e: self._uncheck_all("saved"))
         tk.Label(bar, text="🔎", fg=TEXT3, bg=BG2,
                  font=("Segoe UI", 9)).pack(side="left")
         self._v_filter_saved = tk.StringVar()
-        ttk.Entry(bar, textvariable=self._v_filter_saved, width=16
+        ttk.Entry(bar, textvariable=self._v_filter_saved, width=14
                   ).pack(side="left", padx=(2, 0), pady=8)
         self._v_filter_saved.trace_add(
             "write", lambda *a: self._schedule_filter("saved"))
+        self._mb_status_saved = self._build_status_menubutton(bar, "saved")
+        self._mb_status_saved.pack(side="left", padx=(4, 0), pady=5)
         self._btn_monitor_saved = ttk.Button(bar, text="▶  START SCANNER",
                                               style="Green.TButton",
                                               command=self._toggle_monitor_saved)
@@ -1734,6 +1899,10 @@ class StreamRecorderApp(tk.Tk):
         self._stree.tag_configure("site_hdr", foreground=ACCENT,
                                    font=("Segoe UI Semibold", 9))
 
+        self._stree.bind("<Button-1>", self._on_stree_click)
+        self._stree.bind("<B1-Motion>", lambda e: self._on_tree_drag(e, "saved"))
+        self._stree.bind("<ButtonRelease-1>",
+                         lambda e: self._end_tree_drag("saved"), add="+")
         self._stree.bind("<Button-3>", self._on_stree_right_click)
         self._stree.bind("<Control-a>", lambda e: self._select_all(self._stree))
 
@@ -1763,7 +1932,8 @@ class StreamRecorderApp(tk.Tk):
             # _saved_sync_from_recorder (status/file mirror)
             self._insert_saved_model(d["name"], d["site"])
         self._update_saved_count()
-        if self._v_filter_saved.get().strip():
+        if (self._v_filter_saved.get().strip()
+                or self._status_filter_set("saved") is not None):
             self._filter_saved()
 
     def _register_saved_models(self):
@@ -1777,16 +1947,57 @@ class StreamRecorderApp(tk.Tk):
                           f"for scanning.")
 
     def _update_saved_count(self, visible: Optional[int] = None):
+        if visible is not None:
+            self._saved_visible = visible  # remember across check toggles
         total = len(self._saved_data)
-        if visible is not None and visible < total:
-            txt = f"{visible} / {total} shown"
+        vis = getattr(self, "_saved_visible", None)
+        if vis is not None and vis < total:
+            txt = f"{vis} / {total} shown"
         else:
             txt = f"{total} model(s)"
+        if self._saved_checked:
+            txt += f"  ·  ✓ {len(self._saved_checked)}"
         self._lbl_saved_count.configure(text=txt)
 
     # ── Tree filtering ────────────────────────────────────────────────────────
 
     _SITE_ORDER = ("chaturbate", "stripchat", "camsoda", "myfreecams")
+    _FILTER_STATUSES = (ModelStatus.ONLINE, ModelStatus.RECORDING,
+                        ModelStatus.OFFLINE, ModelStatus.PRIVATE,
+                        ModelStatus.CHECKING, ModelStatus.ERROR)
+
+    def _build_status_menubutton(self, bar, which: str) -> ttk.Menubutton:
+        """'Status ▾' dropdown with one checkbox per status — any combination
+        (e.g. Online + Recording). Nothing checked = show all."""
+        svars = {st: tk.BooleanVar(value=False) for st in self._FILTER_STATUSES}
+        if which == "rec":
+            self._status_vars_rec = svars
+        else:
+            self._status_vars_saved = svars
+        mb = ttk.Menubutton(bar, text="Status: All", style="TMenubutton")
+        menu = tk.Menu(mb, tearoff=0, bg=BG3, fg=TEXT, activebackground=BG2,
+                       activeforeground=ACCENT, font=UI, relief="flat", bd=0)
+        for st, var in svars.items():
+            menu.add_checkbutton(label=st.value.title(), variable=var,
+                                 command=lambda w=which: self._on_status_filter(w))
+        mb["menu"] = menu
+        return mb
+
+    def _status_filter_set(self, which: str) -> Optional[set]:
+        """Checked statuses, or None when the filter is inactive (none or all
+        checked — both mean 'show everything')."""
+        svars = getattr(self, "_status_vars_rec" if which == "rec"
+                        else "_status_vars_saved", None)
+        if not svars:
+            return None
+        sel = {st for st, v in svars.items() if v.get()}
+        return sel if sel and len(sel) < len(svars) else None
+
+    def _on_status_filter(self, which: str):
+        sel = self._status_filter_set(which)
+        mb = self._mb_status_rec if which == "rec" else self._mb_status_saved
+        mb.configure(text="Status: All" if sel is None else f"Status: {len(sel)}")
+        self._schedule_filter(which)
 
     def _on_tab_changed(self, event=None):
         if self._nb.select() == str(self._tab_saved):
@@ -1804,21 +2015,25 @@ class StreamRecorderApp(tk.Tk):
     def _filter_recorder(self):
         self._filter_jobs["rec"] = None
         self._filter_tree(self._tree, list(self._rows),
-                          self._v_filter_rec.get(), "_site_")
+                          self._v_filter_rec.get(), "_site_",
+                          self._status_filter_set("rec"))
 
     def _filter_saved(self):
         self._filter_jobs["saved"] = None
         if not self._saved_built:
             return  # rows not built yet — _populate_saved_tab applies it
         visible = self._filter_tree(self._stree, list(self._saved_rows),
-                                    self._v_filter_saved.get(), "_ssite_")
+                                    self._v_filter_saved.get(), "_ssite_",
+                                    self._status_filter_set("saved"))
         self._update_saved_count(visible)
 
-    def _filter_tree(self, tree, row_iids, query, hdr_prefix) -> int:
-        """Show only rows whose model name contains `query`; the rest are
-        detached (hidden, not deleted — values keep updating and reattach
-        when the filter clears). Site headers with no visible rows are hidden
-        too. Returns the number of visible rows."""
+    def _filter_tree(self, tree, row_iids, query, hdr_prefix,
+                     statuses: Optional[set] = None) -> int:
+        """Show only rows whose model name contains `query` AND (when a
+        status set is given) whose status is in it; the rest are detached
+        (hidden, not deleted — values keep updating and reattach when the
+        filter clears). Site headers with no visible rows are hidden too.
+        Returns the number of visible rows."""
         q = query.strip().lower()
         sites_seen: list[str] = []
         sites_visible: set[str] = set()
@@ -1831,7 +2046,10 @@ class StreamRecorderApp(tk.Tk):
                 sites_seen.append(site)
             if not tree.exists(iid) or not tree.exists(hdr):
                 continue
-            if not q or q in name.lower():
+            ok = not q or q in name.lower()
+            if ok and statuses is not None:
+                ok = STATUS_BY_LABEL.get(tree.set(iid, "status")) in statuses
+            if ok:
                 tree.move(iid, hdr, "end")
                 sites_visible.add(site)
                 shown += 1
@@ -1870,13 +2088,14 @@ class StreamRecorderApp(tk.Tk):
             return
         self._saved_ensure_site(site)
         parent = f"_ssite_{site}"
-        self._stree.insert(parent, "end", iid=sid, text=f"  {name}",
+        self._stree.insert(parent, "end", iid=sid, text=f"☐  {name}",
                            values=("●  OFFLINE", "—", "—"),
                            tags=("s_offline",))
         self._saved_rows[sid] = True
         # Refresh initial size/status
         self._saved_sync_from_recorder(name, site)
-        if self._saved_built and self._v_filter_saved.get().strip():
+        if self._saved_built and (self._v_filter_saved.get().strip()
+                                  or self._status_filter_set("saved") is not None):
             self._schedule_filter("saved")  # respect an active filter
 
     def _saved_sync_from_recorder(self, name: str, site: str):
@@ -1926,7 +2145,7 @@ class StreamRecorderApp(tk.Tk):
         self._update_stats()
         self._log_add(f"Added to Recorder: {name} ({site})", "accent")
 
-    def _remove_saved(self, sid: str):
+    def _remove_saved(self, sid: str, persist: bool = True):
         # The row may not exist yet (lazy tab) — the data entry is what counts
         if sid not in self._saved_data and not self._stree.exists(sid):
             return
@@ -1935,17 +2154,70 @@ class StreamRecorderApp(tk.Tk):
         if self._stree.exists(sid):
             self._stree.delete(sid)
         self._saved_rows.pop(sid, None)
+        self._saved_checked.discard(sid)
         site_id = f"_ssite_{site}"
         if self._stree.exists(site_id) and not self._stree.get_children(site_id):
             self._stree.delete(site_id)
         self.recorder.remove_model(name, site, "saved")
-        self._update_saved_count()
         rec_key = f"{site}:{name}"
         if self._tree.exists(rec_key):
             self._tree.set(rec_key, "saved", "❌")
+        if persist:  # bulk callers persist/log once at the end instead
+            self._update_saved_count()
+            self._persist_models()
+            self._log_add(f"Removed from Saved Models: {name} ({site})", "warn")
+            self._update_saved_btn()
+
+    def _remove_saved_many(self, sids: list):
+        for sid in list(sids):
+            self._remove_saved(sid, persist=False)
+        self._update_saved_count()
         self._persist_models()
-        self._log_add(f"Removed from Saved Models: {name} ({site})", "warn")
         self._update_saved_btn()
+        self._log_add(f"Removed {len(sids)} model(s) from Saved Models", "warn")
+
+    def _add_many_to_recorder(self, sids: list):
+        added = 0
+        for sid in sids:
+            _, site, name = sid.split(":", 2)
+            key = f"{site}:{name}"
+            if key in self._rows:
+                continue  # already in the Recorder tab
+            self.recorder.add_model(name, site, "recorder", quiet=True)
+            self._insert_model(name, site)
+            added += 1
+        if added:
+            self._persist_models()
+            self._update_stats()
+        self._log_add(f"Added {added} model(s) to Recorder"
+                      + (f" ({len(sids) - added} already there)"
+                         if added < len(sids) else ""), "accent")
+
+    def _saved_targets(self, clicked: Optional[str] = None) -> list:
+        """Rows a saved-tab bulk action operates on: checked boxes first,
+        then the multi-selection, then just the clicked row."""
+        if self._saved_checked:
+            return [s for s in self._saved_checked if self._stree.exists(s)]
+        sel = [s for s in self._stree.selection() if not s.startswith("_ssite_")]
+        if sel:
+            return sel
+        return [clicked] if clicked else []
+
+    def _on_stree_click(self, event):
+        """Toggle the row checkbox in the Saved tab."""
+        region = self._stree.identify_region(event.x, event.y)
+        if region not in ("cell", "tree"):
+            return
+        col = self._stree.identify_column(event.x)
+        sid = self._stree.identify_row(event.y)
+        if not sid or sid.startswith("_ssite_"):
+            return
+        modified = event.state & 0x0005  # Shift / Control held
+        if col == "#0" and event.x <= 48 and not modified:
+            self._toggle_check(self._stree, sid, self._saved_checked)
+            return "break"
+        if not modified:
+            self._drag_anchor["saved"] = sid
 
     def _on_stree_right_click(self, event):
         sid = self._stree.identify_row(event.y)
@@ -1953,16 +2225,37 @@ class StreamRecorderApp(tk.Tk):
             return
         if sid not in self._stree.selection():
             self._stree.selection_set(sid)
-        _, site, name = sid.split(":", 2)
+        targets = self._saved_targets(sid)
+        n = len(targets)
         m = self._sctx
         m.delete(0, "end")
-        m.add_command(label=f"＋  Add to Recorder  {name}",
-                      command=lambda: self._add_to_recorder(name, site))
-        m.add_command(label="🔗  Copy Model URL",
-                      command=lambda: self._copy_model_url(name, site))
+        if n == 1:
+            _, site, name = targets[0].split(":", 2)
+            m.add_command(label=f"＋  Add to Recorder  {name}",
+                          command=lambda: self._add_to_recorder(name, site))
+            m.add_command(label="🔗  Copy Model URL",
+                          command=lambda: self._copy_model_url(name, site))
+            m.add_separator()
+            m.add_command(label="✕  Remove from Saved Models",
+                          command=lambda t=targets[0]: self._remove_saved(t))
+        else:
+            src = "checked" if self._saved_checked else "selected"
+            m.add_command(label=f"＋  Add to Recorder  ({n} {src})",
+                          command=lambda t=targets: self._add_many_to_recorder(t))
+            m.add_separator()
+            m.add_command(label=f"✕  Remove from Saved  ({n} {src})",
+                          command=lambda t=targets: self._remove_saved_many(t))
         m.add_separator()
-        m.add_command(label="✕  Remove from Saved Models",
-                      command=lambda: self._remove_saved(sid))
+        raw_sel = [s for s in self._stree.selection()
+                   if not s.startswith("_ssite_")]
+        if raw_sel:
+            m.add_command(label=f"☑  Check Selected  ({len(raw_sel)})",
+                          command=lambda: self._check_selection("saved"))
+        m.add_command(label="☑  Check All Visible",
+                      command=lambda: self._check_all_visible("saved"))
+        if self._saved_checked:
+            m.add_command(label=f"☐  Uncheck All  ({len(self._saved_checked)})",
+                          command=lambda: self._uncheck_all("saved"))
         m.tk_popup(event.x_root, event.y_root)
 
     def _saved_add_prompt(self):

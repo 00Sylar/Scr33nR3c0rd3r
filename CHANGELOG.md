@@ -8,6 +8,33 @@ grouped by date / milestone.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Status filter on both tabs.** A "Status ▾" dropdown next to the name
+  filter with one checkbox per status (Online, Recording, Offline, Private,
+  Checking, Error) — any combination works (e.g. Online + Recording).
+  Nothing checked = show all. The view updates live: a model whose status
+  changes moves in/out of the filtered list automatically, and the name
+  filter and status filter combine.
+- **Row checkboxes on both tabs.** A ☐/☑ box at the start of each model row
+  builds an explicit working set: when any rows are checked, every bulk
+  action (REC, Stop, Toggle AUTO, Remove, Add to Saved, right-click menu)
+  operates on the checked rows instead of the click-selection. The counter
+  label shows "✓ N checked" (click it to clear). Right-click offers
+  "Check All Visible" (respects active filters — e.g. filter to Online,
+  check all, act) and "Uncheck All". Checks survive filtering and sorting.
+- **Faster multi-selection.** Press-and-drag across rows selects the whole
+  range (with edge auto-scroll); Shift+click range-select and Ctrl+click
+  toggle now work everywhere in the row (the checkbox zone ignores modified
+  clicks); right-click "Check Selected" converts the highlight into checked
+  boxes in one step.
+- **Saved-tab bulk actions.** Right-click acts on the checked set (or the
+  multi-selection): "Add to Recorder (N)" with duplicate-skipping and
+  "Remove from Saved (N)" with a single log/persist instead of N.
+
+---
+
 ## V1.0 — 2026-06-11
 
 ### Added
