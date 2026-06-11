@@ -17,6 +17,7 @@ ffmpeg can record Stripchat without a browser.
 """
 
 import re
+import logging
 import threading
 import time
 import urllib.parse
@@ -24,6 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -37,7 +40,9 @@ _user_agent = _DEFAULT_UA
 _session = requests.Session()
 # All streams hit the same CDN host; the urllib3 default of 10 pooled
 # connections per host forces fresh TLS handshakes under concurrent load.
-_adapter = requests.adapters.HTTPAdapter(pool_connections=16, pool_maxsize=64)
+# Sized to match the prefetch pool plus playlist/miss traffic so workers
+# never block waiting for a free connection.
+_adapter = requests.adapters.HTTPAdapter(pool_connections=32, pool_maxsize=128)
 _session.mount("https://", _adapter)
 _session.mount("http://", _adapter)
 
@@ -70,8 +75,12 @@ def bytes_downloaded() -> int:
 # URLs before ffmpeg asks: fetch them in parallel into a small in-memory
 # cache and serve ffmpeg's requests instantly, letting slow streams catch up.
 
-_PREFETCH_WORKERS = 16
-_CACHE_MAX_BYTES = 300 * 1024 * 1024   # hard cap; beyond it, fall back to miss path
+# Workers are shared by ALL active streams. A live segment is ~2 s, so with
+# N streams the pool must complete ~N/2 downloads per second; a slow segment
+# holds a worker for several seconds. 16 workers starved out around ~10-15
+# concurrent recordings, making every stream lose segments at once.
+_PREFETCH_WORKERS = 64
+_CACHE_MAX_BYTES = 768 * 1024 * 1024   # hard cap; beyond it, fall back to miss path
 _ENTRY_TTL = 90.0                      # s: drop fetched segments never requested
 _FETCHED_TTL = 600.0                   # s: how long to remember served URLs
 
@@ -85,6 +94,7 @@ _streams: dict[str, dict] = {}         # stream key → {"segs": [...], "dur": a
 # Called as fn(stream_label, missed_segments, est_seconds_lost) whenever
 # segments expire from the live playlist before they could be downloaded.
 _gap_cb = None
+_last_cap_warn = 0.0
 
 
 def set_gap_callback(fn):
@@ -106,7 +116,10 @@ class _Entry:
 
 def _prefetch_one(url: str, mode: str, entry: _Entry):
     try:
-        r = _fetch(url, mode)
+        # Tight budget: a live segment only exists for ~10-20 s, and a worker
+        # stuck on one stalled download starves every other stream. Better to
+        # fail fast and let the next playlist refresh retry.
+        r = _fetch(url, mode, tries=2, timeout=(5, 10))
         entry.data = r.content
         entry.status = r.status_code
         entry.ctype = r.headers.get("Content-Type", "application/octet-stream")
@@ -167,6 +180,14 @@ def _track_media_playlist(text: str, base_url: str, mode: str, key: str):
                     e = _Entry()
                     _cache[u] = e
                     submit.append((u, e))
+        else:
+            global _last_cap_warn
+            if now - _last_cap_warn > 30:
+                _last_cap_warn = now
+                logger.warning(
+                    "relay prefetch cache full (%d MB, %d entries) — "
+                    "prefetch suspended, streams will fall behind",
+                    total // (1024 * 1024), len(_cache))
         for u, e in list(_cache.items()):
             if e.event.is_set() and now - e.ts > _ENTRY_TTL:
                 _cache.pop(u, None)
@@ -200,12 +221,13 @@ def _headers(mode: str) -> dict:
     return headers
 
 
-def _fetch(url: str, mode: str = "chaturbate") -> requests.Response:
+def _fetch(url: str, mode: str = "chaturbate", tries: int = 3,
+           timeout=20) -> requests.Response:
     headers = _headers(mode)
     last_exc = None
-    for _ in range(3):
+    for _ in range(tries):
         try:
-            return _session.get(url, timeout=20, headers=headers)
+            return _session.get(url, timeout=timeout, headers=headers)
         except requests.RequestException as exc:
             last_exc = exc
     raise last_exc

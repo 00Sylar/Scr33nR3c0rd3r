@@ -22,22 +22,29 @@ from notifier import send_notification
 
 # ── File logging ──────────────────────────────────────────────────────────────
 # pythonw has no console (stderr is discarded), so without this any background
-# thread error vanishes. Everything recorder.py logs — including monitor-crash
-# tracebacks — lands in ~/.streamrecorder.log with the thread name.
+# thread error vanishes. Everything recorder.py / cb_relay.py logs — including
+# monitor-crash tracebacks — lands in streamrecorder.log next to app.py, with
+# the thread name. Falls back to the home directory if the app dir is read-only.
 import logging
 import faulthandler
 from logging.handlers import RotatingFileHandler
 
-LOG_FILE = os.path.join(os.path.expanduser("~"), ".streamrecorder.log")
-_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=2,
-                               encoding="utf-8")
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(_APP_DIR, "streamrecorder.log")
+try:
+    _handler = RotatingFileHandler(LOG_FILE, maxBytes=5_000_000, backupCount=3,
+                                   encoding="utf-8")
+except OSError:
+    LOG_FILE = os.path.join(os.path.expanduser("~"), "streamrecorder.log")
+    _handler = RotatingFileHandler(LOG_FILE, maxBytes=5_000_000, backupCount=3,
+                                   encoding="utf-8")
 _handler.setFormatter(logging.Formatter(
     "%(asctime)s %(threadName)-16s %(levelname)-7s %(message)s"))
 logging.getLogger().addHandler(_handler)
 logging.getLogger().setLevel(logging.INFO)
 try:
-    _crash_f = open(os.path.join(os.path.expanduser("~"),
-                                 ".streamrecorder_crash.log"), "a")
+    _crash_f = open(os.path.join(os.path.dirname(LOG_FILE),
+                                 "streamrecorder_crash.log"), "a")
     faulthandler.enable(_crash_f)
 except OSError:
     pass
