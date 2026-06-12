@@ -732,6 +732,9 @@ class StreamRecorderApp(tk.Tk):
                                             style="Green.TButton",
                                             command=self._toggle_monitor_recorder)
         self._btn_monitor_rec.pack(side="right", padx=10, pady=5)
+        ttk.Button(bar, text="⏹  STOP ALL DOWNLOADS", style="Red.TButton",
+                   command=self._stop_all_downloads
+                   ).pack(side="right", padx=(0, 0), pady=5)
 
         # ── Treeview ──
         cols = ("status", "file", "size", "auto", "saved")
@@ -1099,6 +1102,23 @@ class StreamRecorderApp(tk.Tk):
         self._tree.set(key, "auto", "☑" if val else "☐")
         self._persist_models()
 
+    def _stop_all_downloads(self):
+        """Force-stop every active download (all sites) and uncheck every
+        AUTO toggle so the monitor doesn't restart them."""
+        if not messagebox.askyesno(
+                "Stop all downloads",
+                "Force-stop ALL active downloads and uncheck AUTO on every model?"):
+            return
+        for key in list(self._rows):
+            self._auto_rec[key] = False
+            if self._tree.exists(key):
+                self._tree.set(key, "auto", "☐")
+        self._persist_models()
+        self._log_add("Stopping all downloads…", "warn")
+        # Killing sessions waits on graceful stops — keep it off the UI thread
+        threading.Thread(target=self.recorder.stop_all_recordings,
+                         daemon=True, name="stop-all-dl").start()
+
     def _select_all(self, tree: ttk.Treeview):
         """Select all model rows (skip site/section headers)."""
         items = []
@@ -1272,7 +1292,10 @@ class StreamRecorderApp(tk.Tk):
         self._model_q.pop(key, None)
         self._checked.discard(key)
         site_id = f"_site_{site}"
-        if self._tree.exists(site_id) and not self._tree.get_children(site_id):
+        # Filtered-out rows are detached (parentless), so check _rows — not
+        # get_children() — or we'd delete a header that still owns hidden rows.
+        if (self._tree.exists(site_id)
+                and not any(k.split(":", 1)[0] == site for k in self._rows)):
             self._tree.delete(site_id)
         self._persist_models()
         self._update_stats()
@@ -1301,7 +1324,9 @@ class StreamRecorderApp(tk.Tk):
             self._model_q.pop(key, None)
             self._checked.discard(key)
             site_id = f"_site_{site}"
-            if self._tree.exists(site_id) and not self._tree.get_children(site_id):
+            # _rows includes filter-detached rows; get_children() doesn't
+            if (self._tree.exists(site_id)
+                    and not any(k.split(":", 1)[0] == site for k in self._rows)):
                 self._tree.delete(site_id)
             self._log_add(f"Removed: {name} ({site})", "warn")
         self._persist_models()
@@ -2196,7 +2221,9 @@ class StreamRecorderApp(tk.Tk):
         self._saved_rows.pop(sid, None)
         self._saved_checked.discard(sid)
         site_id = f"_ssite_{site}"
-        if self._stree.exists(site_id) and not self._stree.get_children(site_id):
+        # _saved_rows includes filter-detached rows; get_children() doesn't
+        if (self._stree.exists(site_id)
+                and not any(s.split(":")[1] == site for s in self._saved_rows)):
             self._stree.delete(site_id)
         self.recorder.remove_model(name, site, "saved")
         rec_key = f"{site}:{name}"

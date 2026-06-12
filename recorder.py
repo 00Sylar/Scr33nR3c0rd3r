@@ -810,6 +810,33 @@ class StreamRecorder:
         self._kill_session(session)
         self._log(f"Stopped recording {name} ({site})")
 
+    def stop_all_recordings(self) -> int:
+        """Force-stop every active download on every site without touching
+        the monitor threads. Returns how many sessions were stopped."""
+        with self._lock:
+            victims = []
+            for cfg in self.models.values():
+                if not cfg.session:
+                    continue
+                victims.append(cfg.session)
+                cfg.session = None
+                cfg.stop_requested = True
+                # OFFLINE so the GUI doesn't immediately auto-rec it again
+                cfg.stream_url = ""
+                self._reset_session_quality(cfg)
+                self._set_status(cfg, ModelStatus.OFFLINE, "")
+        # Kill outside the lock and in parallel (same as stop_monitor)
+        threads = [
+            threading.Thread(target=self._kill_session, args=(s,), daemon=True)
+            for s in victims
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=20)
+        self._log(f"Stopped all downloads ({len(victims)} active).")
+        return len(victims)
+
     # Online checks for due models run in a small shared pool: the old serial
     # pass meant one slow site response delayed every other model's check AND
     # the split/stall housekeeping of active sessions. CB calls stay globally
