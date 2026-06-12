@@ -11,6 +11,12 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **OneTab / browser integration.** Right-click on either tab now offers
+  "🌐 Open in Browser" (opens each model's page as a browser tab; asks for
+  confirmation above 10 tabs) and, for multi-selections, "📋 Copy as OneTab
+  List" — copies one `URL | name (site)` line per model, ready to paste into
+  OneTab's Import/Export URLs page. Both act on the checked set when boxes
+  are checked, otherwise on the highlighted selection.
 - **Status filter on both tabs.** A "Status ▾" dropdown next to the name
   filter with one checkbox per status (Online, Recording, Offline, Private,
   Checking, Error) — any combination works (e.g. Online + Recording).

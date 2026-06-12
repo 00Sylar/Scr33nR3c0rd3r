@@ -1022,6 +1022,8 @@ class StreamRecorderApp(tk.Tk):
             m.add_separator()
             m.add_command(label="🔗  Copy Model URL",
                           command=lambda: self._copy_model_url(name, site))
+            m.add_command(label="🌐  Open in Browser",
+                          command=lambda: self._open_in_browser([iid]))
             m.add_command(label="📁  Open Output Folder",
                           command=lambda: os.startfile(self.settings.output_dir))
             m.add_command(label="✕  Remove Model",
@@ -1038,6 +1040,10 @@ class StreamRecorderApp(tk.Tk):
             m.add_cascade(label=f"🎞  Max Quality  ({n} selected)",
                           menu=self._build_quality_menu(sel))
             m.add_separator()
+            m.add_command(label=f"🌐  Open in Browser  ({n} selected)",
+                          command=lambda s=sel: self._open_in_browser(s))
+            m.add_command(label=f"📋  Copy as OneTab List  ({n} selected)",
+                          command=lambda s=sel: self._copy_onetab(s))
             m.add_command(label="📁  Open Output Folder",
                           command=lambda: os.startfile(self.settings.output_dir))
             m.add_command(label=f"✕  Remove  ({n} selected)",
@@ -1314,6 +1320,40 @@ class StreamRecorderApp(tk.Tk):
         self.clipboard_clear()
         self.clipboard_append(url)
         self._log_add(f"Copied URL: {url}")
+
+    def _keys_to_models(self, keys: list, saved: bool = False) -> list:
+        """Map tree row ids to (name, site, url) tuples.
+        Recorder keys are "site:name"; saved keys are "saved:site:name"."""
+        out = []
+        for k in keys:
+            if saved:
+                _, site, name = k.split(":", 2)
+            else:
+                site, name = k.split(":", 1)
+            url = self._SITE_URLS.get(site, "https://{}/").format(name)
+            out.append((name, site, url))
+        return out
+
+    def _open_in_browser(self, keys: list, saved: bool = False):
+        items = self._keys_to_models(keys, saved)
+        if len(items) > 10 and not messagebox.askyesno(
+                "Open in Browser",
+                f"Open {len(items)} tabs in your browser?"):
+            return
+        import webbrowser
+        for _, _, url in items:
+            webbrowser.open(url)
+        self._log_add(f"Opened {len(items)} model page(s) in browser")
+
+    def _copy_onetab(self, keys: list, saved: bool = False):
+        """Copy models in OneTab's import format: one "URL | title" per line.
+        Paste into OneTab → Import / Export URLs."""
+        items = self._keys_to_models(keys, saved)
+        text = "\n".join(f"{url} | {name} ({site})"
+                         for name, site, url in items)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self._log_add(f"Copied {len(items)} model(s) as OneTab list")
 
     def _stop_async(self, name: str, site: str):
         """Stop a recording on a worker thread — graceful_stop blocks up to
@@ -2235,6 +2275,8 @@ class StreamRecorderApp(tk.Tk):
                           command=lambda: self._add_to_recorder(name, site))
             m.add_command(label="🔗  Copy Model URL",
                           command=lambda: self._copy_model_url(name, site))
+            m.add_command(label="🌐  Open in Browser",
+                          command=lambda t=targets: self._open_in_browser(t, saved=True))
             m.add_separator()
             m.add_command(label="✕  Remove from Saved Models",
                           command=lambda t=targets[0]: self._remove_saved(t))
@@ -2242,6 +2284,10 @@ class StreamRecorderApp(tk.Tk):
             src = "checked" if self._saved_checked else "selected"
             m.add_command(label=f"＋  Add to Recorder  ({n} {src})",
                           command=lambda t=targets: self._add_many_to_recorder(t))
+            m.add_command(label=f"🌐  Open in Browser  ({n} {src})",
+                          command=lambda t=targets: self._open_in_browser(t, saved=True))
+            m.add_command(label=f"📋  Copy as OneTab List  ({n} {src})",
+                          command=lambda t=targets: self._copy_onetab(t, saved=True))
             m.add_separator()
             m.add_command(label=f"✕  Remove from Saved  ({n} {src})",
                           command=lambda t=targets: self._remove_saved_many(t))
