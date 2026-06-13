@@ -33,6 +33,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 ### Integrations
 - ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page (local API, port 5200)
 - ✅ Telegram upload pipeline (optional) — converts finished recordings and uploads them to a Telegram group/topic
+- ✅ **Chat-bot / agent control (OpenClaw)** — drive Scr33nX from your phone over Telegram/WhatsApp: text a link to record, stop one or all, add/remove from Saved, toggle the monitors/scanner/pipeline, and even open or close the app. Everything runs through the same local API. Full setup: **[OPENCLAW-HOWTO.md](OPENCLAW-HOWTO.md)**.
 
 ---
 
@@ -153,6 +154,26 @@ The **Output / Upload** tab can convert finished `.ts` recordings to `.mp4` and 
 3. Save and enable the pipeline
 
 Settings are stored in `Pipeline/pipeline_settings.json`. Requires the `tdjson` package (installed via `requirements.txt`).
+
+---
+
+## Local Control API (port 5200)
+
+While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, used by the browser extensions **and** by external automation (e.g. the OpenClaw chat bot — see **[OPENCLAW-HOWTO.md](OPENCLAW-HOWTO.md)**). It is loopback-only (no remote access) and unauthenticated.
+
+| Method & path | Body | Action |
+|---|---|---|
+| `GET /status` | `?name=&site=` | model state: `in_recorder`, `in_saved`, `status`, `auto` |
+| `POST /add` | `{name, site, target}` | add to `recorder` or `saved` |
+| `POST /record` | `{name, site, action}` | `start` / `stop` recording one model |
+| `POST /auto` | `{name, site, enabled}` | toggle AUTO for a model |
+| `POST /remove` | `{name, site, target}` | remove from `recorder` or `saved` |
+| `POST /stop_all` | — | stop every active download + clear all AUTO |
+| `POST /monitor` | `{target, enabled}` | start/stop the `recorder` monitor or `saved` scanner |
+| `POST /pipeline` | `{enabled}` | start/stop the Telegram upload pipeline |
+| `POST /quit` | — | gracefully shut the app down |
+
+A command-line helper, **`scr33nx_ctl.py`**, wraps all of these (plus `open`, which launches the app) — run `python scr33nx_ctl.py --help` for the subcommands.
 
 ---
 

@@ -207,6 +207,14 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._handle_remove()
         elif parsed.path == "/auto":
             self._handle_auto()
+        elif parsed.path == "/stop_all":
+            self._handle_stop_all()
+        elif parsed.path == "/monitor":
+            self._handle_monitor()
+        elif parsed.path == "/pipeline":
+            self._handle_pipeline()
+        elif parsed.path == "/quit":
+            self._handle_quit()
         else:
             self._json({"error": "not found"}, 404)
 
@@ -293,10 +301,18 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if not name or not site:
             self._json({"ok": False, "error": "missing name or site"}, 400)
             return
+        app = self._app
+        if target == "saved":
+            sid = f"saved:{site}:{name}"
+            if sid not in app._saved_data:
+                self._json({"ok": False, "error": "Model is not in Saved Models"})
+                return
+            app.after(0, lambda s=sid: app._remove_saved(s))
+            self._json({"ok": True})
+            return
         if target != "recorder":
             self._json({"ok": False, "error": f"unsupported target: {target}"}, 400)
             return
-        app = self._app
         key = f"{site}:{name}"
         if key not in app._rows:
             self._json({"ok": False, "error": "Model is not in the Recorder list"})
@@ -329,6 +345,46 @@ class _ApiHandler(BaseHTTPRequestHandler):
             return
         app.after(0, lambda: app._set_auto(key, enabled))
         self._json({"ok": True, "auto": enabled})
+
+    def _handle_stop_all(self):
+        """Force-stop every active download and clear AUTO (no confirm dialog)."""
+        self._app.after(0, self._app._api_stop_all)
+        self._json({"ok": True})
+
+    def _handle_monitor(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+        target  = body.get("target", "").strip().lower()
+        enabled = bool(body.get("enabled", False))
+        if target not in ("recorder", "saved"):
+            self._json({"ok": False,
+                        "error": "target must be 'recorder' or 'saved'"}, 400)
+            return
+        app = self._app
+        app.after(0, lambda t=target, e=enabled: app._api_set_monitor(t, e))
+        self._json({"ok": True, "target": target, "enabled": enabled})
+
+    def _handle_pipeline(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+        enabled = bool(body.get("enabled", False))
+        app = self._app
+        app.after(0, lambda e=enabled: app._api_set_pipeline(e))
+        self._json({"ok": True, "enabled": enabled})
+
+    def _handle_quit(self):
+        # Reply first, THEN schedule the shutdown (which stops this very
+        # server) so the client still receives the response.
+        self._json({"ok": True})
+        self._app.after(0, self._app._api_quit)
 
     def _cors(self, code):
         self.send_response(code)
@@ -1118,6 +1174,63 @@ class StreamRecorderApp(tk.Tk):
         # Killing sessions waits on graceful stops — keep it off the UI thread
         threading.Thread(target=self.recorder.stop_all_recordings,
                          daemon=True, name="stop-all-dl").start()
+
+    # ── Extension/bot API actions (no modal dialogs) ─────────────────────────
+    def _api_stop_all(self):
+        """API: same as the Stop-All button but without the confirm dialog."""
+        for key in list(self._rows):
+            self._auto_rec[key] = False
+            if self._tree.exists(key):
+                self._tree.set(key, "auto", "☐")
+        self._persist_models()
+        self._log_add("Stopping all downloads (via API)…", "warn")
+        threading.Thread(target=self.recorder.stop_all_recordings,
+                         daemon=True, name="stop-all-dl-api").start()
+
+    def _api_set_monitor(self, which: str, enabled: bool):
+        """API: bring the recorder/saved monitor to *enabled* (idempotent)."""
+        current = (self._monitoring_recorder if which == "recorder"
+                   else self._monitoring_saved)
+        if enabled == current:
+            return  # already in the desired state
+        if which == "recorder":
+            self._toggle_monitor_recorder()
+        else:
+            self._toggle_monitor_saved()
+
+    def _api_set_pipeline(self, enabled: bool):
+        """API: bring the Telegram pipeline to *enabled* (idempotent)."""
+        running = bool(self.pipeline and self.pipeline.running)
+        if enabled == running:
+            return
+        self._toggle_pipeline(silent=True)
+
+    def _api_quit(self):
+        """API: graceful shutdown with no confirm dialog (mirrors _on_close
+        minus the prompt). Used by the bot's `close` command."""
+        if getattr(self, "_closing", False):
+            return
+        self._closing = True
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
+        self._lbl_hdr_status.configure(text="● STOPPING…", fg=ORANGE)
+        self._stop_api_server()
+        self._remove_tray()
+        self._save_settings()
+        def _shutdown():
+            try:
+                self.recorder.stop_monitor()
+            except Exception:
+                pass
+            if hasattr(self, "pipeline"):
+                try:
+                    self.pipeline.stop()
+                except Exception:
+                    pass
+            try:
+                self.after(0, self.destroy)
+            except (tk.TclError, RuntimeError):
+                pass
+        threading.Thread(target=_shutdown, daemon=True, name="shutdown-api").start()
 
     def _select_all(self, tree: ttk.Treeview):
         """Select all model rows (skip site/section headers)."""
@@ -2546,7 +2659,7 @@ class StreamRecorderApp(tk.Tk):
         cfg.ffprobe_path = "ffprobe"
         return cfg
 
-    def _toggle_pipeline(self):
+    def _toggle_pipeline(self, silent: bool = False):
         if self.pipeline and self.pipeline.running:
             self.pipeline.stop()
             self._btn_pipeline.configure(text="▶  START PIPELINE", style="Green.TButton")
@@ -2559,8 +2672,14 @@ class StreamRecorderApp(tk.Tk):
         if not cfg.api_hash: missing.append("API Hash")
         if not cfg.chat_id:  missing.append("Chat ID")
         if missing:
-            messagebox.showerror("Missing settings",
-                "Please fill in: " + ", ".join(missing))
+            # silent=True path is used by the API (no modal dialog on the UI
+            # thread — that would freeze the app that serves the API).
+            if silent:
+                self._log_add("Pipeline start (API) failed — missing settings: "
+                              + ", ".join(missing), "error")
+            else:
+                messagebox.showerror("Missing settings",
+                    "Please fill in: " + ", ".join(missing))
             return
 
         os.makedirs(cfg.output_folder, exist_ok=True)

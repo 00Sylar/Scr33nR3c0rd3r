@@ -11,6 +11,19 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **Chat-bot / agent control via the local API (OpenClaw).** Scr33nX can now be
+  driven from a messaging app (Telegram/WhatsApp) through an OpenClaw agent that
+  calls the local API. New control script `scr33nx_ctl.py` wraps every action
+  (record / stop / stop-all / add to recorder or saved / remove / AUTO on-off /
+  status / start-stop the recorder monitor, saved scanner, and Telegram pipeline /
+  open / close the app). Full walkthrough in the new **`OPENCLAW-HOWTO.md`**.
+- **New local-API endpoints (port 5200).** Added `POST /stop_all` (stop every
+  download + clear AUTO), `POST /monitor {target, enabled}` (start/stop the
+  recorder monitor or saved scanner), `POST /pipeline {enabled}` (start/stop the
+  Telegram pipeline), and `POST /quit` (graceful shutdown). `POST /remove` now
+  also accepts `target: "saved"` to remove from Saved Models. All API-triggered
+  actions use no-dialog code paths so they never block the UI thread that serves
+  the API.
 - **OneTab / browser integration.** Right-click on either tab now offers
   "🌐 Open in Browser" (opens each model's page as a browser tab; asks for
   confirmation above 10 tabs) and, for multi-selections, "📋 Copy as OneTab
