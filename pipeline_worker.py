@@ -237,6 +237,12 @@ class PipelineWorker:
     async def _uploader_worker(self, td, slot: int, upload_queue: asyncio.Queue,
                                 uploaded: set):
         while True:
+            # Stop pulling new files the moment the pipeline is stopping. An
+            # in-flight send_video already completed this iteration (finish
+            # current, drop the rest) — without this top-of-loop check the
+            # worker would drain the whole backlog before noticing _shutdown.
+            if self._shutdown:
+                return
             try:
                 path = await asyncio.wait_for(upload_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
@@ -301,7 +307,7 @@ class PipelineWorker:
             for i in range(num_parts):
                 start = i * part_dur
                 out = os.path.join(self.cfg.output_folder,
-                                   f"{base}_part{i+1}.mp4")
+                                   f"{base}_part{i+1:03d}.mp4")
                 cmd = [self.cfg.ffmpeg_path,
                        "-i", ts_path,
                        "-ss", str(start),

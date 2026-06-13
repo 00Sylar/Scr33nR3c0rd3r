@@ -167,6 +167,11 @@ class _ApiHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/dashboard":
+            # Aggregate per-site + totals snapshot (read-only — safe off the
+            # Tk thread, same as the /status reads below).
+            self._json(self._app._api_dashboard())
+            return
         if parsed.path != "/status":
             self._json({"error": "not found"}, 404)
             return
@@ -209,6 +214,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._handle_auto()
         elif parsed.path == "/stop_all":
             self._handle_stop_all()
+        elif parsed.path == "/clear":
+            self._handle_clear()
         elif parsed.path == "/monitor":
             self._handle_monitor()
         elif parsed.path == "/pipeline":
@@ -351,6 +358,12 @@ class _ApiHandler(BaseHTTPRequestHandler):
         self._app.after(0, self._app._api_stop_all)
         self._json({"ok": True})
 
+    def _handle_clear(self):
+        """Clean-slate the Recorder (no confirm dialog): stop monitor + all
+        downloads, clear AUTO, remove every model. Saved Models untouched."""
+        self._app.after(0, lambda: self._app._do_clear_recorder(via_api=True))
+        self._json({"ok": True})
+
     def _handle_monitor(self):
         length = int(self.headers.get("Content-Length", 0))
         try:
@@ -434,6 +447,7 @@ class StreamRecorderApp(tk.Tk):
         self.recorder.quality_global = self.settings.max_quality
         self.recorder.quality_overrides = self._model_q
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
+        self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
         self._monitoring_recorder = False
         self._monitoring_saved    = False
         self._tray: Optional[WinTray] = None
@@ -704,6 +718,13 @@ class StreamRecorderApp(tk.Tk):
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,0))
 
+        self._v_pwfallback = tk.BooleanVar(value=self.settings.playwright_fallback_enabled)
+        tk.Checkbutton(p, text="🎭 Stripchat Browser Fallback",
+                       variable=self._v_pwfallback,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                       activeforeground=TEXT, font=UI, relief="flat").pack(
+            anchor="w", padx=16, pady=(0,0))
+
         self._v_privacy = tk.BooleanVar(value=self.settings.privacy_mode_enabled)
         tk.Checkbutton(p, text="🔒 Privacy Mode", variable=self._v_privacy,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
@@ -714,9 +735,10 @@ class StreamRecorderApp(tk.Tk):
                    command=self._save_settings).pack(fill="x", padx=16, pady=(0,0))
 
         tk.Frame(p, bg=BORDER, height=1).pack(fill="x", padx=12, pady=(16,0))
-        self._lbl_stats = tk.Label(p, text="0 recording  ·  0 offline",
-                                    fg=TEXT3, bg=BG2, font=("Segoe UI", 9))
-        self._lbl_stats.pack(anchor="w", padx=16, pady=8)
+        self._lbl_stats = tk.Label(p, text="MODELS · STATUS", fg=TEXT2, bg=BG2,
+                                    font=("Consolas", 9), justify="left",
+                                    anchor="w")
+        self._lbl_stats.pack(anchor="w", fill="x", padx=16, pady=8)
 
     def _build_right(self, p):
         nb = ttk.Notebook(p)
@@ -791,6 +813,9 @@ class StreamRecorderApp(tk.Tk):
         ttk.Button(bar, text="⏹  STOP ALL DOWNLOADS", style="Red.TButton",
                    command=self._stop_all_downloads
                    ).pack(side="right", padx=(0, 0), pady=5)
+        ttk.Button(bar, text="🧹  CLEAR RECORDER", style="Ghost.TButton",
+                   command=self._clear_recorder
+                   ).pack(side="right", padx=(0, 6), pady=5)
 
         # ── Treeview ──
         cols = ("status", "file", "size", "auto", "saved")
@@ -1174,6 +1199,41 @@ class StreamRecorderApp(tk.Tk):
         # Killing sessions waits on graceful stops — keep it off the UI thread
         threading.Thread(target=self.recorder.stop_all_recordings,
                          daemon=True, name="stop-all-dl").start()
+
+    def _clear_recorder(self):
+        """Clean-slate the Recorder: stop the monitor, stop every download,
+        uncheck all AUTO, and remove every model (all sites). Leaves the app
+        ready to use. Saved Models are untouched."""
+        if not messagebox.askyesno(
+                "Clear recorder",
+                "Stop everything and remove ALL models from the Recorder?\n\n"
+                "This stops the monitor, all active downloads, clears AUTO, and "
+                "empties the Recorder list. Saved Models are kept."):
+            return
+        self._do_clear_recorder()
+
+    def _do_clear_recorder(self, via_api: bool = False):
+        """Clean-slate the Recorder without a dialog. Shared by the button
+        (after confirm) and the bot API (/clear)."""
+        # Stop the recorder monitor so it can't re-add/restart anything
+        if self._monitoring_recorder:
+            self._toggle_monitor_recorder()
+        # Uncheck every AUTO, then force-stop all active downloads off-thread
+        for key in list(self._rows):
+            self._auto_rec[key] = False
+            if self._tree.exists(key):
+                self._tree.set(key, "auto", "☐")
+        threading.Thread(target=self.recorder.stop_all_recordings,
+                         daemon=True, name="clear-stop-all").start()
+        # Remove every model from the Recorder (reuses the no-dialog remover,
+        # which handles tree rows, headers, persistence, and stats)
+        for key in list(self._rows):
+            site, name = key.split(":", 1)
+            self._do_remove_from_recorder(name, site)
+        self._uncheck_all("rec")
+        self._update_stats()
+        self._log_add("Recorder cleared%s." % (" (via API)" if via_api else ""),
+                      "warn")
 
     # ── Extension/bot API actions (no modal dialogs) ─────────────────────────
     def _api_stop_all(self):
@@ -2849,8 +2909,10 @@ class StreamRecorderApp(tk.Tk):
         self.settings.gap_warnings_enabled  = self._v_gapwarn.get()
         self.settings.max_quality = QUALITY_OPTIONS.get(self._v_quality.get(), 0)
         self.settings.auto_downgrade_enabled = self._v_autodown.get()
+        self.settings.playwright_fallback_enabled = self._v_pwfallback.get()
         self.recorder.quality_global = self.settings.max_quality
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
+        self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
         self.settings.privacy_mode_enabled  = self._v_privacy.get()
         self.recorder.gap_warnings_enabled  = self.settings.gap_warnings_enabled
         self._persist_models()
@@ -2895,26 +2957,59 @@ class StreamRecorderApp(tk.Tk):
                     self._model_q[f"{s}:{n}"] = q
         self._update_stats()
 
-    def _update_stats(self):
-        recording = 0
-        online    = 0
-        offline   = 0
-        for k in self._rows:
+    # Dashboard rows — emoji colors match each site's brand
+    # (CB yellow, SC red, CS blue, MFC green). ▶ recording · ● online · ○ offline.
+    _DASH_SITES = [
+        ("chaturbate", "🟡", "CB"),
+        ("stripchat",  "🔴", "SC"),
+        ("camsoda",    "🔵", "CS"),
+        ("myfreecams", "🟢", "MFC"),
+    ]
+
+    def _dashboard_counts(self):
+        """Per-site [total, recording, online, offline] + grand totals.
+        Snapshots the row keys so it's safe to call from the API handler
+        thread (same read-only pattern as the /status endpoint)."""
+        tally = {s: [0, 0, 0, 0] for s, _e, _l in self._DASH_SITES}
+        for k in list(self._rows):
+            t = tally.get(k.split(":", 1)[0])
+            if t is None:
+                continue
+            t[0] += 1
             cfg = self.recorder.models.get(k)
-            if cfg:
-                if cfg.status == ModelStatus.RECORDING:
-                    recording += 1
-                elif cfg.status == ModelStatus.ONLINE:
-                    online += 1
-                else:
-                    offline += 1
-            else:
-                offline += 1
-        parts = []
-        if recording: parts.append(f"{recording} recording")
-        if online:    parts.append(f"{online} online")
-        if offline:   parts.append(f"{offline} offline")
-        self._lbl_stats.configure(text="  ·  ".join(parts) if parts else "0 offline")
+            st = cfg.status if cfg else None
+            if st == ModelStatus.RECORDING:
+                t[1] += 1
+            elif st == ModelStatus.ONLINE:
+                t[2] += 1
+            else:                       # offline/error/checking/private → offline
+                t[3] += 1
+        total = [0, 0, 0, 0]
+        for c in tally.values():
+            for i in range(4):
+                total[i] += c[i]
+        return tally, total
+
+    def _update_stats(self):
+        tally, total = self._dashboard_counts()
+        lines = ["MODELS · STATUS"]
+        for site, emoji, lbl in self._DASH_SITES:
+            c = tally[site]
+            if c[0]:
+                lines.append(
+                    f"{emoji} {lbl:<3}{c[0]:>3} │ ▶{c[1]:<2} ●{c[2]:<2} ○{c[3]:<2}")
+        lines.append("──────────────────────")
+        lines.append(
+            f"ALL  {total[0]:>3} │ ▶{total[1]}  ●{total[2]}  ○{total[3]}")
+        self._lbl_stats.configure(text="\n".join(lines))
+
+    def _api_dashboard(self) -> dict:
+        """Aggregate dashboard snapshot for the bot/API (GET /dashboard)."""
+        tally, total = self._dashboard_counts()
+        keys = ("total", "recording", "online", "offline")
+        sites = {lbl: dict(zip(keys, tally[s]))
+                 for s, _e, lbl in self._DASH_SITES}
+        return {"ok": True, "sites": sites, "all": dict(zip(keys, total))}
 
     @staticmethod
     def _parse_int(val: str, default: int = None) -> Optional[int]:

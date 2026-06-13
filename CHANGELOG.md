@@ -11,6 +11,24 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **Status dashboard (left panel).** The single "N recording · N offline" line
+  is now a per-site + totals breakdown: one row per site that has models —
+  🟡 CB, 🔴 SC, 🔵 CS, 🟢 MFC (colors match each site's brand) — showing
+  total / ▶ recording / ● online / ○ offline, plus an ALL summary line.
+- **🧹 CLEAR RECORDER button** (next to STOP ALL DOWNLOADS). One click to a
+  clean slate: stops the recorder monitor, force-stops every active download,
+  unchecks all AUTO, and removes every model from the Recorder (all sites).
+  Saved Models are untouched. Confirms first. Also exposed to the bot via the
+  new `POST /clear` endpoint and `scr33nx_ctl.py clear` command.
+- **Bot dashboard + clear (OpenClaw).** New `GET /dashboard` endpoint returns the
+  aggregate per-site (CB/SC/CS/MFC) + totals snapshot, and `POST /clear` clears
+  the Recorder. Wired into `scr33nx_ctl.py` as `dashboard` and `clear` commands,
+  so you can ask the bot "Scr33nX dashboard status" or "clear the recorder".
+- **🎭 Stripchat Browser Fallback toggle (Settings).** Gates the Playwright
+  browser fallback used when Stripchat's browserless native path can't resolve
+  a stream. Enabled (default) = unchanged behavior. Disabled = native path
+  only; if it fails the stream is simply not recorded and Playwright never
+  launches under any circumstance.
 - **Chat-bot / agent control via the local API (OpenClaw).** Scr33nX can now be
   driven from a messaging app (Telegram/WhatsApp) through an OpenClaw agent that
   calls the local API. New control script `scr33nx_ctl.py` wraps every action
@@ -51,6 +69,20 @@ grouped by date / milestone.
 - **Saved-tab bulk actions.** Right-click acts on the checked set (or the
   multi-selection): "Add to Recorder (N)" with duplicate-skipping and
   "Remove from Saved (N)" with a single log/persist instead of N.
+
+### Changed
+- **Standardized output filenames across all sites.** A recording that never
+  splits now keeps NO part suffix (`modelname_CB_20240515_143022.ts`); the
+  moment a size-split happens, the first segment is renamed and the set reads
+  `_part001`, `_part002`, … All parts of one recording share a single
+  timestamp, and the Telegram-pipeline `.mp4` splits use the same 3-digit
+  `_partNNN` padding as the recorder (was `_part1`).
+
+### Fixed
+- **STOP TELEGRAM PIPELINE now halts the uploader workers.** Previously the
+  converter stopped but the Telegram upload clients kept draining the queued
+  backlog. Stopping now lets the in-flight upload finish, then halts the
+  uploaders and closes the TDLib clients until the pipeline is resumed.
 
 ---
 

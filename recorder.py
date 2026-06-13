@@ -54,6 +54,9 @@ class RecordingSession:
     max_size_mb: Optional[int]
     stream_url: str
     part: int = 1
+    # Shared base ("modelname_SITE_YYYYMMDD_HHMMSS") for every part of this
+    # recording — computed once so split parts differ only by the _partNNN tag.
+    base_name: Optional[str] = None
     process: Optional[subprocess.Popen] = None
     start_time: Optional[float] = None
     current_file: Optional[str] = None
@@ -379,11 +382,16 @@ SITE_TAGS = {"chaturbate": "CB", "stripchat": "ST", "camsoda": "CS",
 
 
 def build_output_path(session: RecordingSession) -> str:
-    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
-    site_tag = SITE_TAGS.get(session.site, session.site[:2].upper())
-    part_tag = f"_part{session.part:03d}" if session.max_size_mb else ""
+    """Path for the session's current part. A recording that never splits keeps
+    NO suffix; once a split occurs (part > 1) every part carries _partNNN. The
+    base name (incl. timestamp) is computed once and reused for all parts."""
+    if session.base_name is None:
+        ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+        site_tag = SITE_TAGS.get(session.site, session.site[:2].upper())
+        session.base_name = f"{session.model_name}_{site_tag}_{ts}"
+    part_tag = f"_part{session.part:03d}" if session.part > 1 else ""
     return os.path.join(session.output_dir,
-                        f"{session.model_name}_{site_tag}_{ts}{part_tag}.ts")
+                        f"{session.base_name}{part_tag}.ts")
 
 
 def _popen_ffmpeg(cmd: list) -> subprocess.Popen:
@@ -564,6 +572,11 @@ class StreamRecorder:
         # (bandwidth saturated). Always logged; notification is opt-out.
         self.gap_warnings_enabled: bool = True
         self._gap_warn_ts: dict[str, float] = {}
+
+        # Stripchat only: when the browserless native path can't be used, fall
+        # back to the Playwright browser recorder. When disabled, the stream is
+        # simply not recorded and Playwright never launches (app-owned flag).
+        self.playwright_fallback_enabled: bool = True
 
         # Quality caps: the relay asks effective_quality(label) for the max
         # variant height each time a master playlist is fetched (recording
@@ -958,9 +971,13 @@ class StreamRecorder:
                                            self.ffmpeg_path)
             if proc is not None:
                 self._log(f"{cfg.name}: native HLS path (no browser)")
-            else:
+            elif self.playwright_fallback_enabled:
                 self._log(f"{cfg.name}: native path unavailable — browser fallback")
                 proc = launch_stripchat_playwright(cfg.name, output_path)
+            else:
+                self._log(f"{cfg.name}: native path unavailable — Playwright "
+                          f"fallback disabled, not recording")
+                return None
         else:
             proc = launch_ffmpeg_hls(stream_url, output_path, self.ffmpeg_path,
                                      site=cfg.site,
@@ -1224,6 +1241,16 @@ class StreamRecorder:
         self._log(f"Split {cfg.name}: {size_mb:.0f}/{session.max_size_mb} MB")
         # Graceful stop so the .ts trailer flushes before we open the next part
         graceful_stop(session.process, timeout=10)
+        # First split: the unsuffixed part-1 file becomes _part001 so the set
+        # reads _part001/_part002/… Done synchronously right after the handle
+        # closes to minimise the window where the pipeline could grab it.
+        if session.part == 1 and session.current_file and session.base_name:
+            first = os.path.join(session.output_dir,
+                                 f"{session.base_name}_part001.ts")
+            try:
+                os.replace(session.current_file, first)
+            except OSError as e:
+                self._log(f"{cfg.name}: couldn't rename first part to _part001: {e}")
         session.part += 1
         url = get_stream_url(cfg.site, cfg.name) or session.stream_url
         if url:

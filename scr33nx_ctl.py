@@ -17,6 +17,8 @@ COMMANDS
   remove-saved  <link|name> [--site S]        remove from Saved Models
   auto          <link|name> on|off [--site S] turn AUTO on/off for a model
   stop-all                                    stop ALL downloads + clear AUTO
+  clear                                        stop everything + REMOVE all models
+  dashboard                                    per-site + totals status snapshot
   monitor       recorder|saved on|off         start/stop a monitor/scanner
   pipeline      on|off                         start/stop the Telegram pipeline
   open                                          launch the Scr33nX app
@@ -26,6 +28,8 @@ EXAMPLES
   python scr33nx_ctl.py record "https://chaturbate.com/name/"
   python scr33nx_ctl.py stop name --site stripchat
   python scr33nx_ctl.py stop-all
+  python scr33nx_ctl.py clear
+  python scr33nx_ctl.py dashboard
   python scr33nx_ctl.py monitor recorder on
   python scr33nx_ctl.py pipeline on
 """
@@ -188,6 +192,14 @@ def cmd_stop_all(a):
     return _request("POST", "/stop_all")
 
 
+def cmd_clear(a):
+    return _request("POST", "/clear")
+
+
+def cmd_dashboard(a):
+    return _request("GET", "/dashboard")
+
+
 def cmd_monitor(a):
     return _request("POST", "/monitor",
                     {"target": a.which, "enabled": a.state == "on"})
@@ -260,6 +272,8 @@ def main() -> int:
     s.add_argument("state", choices=("on", "off"))
     s.set_defaults(fn=cmd_auto)
     s = sub.add_parser("stop-all");      s.set_defaults(fn=cmd_stop_all)
+    s = sub.add_parser("clear");         s.set_defaults(fn=cmd_clear)
+    s = sub.add_parser("dashboard");     s.set_defaults(fn=cmd_dashboard)
     s = sub.add_parser("monitor")
     s.add_argument("which", choices=("recorder", "saved"))
     s.add_argument("state", choices=("on", "off"))

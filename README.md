@@ -96,7 +96,7 @@ The extension adds models to Scr33nX with one click while you're on their page. 
 2. Click **▶ START MONITOR** — the app polls each model at the configured interval
 3. When a model goes live, recording starts automatically and you'll get a notification
 4. When the model goes offline, the recording stops automatically
-5. If you set a **Max File Size**, the recording splits into numbered parts (e.g. `_part001`, `_part002`) automatically
+5. If you set a **Max File Size**, the recording splits into numbered parts (`_part001`, `_part002`, …) automatically; a recording that never reaches the limit keeps a single, unsuffixed file
 6. Watch the **↓ Mbps** meter in the header while recording several models — if your streams start dropping segments you'll also get a warning notification
 
 ### Settings (left panel)
@@ -111,6 +111,7 @@ The extension adds models to Scr33nX with one click while you're on their page. 
 | Notifications | Master toggle for Windows toast notifications |
 | ⚠ Dropped-Segment Warnings | Toast when a recording is losing segments due to saturated bandwidth (always logged to the Activity Log regardless) |
 | ⬇ Auto-Downgrade Quality | Restart a stream one quality step lower when it keeps losing segments (≥10 s lost within 60 s). Only that stream is touched; manual per-model quality choices are respected. Not available for Stripchat |
+| 🎭 Stripchat Browser Fallback | When Stripchat's browserless native path can't resolve a stream, fall back to the Playwright browser recorder. Enabled by default. Uncheck to record native-only — if native fails the stream is skipped and the browser never launches |
 | 🔒 Privacy Mode | Idle screen cover |
 
 ---
@@ -121,12 +122,13 @@ Files are saved to the configured output folder (default: `~/Videos/StreamRecord
 
 **Filename format:**
 ```
-modelname_CB_20240515_143022_part001.ts
+modelname_CB_20240515_143022.ts            ← single file (no split)
 modelname_ST_20240515_143022.ts
-modelname_CS_20240515_143022_part001.ts
-modelname_MFC_20240515_143022.ts
+modelname_CS_20240515_143022_part001.ts    ← split into parts
+modelname_CS_20240515_143022_part002.ts
 ```
 
+- A recording that never hits the **Max File Size** limit is one unsuffixed file. When it splits, every part of that recording shares the same timestamp and is numbered `_part001`, `_part002`, … (3-digit). The same `_partNNN` scheme is used by the Telegram pipeline when it splits a `.mp4` for upload.
 - `CB` = Chaturbate, `ST` = Stripchat, `CS` = Camsoda, `MFC` = MyFreeCams
 - `.ts` container — plays in VLC, MPV, or any player that supports MPEG-TS
 - Convert to `.mp4` with: `ffmpeg -i input.ts -c copy output.mp4`
@@ -164,11 +166,13 @@ While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, 
 | Method & path | Body | Action |
 |---|---|---|
 | `GET /status` | `?name=&site=` | model state: `in_recorder`, `in_saved`, `status`, `auto` |
+| `GET /dashboard` | — | aggregate snapshot: per-site (`CB`/`SC`/`CS`/`MFC`) + `all` totals of `total`/`recording`/`online`/`offline` |
 | `POST /add` | `{name, site, target}` | add to `recorder` or `saved` |
 | `POST /record` | `{name, site, action}` | `start` / `stop` recording one model |
 | `POST /auto` | `{name, site, enabled}` | toggle AUTO for a model |
 | `POST /remove` | `{name, site, target}` | remove from `recorder` or `saved` |
 | `POST /stop_all` | — | stop every active download + clear all AUTO |
+| `POST /clear` | — | stop monitor + all downloads, clear AUTO, remove every Recorder model (Saved kept) |
 | `POST /monitor` | `{target, enabled}` | start/stop the `recorder` monitor or `saved` scanner |
 | `POST /pipeline` | `{enabled}` | start/stop the Telegram upload pipeline |
 | `POST /quit` | — | gracefully shut the app down |

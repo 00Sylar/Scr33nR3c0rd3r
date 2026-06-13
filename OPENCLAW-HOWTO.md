@@ -44,6 +44,8 @@ Just talk normally. The bot maps your intent to a command:
 | "add her but don't record yet" | `record <link> --no-auto` | add + record now, AUTO off |
 | "stop her" / "stop `<name>`" | `stop <name>` | stop one recording |
 | **"stop everything"** | `stop-all` | stop all downloads + clear all AUTO |
+| **"clear the recorder"** / "clean slate" | `clear` | stop monitor + all downloads, clear AUTO, **remove every model** (Saved kept) |
+| **"dashboard status"** / "how many are live?" | `dashboard` | per-site (CB/SC/CS/MFC) + totals: total / recording / online / offline |
 | "save her" / "add to saved" | `add-saved <link>` | add to Saved Models |
 | "remove her from saved" | `remove-saved <name>` | remove from Saved Models |
 | "remove her from the recorder" | `remove <name>` | remove from Recorder |
@@ -86,14 +88,17 @@ python scr33nx_ctl.py <command> [args]
 | `remove` / `remove-saved <model>` | `python scr33nx_ctl.py remove-saved x --site camsoda` |
 | `auto <model> on|off` | `python scr33nx_ctl.py auto x on --site chaturbate` |
 | `stop-all` | `python scr33nx_ctl.py stop-all` |
+| `clear` | `python scr33nx_ctl.py clear` |
+| `dashboard` | `python scr33nx_ctl.py dashboard` |
 | `monitor recorder|saved on|off` | `python scr33nx_ctl.py monitor recorder on` |
 | `pipeline on|off` | `python scr33nx_ctl.py pipeline on` |
 | `open` / `close` | `python scr33nx_ctl.py open` |
 
 Behind the scenes it talks to the **Local Control API** (documented in the README):
-`/status`, `/add`, `/record`, `/auto`, `/remove`, `/stop_all`, `/monitor`,
-`/pipeline`, `/quit`. `open` launches `StreamRecorder.bat` and waits for the API
-to come up; `close` calls `/quit` and waits for the app to go down.
+`/status`, `/dashboard`, `/add`, `/record`, `/auto`, `/remove`, `/stop_all`,
+`/clear`, `/monitor`, `/pipeline`, `/quit`. `open` launches `StreamRecorder.bat`
+and waits for the API to come up; `close` calls `/quit` and waits for the app to
+go down.
 
 > There's also an older single-purpose script, `openclaw_record.py`, that only
 > does the record flow. `scr33nx_ctl.py record ...` supersedes it.
