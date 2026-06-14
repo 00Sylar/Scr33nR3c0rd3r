@@ -735,10 +735,7 @@ class StreamRecorderApp(tk.Tk):
                    command=self._save_settings).pack(fill="x", padx=16, pady=(0,0))
 
         tk.Frame(p, bg=BORDER, height=1).pack(fill="x", padx=12, pady=(16,0))
-        self._lbl_stats = tk.Label(p, text="MODELS · STATUS", fg=TEXT2, bg=BG2,
-                                    font=("Consolas", 9), justify="left",
-                                    anchor="w")
-        self._lbl_stats.pack(anchor="w", fill="x", padx=16, pady=8)
+        self._build_stats_panel(p)
 
     def _build_right(self, p):
         nb = ttk.Notebook(p)
@@ -2990,18 +2987,83 @@ class StreamRecorderApp(tk.Tk):
                 total[i] += c[i]
         return tally, total
 
+    def _build_stats_panel(self, p):
+        """Compact color-coded status grid: a '● N LIVE' hero (recording count
+        in red) over per-site rows. Built once; _update_stats only re-sets text
+        and color in place, so live status flips don't flicker the panel."""
+        wrap = tk.Frame(p, bg=BG2)
+        wrap.pack(anchor="w", fill="x", padx=16, pady=8)
+
+        hero = tk.Frame(wrap, bg=BG2)
+        hero.pack(fill="x")
+        self._lbl_live = tk.Label(hero, text="● 0 LIVE", fg=ACCENT, bg=BG2,
+                                  font=("Consolas", 13, "bold"), anchor="w")
+        self._lbl_live.pack(side="left")
+        self._lbl_total = tk.Label(hero, text="0 models", fg=TEXT3, bg=BG2,
+                                   font=("Consolas", 9), anchor="e")
+        self._lbl_total.pack(side="right")
+
+        grid = tk.Frame(wrap, bg=BG2)
+        grid.pack(fill="x", pady=(6, 0))
+        grid.grid_columnconfigure(0, weight=1)
+        for col in (1, 2, 3):
+            grid.grid_columnconfigure(col, minsize=30, uniform="num")
+
+        # Header glyph row doubles as the color legend: ▶ red · ● green · ○ grey.
+        for col, (txt, fg) in enumerate(
+                (("", TEXT3), ("▶", ACCENT), ("●", GREEN), ("○", TEXT3))):
+            tk.Label(grid, text=txt, fg=fg, bg=BG2, font=("Consolas", 9),
+                     anchor="e" if col else "w").grid(
+                row=0, column=col, sticky="e" if col else "w", pady=(0, 2))
+
+        self._stat_cells = {}
+        row = 1
+        for site, emoji, lbl in self._DASH_SITES:
+            code = tk.Label(grid, text=f"{emoji} {lbl}", fg=TEXT, bg=BG2,
+                            font=("Consolas", 10), anchor="w")
+            nums = [tk.Label(grid, text="0", fg=TEXT3, bg=BG2,
+                             font=("Consolas", 10), anchor="e")
+                    for _ in range(3)]
+            code.grid(row=row, column=0, sticky="w")
+            for i, n in enumerate(nums):
+                n.grid(row=row, column=i + 1, sticky="e")
+            self._stat_cells[site] = (code, *nums)
+            row += 1
+
+        tk.Frame(grid, bg=BORDER, height=1).grid(
+            row=row, column=0, columnspan=4, sticky="ew", pady=4)
+        row += 1
+
+        tk.Label(grid, text="ALL", fg=TEXT2, bg=BG2,
+                 font=("Consolas", 10, "bold"), anchor="w").grid(
+            row=row, column=0, sticky="w")
+        self._tot_cells = [tk.Label(grid, text="0", bg=BG2,
+                           font=("Consolas", 10, "bold"), anchor="e")
+                           for _ in range(3)]
+        for i, n in enumerate(self._tot_cells):
+            n.grid(row=row, column=i + 1, sticky="e")
+
     def _update_stats(self):
         tally, total = self._dashboard_counts()
-        lines = ["MODELS · STATUS"]
-        for site, emoji, lbl in self._DASH_SITES:
+        self._lbl_live.configure(text=f"● {total[1]} LIVE")
+        self._lbl_total.configure(text=f"{total[0]} models")
+        palette = (ACCENT, GREEN, TEXT2)            # recording, online, offline
+        for site, _e, _l in self._DASH_SITES:
+            code, *nums = self._stat_cells[site]
             c = tally[site]
             if c[0]:
-                lines.append(
-                    f"{emoji} {lbl:<3}{c[0]:>3} │ ▶{c[1]:<2} ●{c[2]:<2} ○{c[3]:<2}")
-        lines.append("──────────────────────")
-        lines.append(
-            f"ALL  {total[0]:>3} │ ▶{total[1]}  ●{total[2]}  ○{total[3]}")
-        self._lbl_stats.configure(text="\n".join(lines))
+                code.grid()
+                for i, n in enumerate(nums):
+                    v = c[i + 1]
+                    n.configure(text=str(v), fg=palette[i] if v else TEXT3)
+                    n.grid()
+            else:
+                code.grid_remove()
+                for n in nums:
+                    n.grid_remove()
+        for i, n in enumerate(self._tot_cells):
+            v = total[i + 1]
+            n.configure(text=str(v), fg=palette[i] if v else TEXT3)
 
     def _api_dashboard(self) -> dict:
         """Aggregate dashboard snapshot for the bot/API (GET /dashboard)."""
