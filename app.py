@@ -197,7 +197,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             }.get(cfg.status, "offline")
         self._json({
             "in_recorder": key in app._rows,
-            "in_saved":    sid in app._saved_rows,
+            "in_saved":    sid in app._saved_data,
             "status":      status_str,
             "auto":        app._auto_rec.get(key, False),
         })
@@ -245,7 +245,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         key = f"{site}:{name}"
         sid = f"saved:{key}"
         # Pre-check so we return a useful error before scheduling
-        if target == "saved" and sid in app._saved_rows:
+        if target == "saved" and sid in app._saved_data:
             self._json({"ok": False, "error": "Already in Saved Models"})
             return
         if target != "saved" and key in app._rows:
