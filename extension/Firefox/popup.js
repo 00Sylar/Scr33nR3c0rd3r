@@ -1,5 +1,27 @@
 const API = 'http://localhost:5200';  // v2 (TEST) port
 
+// ── Live-update state ──────────────────────────────────────────────────────────
+// The popup keeps polling the backend while it is open, so the UI reflects status
+// changes (e.g. a Start that takes a few seconds to fetch the URL + spawn ffmpeg)
+// without the user having to close and reopen it. We only re-render when the
+// meaningful state actually changes, so buttons and feedback don't flicker on
+// every poll.
+const POLL_MS = 1200;
+let pageInfo    = null;   // { name, site } for the active tab (resolved once on open)
+let lastSig     = null;   // signature of the last rendered backend state
+let resyncTimer = null;   // fallback re-render after a Start/Stop action
+
+function stateSig(appData) {
+  return appData
+    ? `${appData.in_recorder}|${appData.in_saved}|${appData.status}|${appData.auto}`
+    : 'down';
+}
+
+function scheduleResync(ms) {
+  clearTimeout(resyncTimer);
+  resyncTimer = setTimeout(() => render(), ms);
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function extractModelInfo() {
@@ -129,10 +151,10 @@ function recorderButtonHTML(inRec, status, appUp) {
   return `<button class="btn btn-start" id="btn-start">⏺  Start Recording</button>`;
 }
 
-async function render() {
+async function render(appData) {
   const root = document.getElementById('root');
 
-  const info = await getPageModel();
+  const info = pageInfo;
   if (!info) {
     root.innerHTML = `<div class="msg">
       <span class="icon">🔍</span>
@@ -141,7 +163,10 @@ async function render() {
     return;
   }
 
-  const appData   = await fetchStatus(info.name, info.site);
+  // Called from a poll with fresh data, or standalone (undefined) → fetch it.
+  if (appData === undefined) appData = await fetchStatus(info.name, info.site);
+  lastSig = stateSig(appData);
+
   const appUp     = appData !== null;
   const inRec     = appData?.in_recorder ?? false;
   const inSaved   = appData?.in_saved    ?? false;
@@ -216,9 +241,11 @@ async function render() {
         const res = await postRecord(info.name, info.site, 'start');
         if (res.ok) {
           fb.className = 'feedback ok';
-          fb.textContent = 'Start requested';
-          // Give the backend a moment to fetch URL + spawn ffmpeg
-          setTimeout(render, 1500);
+          fb.textContent = 'Starting… (updates automatically)';
+          // The button stays in this "…  Starting" state; the live poll flips it
+          // to Stop as soon as the backend reports RECORDING. A fallback resync
+          // recovers the UI if the status never changes (e.g. the model is offline).
+          scheduleResync(10000);
         } else {
           btnStart.disabled = false;
           btnStart.textContent = '⏺  Start Recording';
@@ -245,8 +272,8 @@ async function render() {
         const res = await postRecord(info.name, info.site, 'stop');
         if (res.ok) {
           fb.className = 'feedback ok';
-          fb.textContent = 'Stop requested';
-          setTimeout(render, 800);
+          fb.textContent = 'Stopping… (updates automatically)';
+          scheduleResync(6000);
         } else {
           btnStop.disabled = false;
           btnStop.textContent = '⏹  Stop Recording';
@@ -345,4 +372,20 @@ async function render() {
   }
 }
 
-render();
+// ── Live polling ────────────────────────────────────────────────────────────
+async function poll() {
+  if (!pageInfo) return;   // no model on this page → nothing to track
+  const appData = await fetchStatus(pageInfo.name, pageInfo.site);
+  // Only re-render when the meaningful state changed — avoids flicker and
+  // preserves transient button states ("…  Starting") between polls.
+  if (stateSig(appData) !== lastSig) render(appData);
+}
+
+async function init() {
+  pageInfo = await getPageModel();   // resolved once; the popup is tied to one tab
+  await render();
+  // Keep the popup in sync with the backend for as long as it stays open.
+  setInterval(poll, POLL_MS);
+}
+
+init();
