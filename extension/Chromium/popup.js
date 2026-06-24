@@ -142,13 +142,16 @@ function statusBadgeHTML(s) {
 
 // ── Rank stars ──────────────────────────────────────────────────────────────────
 
-function rankRowHTML(rank) {
+function rankRowHTML(rank, enabled) {
   let stars = '';
   for (let i = 1; i <= 5; i++) {
     const on = i <= rank;
     stars += `<span class="star ${on ? 'on' : ''}" data-r="${i}">${on ? '★' : '☆'}</span>`;
   }
-  return `<div class="rank-row" id="rank-row" title="Click a star to rate (click it again to clear)">${stars}</div>`;
+  const cls  = enabled ? '' : ' disabled';
+  const hint = enabled ? 'Click a star to rate (click it again to clear)'
+                       : 'Add to Saved Models or Recorder to rate';
+  return `<div class="rank-row${cls}" id="rank-row" title="${hint}">${stars}</div>`;
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -206,7 +209,7 @@ async function render(appData) {
     <div class="model-name">${info.name}</div>
     <div class="site-label">${siteLabel}</div>
     ${statusBadgeHTML(curStatus)}
-    ${appUp ? rankRowHTML(curRank) : ''}
+    ${appUp ? rankRowHTML((inSaved || inRec) ? curRank : 0, inSaved || inRec) : ''}
     ${recorderButtonHTML(inRec, curStatus, appUp)}
     ${inRec ? `<label class="auto-row">
         <input type="checkbox" id="chk-auto" ${appData?.auto ? 'checked' : ''}>
@@ -227,8 +230,10 @@ async function render(appData) {
   if (!appUp) return;
 
   // ── Rank stars ──────────────────────────────────────────────────────────────
+  // Only wired when the model is on a list (Saved or Recorder); a disabled
+  // row is display-only so you can't create a rank with no home.
   const rankRow = document.getElementById('rank-row');
-  if (rankRow) {
+  if (rankRow && !rankRow.classList.contains('disabled')) {
     rankRow.querySelectorAll('.star').forEach((st) => {
       st.addEventListener('click', async () => {
         const fb   = document.getElementById('fb');

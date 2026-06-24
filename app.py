@@ -378,8 +378,15 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "rank must be 0-5"}, 400)
             return
         app = self._app
-        # Rank is keyed by model identity, so it works whether or not the model
-        # is in a list. Setting it on a brand-new model just records the rank.
+        # A rank must belong to a model that's actually on a list — otherwise it
+        # would be an invisible "orphan" rank with no row to manage it. Clearing
+        # (rank 0) is always allowed so a stale rank can be wiped.
+        key = f"{site}:{name}"
+        if rank > 0 and key not in app._rows and f"saved:{key}" not in app._saved_data:
+            self._json({"ok": False,
+                        "error": "Add the model to Saved Models or Recorder "
+                                 "before ranking"})
+            return
         app.after(0, lambda n=name, s=site, r=rank:
                   app._set_rank_many([(n, s)], r))
         self._json({"ok": True, "rank": rank})
@@ -3196,10 +3203,15 @@ class StreamRecorderApp(tk.Tk):
             {"name": d["name"], "site": d["site"]}
             for d in self._saved_data.values()
         ]
-        # Ranks are keyed by model identity and persisted on their own so a
-        # rank survives even if the model is in neither list (e.g. ranked from
-        # the extension). Drop zero entries to keep the file tidy.
-        self.settings.ranks = {k: v for k, v in self._ranks.items() if v}
+        # Ranks are keyed by model identity and persisted on their own (so a
+        # saved model's rank survives even if it's also added to / removed from
+        # the Recorder). Only keep ranks for models that are actually on a list
+        # — a rank with no row is an "orphan" with nowhere to manage it, so we
+        # drop those (and zero entries) here.
+        self.settings.ranks = {
+            k: v for k, v in self._ranks.items()
+            if v and (k in self._rows or f"saved:{k}" in self._saved_data)
+        }
         save_settings(self.settings)
 
     def _restore_models(self):

@@ -24,6 +24,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 - ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)
 - ✅ **Dropped-segment warnings** — get notified when a stream is losing segments because bandwidth can't keep up (toggle in Settings)
 - ✅ **Saved Models** tab — view-only watchlist with online/offline status
+- ✅ **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab (click a star, click it again to clear; or right-click → **Set Rank** for one row or a whole selection at once). Sortable **RANK** column, shared per-model across both tabs, and saved between sessions
 - ✅ Windows desktop notifications (recording started/stopped/split/dropped segments)
 - ✅ Minimize to system tray
 - ✅ 🔒 Privacy Mode — idle screen cover
@@ -31,7 +32,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 - ✅ Settings saved between sessions (models, output folder, max size, etc.)
 
 ### Integrations
-- ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page (local API, port 5200)
+- ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page, plus 1–5 star rating right from the popup (for models already in Saved Models or Recorder); local API, port 5200
 - ✅ Telegram upload pipeline (optional) — converts finished recordings and uploads them to a Telegram group/topic
 - ✅ **Chat-bot / agent control (OpenClaw)** — drive Scr33nX from your phone over Telegram/WhatsApp: text a link to record, stop one or all, add/remove from Saved, toggle the monitors/scanner/pipeline, and even open or close the app. Everything runs through the same local API. Full setup: **[OPENCLAW-HOWTO.md](OPENCLAW-HOWTO.md)**.
 
@@ -74,7 +75,7 @@ Double-click **`StreamRecorder.bat`** (launches the GUI with no console window).
 
 ### 5. Install the browser extension (optional)
 
-The extension adds models to Scr33nX with one click while you're on their page. The app must be running (it listens on `http://localhost:5200`).
+The extension adds models to Scr33nX with one click while you're on their page, and lets you set a 1–5 star rank from the popup once the model is in Saved Models or the Recorder. The app must be running (it listens on `http://localhost:5200`).
 
 **Chromium browsers (Chrome / Brave / Opera / Edge):**
 1. Open `chrome://extensions` (or `brave://extensions`, `opera://extensions`, `edge://extensions`)
@@ -98,6 +99,7 @@ The extension adds models to Scr33nX with one click while you're on their page. 
 4. When the model goes offline, the recording stops automatically
 5. If you set a **Max File Size**, the recording splits into numbered parts (`_part001`, `_part002`, …) automatically; a recording that never reaches the limit keeps a single, unsuffixed file
 6. Watch the **↓ Mbps** meter in the header while recording several models — if your streams start dropping segments you'll also get a warning notification
+7. **Rate models** — give any model 1–5 stars on the Recorder or Saved Models tab (click a star in the **RANK** column, or right-click → **Set Rank** to rate a whole selection), then click the `RANK` header to sort by it. You can also rate from the browser-extension popup. Ranks stay with the model across both tabs and persist between sessions
 
 ### Settings (left panel)
 
@@ -170,7 +172,7 @@ While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, 
 | `POST /add` | `{name, site, target}` | add to `recorder` or `saved` |
 | `POST /record` | `{name, site, action}` | `start` / `stop` recording one model |
 | `POST /auto` | `{name, site, enabled}` | toggle AUTO for a model |
-| `POST /rank` | `{name, site, rank}` | set a model's 0–5 star rank (`0` clears) |
+| `POST /rank` | `{name, site, rank}` | set a model's 0–5 star rank (`0` clears); the model must already be in Saved Models or the Recorder |
 | `POST /remove` | `{name, site, target}` | remove from `recorder` or `saved` |
 | `POST /stop_all` | — | stop every active download + clear all AUTO |
 | `POST /clear` | — | stop monitor + all downloads, clear AUTO, remove every Recorder model (Saved kept) |

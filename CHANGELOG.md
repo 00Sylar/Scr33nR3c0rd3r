@@ -11,6 +11,23 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **⭐ 1–5 star model ranks.** Rate models on both the Recorder and Saved
+  Models tabs: a sortable **RANK** column where you click a star to set 1–5
+  (click the current star again to clear), or right-click → **Set Rank** to
+  rate a single row or a whole checked/selected set at once. Ranks are keyed
+  by model identity, so the same model shows the same stars on both tabs and
+  in the browser extension, and they persist between sessions (in
+  `~/.streamrecorder_config.json` under `ranks`). The Saved Models **export
+  now carries ranks and merges** into an existing export file (keeps
+  file-only entries, refreshes ranks) instead of overwriting; **import
+  back-fills** stars onto models you already have.
+- **Rank from the browser extension.** The popup (Chromium **and** Firefox)
+  shows a clickable star row for the model on the current page. To avoid
+  "orphan" ranks with no row to manage them, rating is only enabled once the
+  model is in **Saved Models or the Recorder** — otherwise the stars are
+  shown disabled with a hint. New `POST /rank {name, site, rank}` endpoint
+  (rejects ranking a model that isn't on a list); `GET /status` now also
+  returns `rank`.
 - **Status dashboard (left panel).** The single "N recording · N offline" line
   is now a per-site + totals breakdown: one row per site that has models —
   🟡 CB, 🔴 SC, 🔵 CS, 🟢 MFC (colors match each site's brand) — showing
@@ -79,6 +96,17 @@ grouped by date / milestone.
   `_partNNN` padding as the recorder (was `_part1`).
 
 ### Fixed
+- **UI freeze when starting (or stopping) many recordings at once.** A burst
+  of starts — the monitor finding many models online, AUTO firing on all of
+  them, or "Start" on a large selection — spawned one thread *and one ffmpeg
+  subprocess per model simultaneously*, storming the CPU/disk and freezing
+  the window. Launches now go through a bounded pool (4 concurrent) with
+  per-model dedupe, so a big batch staggers smoothly instead of stampeding.
+- **Silent duplicate-instance.** Starting a second Scr33nX while one was
+  already running left the new one unable to bind the API port (5200); it ran
+  half-working, and its tray icon and the browser extension actually
+  controlled the *other* instance. The failed bind is now logged and shown in
+  the Activity Log with a clear "another Scr33nX is likely running" warning.
 - **STOP TELEGRAM PIPELINE now halts the uploader workers.** Previously the
   converter stopped but the Telegram upload clients kept draining the queued
   backlog. Stopping now lets the in-flight upload finish, then halts the
