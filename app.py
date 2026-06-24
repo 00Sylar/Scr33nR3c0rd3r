@@ -200,6 +200,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             "in_saved":    sid in app._saved_data,
             "status":      status_str,
             "auto":        app._auto_rec.get(key, False),
+            "rank":        app._get_rank(name, site),
         })
 
     def do_POST(self):
@@ -212,6 +213,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._handle_remove()
         elif parsed.path == "/auto":
             self._handle_auto()
+        elif parsed.path == "/rank":
+            self._handle_rank()
         elif parsed.path == "/stop_all":
             self._handle_stop_all()
         elif parsed.path == "/clear":
@@ -353,6 +356,33 @@ class _ApiHandler(BaseHTTPRequestHandler):
         app.after(0, lambda: app._set_auto(key, enabled))
         self._json({"ok": True, "auto": enabled})
 
+    def _handle_rank(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+        name = body.get("name", "").strip().lower()
+        site = body.get("site", "").strip().lower()
+        if not name or not site:
+            self._json({"ok": False, "error": "missing name or site"}, 400)
+            return
+        try:
+            rank = int(body.get("rank", 0))
+        except (TypeError, ValueError):
+            self._json({"ok": False, "error": "rank must be an integer 0-5"}, 400)
+            return
+        if not 0 <= rank <= 5:
+            self._json({"ok": False, "error": "rank must be 0-5"}, 400)
+            return
+        app = self._app
+        # Rank is keyed by model identity, so it works whether or not the model
+        # is in a list. Setting it on a brand-new model just records the rank.
+        app.after(0, lambda n=name, s=site, r=rank:
+                  app._set_rank_many([(n, s)], r))
+        self._json({"ok": True, "rank": rank})
+
     def _handle_stop_all(self):
         """Force-stop every active download and clear AUTO (no confirm dialog)."""
         self._app.after(0, self._app._api_stop_all)
@@ -477,6 +507,13 @@ class StreamRecorderApp(tk.Tk):
         # A 1500+ watchlist otherwise costs startup time, Tk memory, and makes
         # every engine scan iterate the full list even when the tab is unused.
         self._saved_data: dict[str, dict] = {}
+        # Per-model 0-5 star rank, keyed by "site:name" (identity, not list) so
+        # the same model shows the same rank in the Recorder tab, the Saved tab
+        # and the browser extension. Persisted in settings.ranks.
+        self._ranks: dict[str, int] = {
+            k: int(v) for k, v in (getattr(self.settings, "ranks", None) or {}).items()
+            if v
+        }
         self._saved_built = False
         self._filter_jobs: dict[str, Optional[str]] = {"rec": None, "saved": None}
         # Row checkboxes (☐/☑ glyph in the name column): an explicit working
@@ -815,7 +852,7 @@ class StreamRecorderApp(tk.Tk):
                    ).pack(side="right", padx=(0, 6), pady=5)
 
         # ── Treeview ──
-        cols = ("status", "file", "size", "auto", "saved")
+        cols = ("rank", "status", "file", "size", "auto", "saved")
         frame = tk.Frame(p, bg=BG)
         frame.pack(fill="both", expand=True)
 
@@ -826,6 +863,10 @@ class StreamRecorderApp(tk.Tk):
         self._tree.heading("#0", text="MODEL  ↕", anchor="w",
                            command=lambda: self._sort_tree("#0"))
         self._tree.column("#0", width=200, minwidth=120)
+
+        self._tree.heading("rank", text="RANK  ↕", anchor="w",
+                           command=lambda: self._sort_tree("rank"))
+        self._tree.column("rank", width=92, minwidth=92, stretch=False)
 
         self._tree.heading("status", text="STATUS  ↕", anchor="w",
                            command=lambda: self._sort_tree("status"))
@@ -885,7 +926,7 @@ class StreamRecorderApp(tk.Tk):
                  "camsoda": "CAMSODA",
                  "myfreecams": "MYFREECAMS"}.get(site, site.upper())
         self._tree.insert("", "end", iid=site_id, text=f"  {label}",
-                          values=("", "", "", ""), tags=("site_hdr",), open=True)
+                          values=("", "", "", "", "", ""), tags=("site_hdr",), open=True)
 
     # ── Row checkboxes ────────────────────────────────────────────────────────
     # Tk's Treeview has no native checkbox column, and nothing can sit left of
@@ -1057,11 +1098,22 @@ class StreamRecorderApp(tk.Tk):
             # everywhere in the row.
             self._toggle_check(self._tree, iid, self._checked)
             return "break"  # don't let the click also change the selection
+        # Click a star in the RANK column (#1) to set 1-5 stars; clicking the
+        # star that's already the rank clears it back to 0.
+        if col == "#1" and not modified:
+            site, name = iid.split(":", 1)
+            bbox = self._tree.bbox(iid, col)
+            if bbox:
+                bx, _, bw, _ = bbox
+                star = max(1, min(5, int((event.x - bx) / (bw / 5)) + 1))
+                cur = self._get_rank(name, site)
+                self._set_rank_many([(name, site)], 0 if cur == star else star)
+            return "break"
         if not modified:
             self._drag_anchor["rec"] = iid  # start of a possible drag-select
-        # col "#5" = the 4th data column = "auto" (since #0 is tree column,
-        # #1=status, #2=file, #3=size, #4=auto)
-        if col == "#4":
+        # Columns: #0 tree (name), #1=rank, #2=status, #3=file, #4=size,
+        # #5=auto, #6=saved.
+        if col == "#5":
             cur = self._auto_rec.get(iid, False)
             new_val = not cur
             self._auto_rec[iid] = new_val
@@ -1129,6 +1181,23 @@ class StreamRecorderApp(tk.Tk):
                           command=lambda: os.startfile(self.settings.output_dir))
             m.add_command(label=f"✕  Remove  ({n} selected)",
                           command=self._remove_selected)
+
+        # Set Rank submenu — one row or the whole selection
+        m.add_separator()
+        rank_items = [(k.split(":", 1)[1], k.split(":", 1)[0]) for k in sel]
+        rank_lbl = "Set Rank" if n == 1 else f"Set Rank  ({n} selected)"
+        rank_menu = tk.Menu(m, tearoff=0, bg=BG3, fg=TEXT,
+                            activebackground=BG2, activeforeground=ACCENT,
+                            font=UI, relief="flat", bd=0)
+        for r in (5, 4, 3, 2, 1):
+            rank_menu.add_command(
+                label=self._rank_stars(r),
+                command=lambda it=rank_items, rr=r: self._set_rank_many(it, rr))
+        rank_menu.add_separator()
+        rank_menu.add_command(
+            label="☆  Clear rank",
+            command=lambda it=rank_items: self._set_rank_many(it, 0))
+        m.add_cascade(label=f"⭐  {rank_lbl}", menu=rank_menu)
 
         m.add_separator()
         raw_sel = [i for i in self._tree.selection()
@@ -1335,6 +1404,10 @@ class StreamRecorderApp(tk.Tk):
                 children.sort(
                     key=lambda iid: self._size_sort_key(tree.set(iid, "size")),
                     reverse=reverse)
+            elif col == "rank":
+                children.sort(
+                    key=lambda iid: tree.set(iid, "rank").count("★"),
+                    reverse=reverse)
             else:
                 children.sort(
                     key=lambda iid: tree.set(iid, col).strip().lower(),
@@ -1352,7 +1425,7 @@ class StreamRecorderApp(tk.Tk):
             self._tree, col,
             site_prefix="_site_",
             sort_state=self._sort_reverse,
-            col_labels={"#0": "MODEL", "status": "STATUS",
+            col_labels={"#0": "MODEL", "rank": "RANK", "status": "STATUS",
                         "size": "SIZE", "auto": "AUTO", "saved": "SAVED"},
         )
 
@@ -1361,7 +1434,8 @@ class StreamRecorderApp(tk.Tk):
             self._stree, col,
             site_prefix="_ssite_",
             sort_state=self._stree_sort_reverse,
-            col_labels={"#0": "MODEL", "status": "STATUS", "size": "SIZE"},
+            col_labels={"#0": "MODEL", "rank": "RANK",
+                        "status": "STATUS", "size": "SIZE"},
         )
 
     # ── Model management ─────────────────────────────────────────────────────
@@ -1442,7 +1516,8 @@ class StreamRecorderApp(tk.Tk):
         auto_text  = "☑" if auto_rec else "☐"
         saved_text = "✔️" if self._saved_key(name, site) in self._saved_data else "❌"
         self._tree.insert(parent, "end", iid=key, text=f"☐  {name}",
-                          values=("●  OFFLINE", "—", "—", auto_text, saved_text),
+                          values=(self._rank_stars(self._get_rank(name, site)),
+                                  "●  OFFLINE", "—", "—", auto_text, saved_text),
                           tags=("s_offline",))
         self._rows[key] = True
         self._auto_rec[key] = auto_rec
@@ -2103,7 +2178,7 @@ class StreamRecorderApp(tk.Tk):
         ttk.Button(bar, text="📤 Export", style="Flat.TButton",
                    command=self._saved_export).pack(side="right", padx=2, pady=5)
 
-        cols = ("status", "file", "size")
+        cols = ("rank", "status", "file", "size")
         frame = tk.Frame(p, bg=BG)
         frame.pack(fill="both", expand=True)
 
@@ -2113,6 +2188,9 @@ class StreamRecorderApp(tk.Tk):
         self._stree.heading("#0", text="MODEL  ↕", anchor="w",
                             command=lambda: self._sort_stree("#0"))
         self._stree.column("#0", width=200, minwidth=120)
+        self._stree.heading("rank", text="RANK  ↕", anchor="w",
+                            command=lambda: self._sort_stree("rank"))
+        self._stree.column("rank", width=92, minwidth=92, stretch=False)
         self._stree.heading("status", text="STATUS  ↕", anchor="w",
                             command=lambda: self._sort_stree("status"))
         self._stree.column("status", width=140, minwidth=80)
@@ -2152,6 +2230,11 @@ class StreamRecorderApp(tk.Tk):
             n, s = m.get("name"), m.get("site")
             if n and s:
                 self._saved_data[self._saved_key(n, s)] = {"name": n, "site": s}
+                # Migrate a rank stored inline on older configs into the
+                # shared store (settings.ranks is authoritative now).
+                r = int(m.get("rank", 0) or 0)
+                if r:
+                    self._ranks.setdefault(self._rank_key(n, s), r)
         self._update_saved_count()
 
     def _populate_saved_tab(self):
@@ -2311,10 +2394,70 @@ class StreamRecorderApp(tk.Tk):
                  "camsoda": "CAMSODA",
                  "myfreecams": "MYFREECAMS"}.get(site, site.upper())
         self._stree.insert("", "end", iid=site_id, text=f"  {label}",
-                           values=("", "", ""), tags=("site_hdr",), open=True)
+                           values=("", "", "", ""), tags=("site_hdr",), open=True)
 
     def _saved_key(self, name: str, site: str) -> str:
         return f"saved:{site}:{name.lower()}"
+
+    @staticmethod
+    def _rank_stars(rank: int) -> str:
+        """Render a 0-5 rank as five star glyphs (filled + empty), e.g.
+        3 → '★★★☆☆'. Always five glyphs so an unranked row is still
+        clickable star-by-star."""
+        r = max(0, min(5, int(rank or 0)))
+        return "★" * r + "☆" * (5 - r)
+
+    @staticmethod
+    def _rank_from_stars(text: str) -> int:
+        return text.count("★")
+
+    @staticmethod
+    def _rank_key(name: str, site: str) -> str:
+        return f"{site.lower()}:{name.lower()}"
+
+    def _get_rank(self, name: str, site: str) -> int:
+        return int(self._ranks.get(self._rank_key(name, site), 0) or 0)
+
+    def _set_rank_many(self, items, rank: int) -> int:
+        """Set the 0-5 star rank on a list of (name, site) models — the single
+        place ranks change. Updates the shared store, refreshes the matching
+        rows in BOTH trees (whichever exist), and persists once. Returns the
+        number of models whose rank actually changed."""
+        rank = max(0, min(5, int(rank)))
+        stars = self._rank_stars(rank)
+        changed = 0
+        for name, site in items:
+            k = self._rank_key(name, site)
+            if int(self._ranks.get(k, 0) or 0) != rank:
+                changed += 1
+            if rank:
+                self._ranks[k] = rank
+            else:
+                self._ranks.pop(k, None)
+            rkey = f"{site}:{name.lower()}"
+            if self._tree.exists(rkey):
+                self._tree.set(rkey, "rank", stars)
+            sid = self._saved_key(name, site)
+            if self._stree.exists(sid):
+                self._stree.set(sid, "rank", stars)
+        if changed:
+            self._persist_models()
+        return changed
+
+    def _saved_rank(self, sid: str) -> int:
+        _, site, name = sid.split(":", 2)
+        return self._get_rank(name, site)
+
+    def _set_saved_rank(self, sids, rank: int) -> int:
+        """Saved-tab entry point: rank one or many rows (by sid)."""
+        if isinstance(sids, str):
+            sids = [sids]
+        items = []
+        for sid in sids:
+            if sid in self._saved_data or self._stree.exists(sid):
+                _, site, name = sid.split(":", 2)
+                items.append((name, site))
+        return self._set_rank_many(items, rank)
 
     def _insert_saved_model(self, name: str, site: str):
         key = f"{site}:{name.lower()}"
@@ -2324,7 +2467,8 @@ class StreamRecorderApp(tk.Tk):
         self._saved_ensure_site(site)
         parent = f"_ssite_{site}"
         self._stree.insert(parent, "end", iid=sid, text=f"☐  {name}",
-                           values=("●  OFFLINE", "—", "—"),
+                           values=(self._rank_stars(self._saved_rank(sid)),
+                                   "●  OFFLINE", "—", "—"),
                            tags=("s_offline",))
         self._saved_rows[sid] = True
         # Refresh initial size/status
@@ -2453,6 +2597,17 @@ class StreamRecorderApp(tk.Tk):
         if col == "#0" and event.x <= 48 and not modified:
             self._toggle_check(self._stree, sid, self._saved_checked)
             return "break"
+        # Click a star in the RANK column to set 1-5 stars; clicking the
+        # star that's already the rank clears it back to 0.
+        if col == "#1" and not modified:
+            bbox = self._stree.bbox(sid, col)
+            if bbox:
+                bx, _, bw, _ = bbox
+                star = int((event.x - bx) / (bw / 5)) + 1
+                star = max(1, min(5, star))
+                self._set_saved_rank(sid, 0 if self._saved_rank(sid) == star
+                                     else star)
+            return "break"
         if not modified:
             self._drag_anchor["saved"] = sid
 
@@ -2488,6 +2643,21 @@ class StreamRecorderApp(tk.Tk):
             m.add_separator()
             m.add_command(label=f"✕  Remove from Saved  ({n} {src})",
                           command=lambda t=targets: self._remove_saved_many(t))
+        # Set Rank submenu — works for one row or the whole selection/check set
+        m.add_separator()
+        rank_lbl = "Set Rank" if n == 1 else f"Set Rank  ({n})"
+        rank_menu = tk.Menu(m, tearoff=0, bg=BG3, fg=TEXT,
+                            activebackground=BG2, activeforeground=ACCENT,
+                            font=UI, relief="flat", bd=0)
+        for r in (5, 4, 3, 2, 1):
+            rank_menu.add_command(
+                label=self._rank_stars(r),
+                command=lambda t=targets, rr=r: self._set_saved_rank(t, rr))
+        rank_menu.add_separator()
+        rank_menu.add_command(
+            label="☆  Clear rank",
+            command=lambda t=targets: self._set_saved_rank(t, 0))
+        m.add_cascade(label=f"⭐  {rank_lbl}", menu=rank_menu)
         m.add_separator()
         raw_sel = [s for s in self._stree.selection()
                    if not s.startswith("_ssite_")]
@@ -2527,17 +2697,49 @@ class StreamRecorderApp(tk.Tk):
         )
         if not path:
             return
-        items = [{"name": d["name"], "site": d["site"]}
-                 for d in self._saved_data.values()]
+        # Merge into an existing export rather than overwriting it: entries
+        # already in the file are kept, ranks are refreshed from the current
+        # list, and models the file has but we don't are preserved untouched.
+        merged: dict = {}
+        existing = 0
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    prev = json.load(f)
+                for m in (prev.get("saved_models") if isinstance(prev, dict)
+                          else []) or []:
+                    if not isinstance(m, dict):
+                        continue
+                    n = (m.get("name") or "").strip()
+                    s = (m.get("site") or "").strip()
+                    if n and s:
+                        merged[f"{s.lower()}:{n.lower()}"] = {
+                            "name": n, "site": s,
+                            "rank": int(m.get("rank", 0) or 0)}
+                existing = len(merged)
+            except Exception:
+                pass  # unreadable/garbage file — fall back to a clean write
+        updated = 0
+        for d in self._saved_data.values():
+            k = f"{d['site'].lower()}:{d['name'].lower()}"
+            if k in merged:
+                updated += 1
+            merged[k] = {"name": d["name"], "site": d["site"],
+                         "rank": self._get_rank(d["name"], d["site"])}
+        items = list(merged.values())
         try:
             with open(path, "w", encoding="utf-8") as f:
-                json.dump({"version": 1, "saved_models": items}, f, indent=2)
+                json.dump({"version": 2, "saved_models": items}, f, indent=2)
         except Exception as e:
             messagebox.showerror("Export failed", str(e))
             return
+        kept = existing - updated  # file-only entries left untouched
         self._log_add(f"Exported {len(items)} saved model(s) → {path}", "success")
-        messagebox.showinfo("Export complete",
-                            f"Exported {len(items)} model(s) to:\n{path}")
+        messagebox.showinfo(
+            "Export complete",
+            f"Wrote {len(items)} model(s) to:\n{path}" +
+            (f"\n\nMerged with existing file: {kept} kept, "
+             f"{updated} updated." if existing else ""))
 
     def _saved_import(self):
         path = filedialog.askopenfilename(
@@ -2557,7 +2759,7 @@ class StreamRecorderApp(tk.Tk):
             messagebox.showerror("Import failed",
                                  "File is not a valid saved-models export.")
             return
-        added = skipped = invalid = 0
+        added = skipped = invalid = ranked = 0
         for m in items:
             if not isinstance(m, dict):
                 invalid += 1
@@ -2566,25 +2768,41 @@ class StreamRecorderApp(tk.Tk):
             if not n or not s:
                 invalid += 1
                 continue
-            if self._saved_key(n, s) in self._saved_data:
-                skipped += 1
+            rank = max(0, min(5, int(m.get("rank", 0) or 0)))
+            sid = self._saved_key(n, s)
+            rkey = self._rank_key(n, s)
+            if sid in self._saved_data:
+                # Already on the watchlist — still pull in a rank if the file
+                # carries one and ours is unset, so importing a ranked export
+                # back-fills stars onto existing models.
+                if rank and self._get_rank(n, s) == 0:
+                    self._ranks[rkey] = rank
+                    if self._stree.exists(sid):
+                        self._stree.set(sid, "rank", self._rank_stars(rank))
+                    ranked += 1
+                else:
+                    skipped += 1
                 continue
-            self._saved_data[self._saved_key(n, s)] = {"name": n, "site": s}
+            self._saved_data[sid] = {"name": n, "site": s}
+            if rank:
+                self._ranks[rkey] = rank
             if self._monitoring_saved:
                 self.recorder.add_model(n, s, "saved", quiet=True)
             self._insert_saved_model(n, s)
             added += 1
-        if added:
+        if added or ranked:
             self._update_saved_count()
             self._persist_models()
         self._log_add(
-            f"Import: added {added}, skipped {skipped} duplicate(s)" +
+            f"Import: added {added}, ranked {ranked}, "
+            f"skipped {skipped} duplicate(s)" +
             (f", {invalid} invalid" if invalid else ""),
-            "success" if added else "warn",
+            "success" if (added or ranked) else "warn",
         )
         messagebox.showinfo(
             "Import complete",
-            f"Added: {added}\nSkipped (already present): {skipped}" +
+            f"Added: {added}\nRanks applied to existing: {ranked}\n"
+            f"Skipped (already present): {skipped}" +
             (f"\nInvalid entries: {invalid}" if invalid else ""),
         )
 
@@ -2941,6 +3159,10 @@ class StreamRecorderApp(tk.Tk):
             {"name": d["name"], "site": d["site"]}
             for d in self._saved_data.values()
         ]
+        # Ranks are keyed by model identity and persisted on their own so a
+        # rank survives even if the model is in neither list (e.g. ranked from
+        # the extension). Drop zero entries to keep the file tidy.
+        self.settings.ranks = {k: v for k, v in self._ranks.items() if v}
         save_settings(self.settings)
 
     def _restore_models(self):
@@ -2952,6 +3174,9 @@ class StreamRecorderApp(tk.Tk):
                 q = int(m.get("max_q", 0) or 0)
                 if q:
                     self._model_q[f"{s}:{n}"] = q
+                r = int(m.get("rank", 0) or 0)  # migrate older inline ranks
+                if r:
+                    self._ranks.setdefault(self._rank_key(n, s), r)
         self._update_stats()
 
     # Dashboard rows — emoji colors match each site's brand
@@ -3089,8 +3314,20 @@ class StreamRecorderApp(tk.Tk):
             t = threading.Thread(target=self._api_server.serve_forever,
                                  daemon=True, name="api-server")
             t.start()
-        except OSError:
+        except OSError as e:
+            # Almost always "port already in use" — i.e. another Scr33nX is
+            # already running and owns the API port. Make it loud instead of
+            # silently starting a second, half-working instance whose tray icon
+            # and browser extension talk to the OTHER process.
             self._api_server = None
+            logging.getLogger().warning(
+                "API server could not bind 127.0.0.1:%s (%s) — is another "
+                "Scr33nX already running? The browser extension will talk to "
+                "that instance, not this one.", _API_PORT, e)
+            self._log_add(
+                f"⚠  Local API port {_API_PORT} is already in use — another "
+                f"Scr33nX is likely running. The browser extension is "
+                f"controlling that instance, not this window.", "warn")
 
     def _stop_api_server(self):
         if getattr(self, "_api_server", None):

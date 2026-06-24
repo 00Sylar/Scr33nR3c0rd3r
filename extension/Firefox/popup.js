@@ -13,7 +13,7 @@ let resyncTimer = null;   // fallback re-render after a Start/Stop action
 
 function stateSig(appData) {
   return appData
-    ? `${appData.in_recorder}|${appData.in_saved}|${appData.status}|${appData.auto}`
+    ? `${appData.in_recorder}|${appData.in_saved}|${appData.status}|${appData.auto}|${appData.rank}`
     : 'down';
 }
 
@@ -116,6 +116,16 @@ async function postAuto(name, site, enabled) {
   return r.json();
 }
 
+async function postRank(name, site, rank) {
+  const r = await fetch(`${API}/rank`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ name, site, rank }),
+    signal:  AbortSignal.timeout(3000),
+  });
+  return r.json();
+}
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function statusBadgeHTML(s) {
@@ -128,6 +138,17 @@ function statusBadgeHTML(s) {
     error:     '⚠  ERROR',
   };
   return `<div class="status-badge ${s}">${labels[s] || s.toUpperCase()}</div>`;
+}
+
+// ── Rank stars ──────────────────────────────────────────────────────────────────
+
+function rankRowHTML(rank) {
+  let stars = '';
+  for (let i = 1; i <= 5; i++) {
+    const on = i <= rank;
+    stars += `<span class="star ${on ? 'on' : ''}" data-r="${i}">${on ? '★' : '☆'}</span>`;
+  }
+  return `<div class="rank-row" id="rank-row" title="Click a star to rate (click it again to clear)">${stars}</div>`;
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -171,6 +192,7 @@ async function render(appData) {
   const inRec     = appData?.in_recorder ?? false;
   const inSaved   = appData?.in_saved    ?? false;
   const curStatus = appData?.status      ?? null;
+  const curRank   = appData?.rank        ?? 0;
 
   const siteLabel = info.site.charAt(0).toUpperCase() + info.site.slice(1);
 
@@ -184,6 +206,7 @@ async function render(appData) {
     <div class="model-name">${info.name}</div>
     <div class="site-label">${siteLabel}</div>
     ${statusBadgeHTML(curStatus)}
+    ${appUp ? rankRowHTML(curRank) : ''}
     ${recorderButtonHTML(inRec, curStatus, appUp)}
     ${inRec ? `<label class="auto-row">
         <input type="checkbox" id="chk-auto" ${appData?.auto ? 'checked' : ''}>
@@ -202,6 +225,43 @@ async function render(appData) {
   `;
 
   if (!appUp) return;
+
+  // ── Rank stars ──────────────────────────────────────────────────────────────
+  const rankRow = document.getElementById('rank-row');
+  if (rankRow) {
+    rankRow.querySelectorAll('.star').forEach((st) => {
+      st.addEventListener('click', async () => {
+        const fb   = document.getElementById('fb');
+        const star = parseInt(st.dataset.r, 10);
+        const cur  = appData?.rank ?? 0;
+        const next = (cur === star) ? 0 : star;   // click current rank to clear
+        // Optimistic paint so the stars respond instantly.
+        rankRow.querySelectorAll('.star').forEach((s2) => {
+          const on = parseInt(s2.dataset.r, 10) <= next;
+          s2.classList.toggle('on', on);
+          s2.textContent = on ? '★' : '☆';
+        });
+        try {
+          const res = await postRank(info.name, info.site, next);
+          if (res.ok) {
+            fb.className = 'feedback ok';
+            fb.textContent = next ? `Rated ${next}★` : 'Rank cleared';
+            // Keep local state in sync so the poll doesn't redraw and wipe it.
+            if (appData) appData.rank = next;
+            lastSig = stateSig(appData);
+          } else {
+            fb.className = 'feedback err';
+            fb.textContent = res.error || 'Failed';
+            setTimeout(() => render(), 200);
+          }
+        } catch {
+          fb.className = 'feedback err';
+          fb.textContent = 'Could not reach StreamRecorder';
+          setTimeout(() => render(), 200);
+        }
+      });
+    });
+  }
 
   // ── Add to Recorder ─────────────────────────────────────────────────────────
   const btnRec = document.getElementById('btn-rec');

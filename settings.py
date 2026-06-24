@@ -43,6 +43,7 @@ class AppSettings:
     playwright_fallback_enabled: bool = True   # Stripchat: use browser fallback when native fails
     models: List[dict] = None                  # [{name, site, auto_rec, max_q}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list
+    ranks: dict = None                         # "site:name" → 0-5 star rank
     # Pipeline / Telegram upload — persisted to PIPELINE_CONFIG_FILE
     pipeline_enabled: bool = False
     pipeline_converted_dir: str = ""           # empty = <output_dir>/converted
@@ -57,6 +58,8 @@ class AppSettings:
             self.models = []
         if self.saved_models is None:
             self.saved_models = []
+        if self.ranks is None:
+            self.ranks = {}
 
 
 def _load_pipeline_file() -> dict:
@@ -106,6 +109,7 @@ def load_settings() -> AppSettings:
     s.playwright_fallback_enabled = main.get("playwright_fallback_enabled", s.playwright_fallback_enabled)
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
+    s.ranks = main.get("ranks", {}) or {}
 
     # Pipeline config: prefer Pipeline/pipeline_settings.json; migrate legacy
     # fields from the main config file on first load if present.
@@ -143,6 +147,7 @@ def save_settings(s: AppSettings):
         "playwright_fallback_enabled": s.playwright_fallback_enabled,
         "models": s.models,
         "saved_models": s.saved_models,
+        "ranks": s.ranks,
     }
     _save_json(CONFIG_FILE, data)
     save_pipeline_settings(s)

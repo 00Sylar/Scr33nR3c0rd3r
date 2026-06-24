@@ -57,6 +57,22 @@
     .status-badge.offline   { color: #56565c; }
     .status-badge.checking  { color: #ffc14d; }
 
+    .rank-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 11px;
+      user-select: none;
+    }
+    .rank-row .star {
+      font-size: 19px;
+      line-height: 1;
+      color: #3a3a3e;
+      cursor: pointer;
+      transition: color 0.1s, transform 0.1s;
+    }
+    .rank-row .star.on { color: #ffc14d; }
+    .rank-row .star:hover { transform: scale(1.18); }
+
     .btn {
       display: block;
       width: 100%;

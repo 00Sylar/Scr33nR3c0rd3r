@@ -165,11 +165,12 @@ While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, 
 
 | Method & path | Body | Action |
 |---|---|---|
-| `GET /status` | `?name=&site=` | model state: `in_recorder`, `in_saved`, `status`, `auto` |
+| `GET /status` | `?name=&site=` | model state: `in_recorder`, `in_saved`, `status`, `auto`, `rank` |
 | `GET /dashboard` | — | aggregate snapshot: per-site (`CB`/`SC`/`CS`/`MFC`) + `all` totals of `total`/`recording`/`online`/`offline` |
 | `POST /add` | `{name, site, target}` | add to `recorder` or `saved` |
 | `POST /record` | `{name, site, action}` | `start` / `stop` recording one model |
 | `POST /auto` | `{name, site, enabled}` | toggle AUTO for a model |
+| `POST /rank` | `{name, site, rank}` | set a model's 0–5 star rank (`0` clears) |
 | `POST /remove` | `{name, site, target}` | remove from `recorder` or `saved` |
 | `POST /stop_all` | — | stop every active download + clear all AUTO |
 | `POST /clear` | — | stop monitor + all downloads, clear AUTO, remove every Recorder model (Saved kept) |
