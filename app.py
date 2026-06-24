@@ -1847,8 +1847,9 @@ class StreamRecorderApp(tk.Tk):
     # ── Privacy Mode ──────────────────────────────────────────────────────────
     # When enabled and the window sits untouched for PRIVACY_IDLE_SECONDS, a
     # full-window starfield covers the UI (and the title is blanked) so nothing
-    # is readable while AFK. A click inside or a window move asks to exit;
-    # the mode re-arms after the next idle period until the box is unchecked.
+    # is readable while AFK. Click the cover to exit (a confirm panel is drawn
+    # ON the cover); the mode re-arms after the next idle period until the box
+    # is unchecked.
 
     def _privacy_init(self):
         self._last_activity      = time.time()
@@ -1856,6 +1857,7 @@ class StreamRecorderApp(tk.Tk):
         self._privacy_prompting  = False
         self._privacy_anim_job   = None
         self._privacy_title      = ""
+        self._privacy_confirm    = None
         for seq in ("<Motion>", "<KeyPress>", "<Button>", "<MouseWheel>"):
             self.bind_all(seq, self._privacy_touch, add="+")
         # Children share the root's bindtag, so filter to root-only events
@@ -1868,9 +1870,11 @@ class StreamRecorderApp(tk.Tk):
     def _privacy_on_configure(self, event):
         if event.widget is not self:
             return
-        if self._privacy_canvas is not None:
-            self._privacy_prompt_exit()   # window moved/resized while covered
-        else:
+        # While covered, a window move/resize must NOT pop a dialog — the cover
+        # (placed relwidth/relheight=1) just tracks the new size. Exiting is an
+        # explicit click on the cover. (The old code opened a modal here, which
+        # could hide behind the cover and hang the whole UI.)
+        if self._privacy_canvas is None:
             self._last_activity = time.time()
 
     def _privacy_tick(self):
@@ -1899,23 +1903,48 @@ class StreamRecorderApp(tk.Tk):
             self.after_cancel(self._privacy_anim_job)
             self._privacy_anim_job = None
         if self._privacy_canvas is not None:
-            self._privacy_canvas.destroy()
+            self._privacy_canvas.destroy()   # also destroys the confirm panel
             self._privacy_canvas = None
+        self._privacy_confirm   = None
+        self._privacy_prompting = False
         if self._privacy_title:
             self.title(self._privacy_title)
         self._last_activity = time.time()
 
     def _privacy_prompt_exit(self):
+        # Confirm with a panel drawn ON the cover instead of a modal dialog.
+        # A modal askyesno runs a nested event loop with an input grab; with
+        # the full-window cover up it rendered behind the cover, so the window
+        # was grabbed but the dialog was invisible — the app looked frozen.
         if self._privacy_prompting or self._privacy_canvas is None:
             return
         self._privacy_prompting = True
-        try:
-            if messagebox.askyesno("Privacy Mode", "Exit privacy mode?",
-                                   parent=self):
-                self._privacy_disengage()
-        finally:
-            self._privacy_prompting = False
-            self._last_activity = time.time()
+        c = self._privacy_canvas
+        panel = tk.Frame(c, bg="#0a0a14", highlightthickness=1,
+                         highlightbackground="#ff2b3d")
+        tk.Label(panel, text="Exit privacy mode?", bg="#0a0a14", fg="#f2f2f4",
+                 font=("Segoe UI", 12, "bold")).pack(padx=26, pady=(16, 12))
+        row = tk.Frame(panel, bg="#0a0a14")
+        row.pack(pady=(0, 16))
+        tk.Button(row, text="Exit", width=8, relief="flat", bd=0,
+                  bg="#ff2b3d", fg="#0a0a0b", activebackground="#ff5563",
+                  font=("Segoe UI", 10, "bold"), cursor="hand2",
+                  command=lambda: self._privacy_resolve(True)).pack(side="left", padx=6)
+        tk.Button(row, text="Stay", width=8, relief="flat", bd=0,
+                  bg="#17171a", fg="#8a8a90", activebackground="#222226",
+                  font=("Segoe UI", 10, "bold"), cursor="hand2",
+                  command=lambda: self._privacy_resolve(False)).pack(side="left", padx=6)
+        panel.place(relx=0.5, rely=0.5, anchor="center")
+        self._privacy_confirm = panel
+
+    def _privacy_resolve(self, do_exit: bool):
+        if self._privacy_confirm is not None:
+            self._privacy_confirm.destroy()
+            self._privacy_confirm = None
+        self._privacy_prompting = False
+        self._last_activity = time.time()
+        if do_exit:
+            self._privacy_disengage()
 
     def _privacy_scene_init(self):
         c = self._privacy_canvas

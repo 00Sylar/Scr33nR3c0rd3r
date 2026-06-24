@@ -96,6 +96,13 @@ grouped by date / milestone.
   `_partNNN` padding as the recorder (was `_part1`).
 
 ### Fixed
+- **Privacy Mode could freeze the whole app.** Moving or resizing the window
+  while the idle starfield cover was up popped a **modal** "Exit privacy mode?"
+  dialog that rendered *behind* the full-window cover — the window kept the
+  modal's input grab but the dialog was invisible, so the UI looked frozen
+  (recordings and background threads kept running). Moving the window no
+  longer prompts; clicking the cover now shows an **Exit / Stay panel drawn on
+  the cover itself** — no modal, no grab, nothing that can hang the event loop.
 - **UI freeze when starting (or stopping) many recordings at once.** A burst
   of starts — the monitor finding many models online, AUTO firing on all of
   them, or "Start" on a large selection — spawned one thread *and one ffmpeg
