@@ -13,6 +13,7 @@ import random
 import threading
 import tkinter as tk
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 from typing import Optional
@@ -450,6 +451,11 @@ class _ApiHandler(BaseHTTPRequestHandler):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class StreamRecorderApp(tk.Tk):
+    # Max recordings to *launch* concurrently. Steady-state recording count is
+    # unbounded; this only staggers the start storm (network fetch + ffmpeg
+    # spawn per model) so a big batch doesn't freeze the UI.
+    _LAUNCH_POOL_SIZE = 4
+
     def __init__(self):
         super().__init__()
         self.title("Scr33nX")
@@ -470,6 +476,16 @@ class StreamRecorderApp(tk.Tk):
 
         self._rows: dict[str, bool] = {}          # key → exists flag
         self._saved_rows: dict[str, bool] = {}    # saved-only models (view only)
+        # Recording launches are throttled through a small pool. A burst —
+        # the monitor finding many models online at once, AUTO firing on all
+        # of them, or "Start" on a big selection — used to spawn one thread
+        # (and one ffmpeg subprocess) PER model simultaneously, storming the
+        # CPU/disk and freezing the Tk UI. The pool caps how many start at
+        # once; _launching dedupes so the same model isn't queued twice.
+        self._rec_pool = ThreadPoolExecutor(max_workers=self._LAUNCH_POOL_SIZE,
+                                            thread_name_prefix="rec-launch")
+        self._launching: set[str] = set()
+        self._launching_lock = threading.Lock()
         self._auto_rec: dict[str, bool] = {}      # key → auto-rec state (recorder tab)
         self._model_q: dict[str, int] = {}        # key → per-model quality cap (height px, 0 = default)
         # The recorder answers the relay's per-stream quality queries; the app
@@ -1337,6 +1353,7 @@ class StreamRecorderApp(tk.Tk):
         if getattr(self, "_closing", False):
             return
         self._closing = True
+        self._rec_pool.shutdown(wait=False, cancel_futures=True)
         self.protocol("WM_DELETE_WINDOW", lambda: None)
         self._lbl_hdr_status.configure(text="● STOPPING…", fg=ORANGE)
         self._stop_api_server()
@@ -1702,6 +1719,33 @@ class StreamRecorderApp(tk.Tk):
 
     # ── Record toggle (per model) ─────────────────────────────────────────────
 
+    def _launch_recording(self, name: str, site: str):
+        """Start a recording through the bounded launch pool instead of a raw
+        thread, so a burst of starts (auto-rec firing on many models, or a big
+        manual selection) can't spawn dozens of ffmpeg processes at once and
+        freeze the UI. _launching dedupes a model that's already queued."""
+        key = f"{site}:{name.lower()}"
+        with self._launching_lock:
+            if key in self._launching:
+                return
+            self._launching.add(key)
+
+        def _do():
+            try:
+                ok = self.recorder.start_recording(name, site)
+                if not ok:
+                    self.after(0, lambda: self._log_add(
+                        f"{name} ({site}) is offline — cannot record.", "warn"))
+            finally:
+                with self._launching_lock:
+                    self._launching.discard(key)
+
+        try:
+            self._rec_pool.submit(_do)
+        except RuntimeError:           # pool already shut down (app closing)
+            with self._launching_lock:
+                self._launching.discard(key)
+
     def _toggle_rec(self, key: str, name: str, site: str):
         with self.recorder._lock:
             cfg = self.recorder.models.get(key)
@@ -1710,12 +1754,7 @@ class StreamRecorderApp(tk.Tk):
         if cfg.status == ModelStatus.RECORDING:
             self._stop_async(name, site)
         else:
-            def _do():
-                ok = self.recorder.start_recording(name, site)
-                if not ok:
-                    self.after(0, lambda: self._log_add(
-                        f"{name} ({site}) is offline — cannot record.", "warn"))
-            threading.Thread(target=_do, daemon=True).start()
+            self._launch_recording(name, site)
 
     # ── Monitor toggles (per-tab, independent) ────────────────────────────────
 
@@ -2043,9 +2082,7 @@ class StreamRecorderApp(tk.Tk):
             # Auto-record when the Recorder monitor is active and AUTO is checked
             if self._monitoring_recorder and self._auto_rec.get(key, False):
                 site, name = key.split(":", 1)
-                def _do(n=name, s=site):
-                    self.recorder.start_recording(n, s)
-                threading.Thread(target=_do, daemon=True).start()
+                self._launch_recording(name, site)
         elif status in (ModelStatus.OFFLINE, ModelStatus.CHECKING, ModelStatus.PRIVATE):
             self._tree.set(key, "file", "—")
             self._tree.set(key, "size", "—")
@@ -3432,6 +3469,8 @@ class StreamRecorderApp(tk.Tk):
             if not messagebox.askyesno("Quit", "Recordings are active. Stop and exit?"):
                 return
         self._closing = True
+        # Drop any queued launches so shutdown doesn't kick off new recordings.
+        self._rec_pool.shutdown(wait=False, cancel_futures=True)
         self.protocol("WM_DELETE_WINDOW", lambda: None)
         self._lbl_hdr_status.configure(text="● STOPPING…", fg=ORANGE)
         self._stop_api_server()
