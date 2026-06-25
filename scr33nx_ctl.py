@@ -7,12 +7,13 @@ this script only sends commands to it, it does not launch it. Every call prints
 a single line of JSON so an agent can parse the result and report back.
 
 COMMANDS
-  status        <link|name> [--site S]        show a model's state
-  record        <link|name> [--site S] [--auto-only] [--no-auto]
+  status        <link|name> [--site S]        show a model's state (incl. rank)
+  record        <link|name> [--site S] [--auto-only] [--no-auto] [--rank N]
                                               add to recorder, AUTO on, start now
   stop          <link|name> [--site S]        stop recording one model
-  add-recorder  <link|name> [--site S]        add to Recorder (no AUTO/record)
-  add-saved     <link|name> [--site S]        add to Saved Models
+  add-recorder  <link|name> [--site S] [--rank N]   add to Recorder (no AUTO/record)
+  add-saved     <link|name> [--site S] [--rank N]   add to Saved Models
+  rank          <link|name> <0-5> [--site S]  set a model's 1-5 star rank (0 clears)
   remove        <link|name> [--site S]        remove from Recorder
   remove-saved  <link|name> [--site S]        remove from Saved Models
   auto          <link|name> on|off [--site S] turn AUTO on/off for a model
@@ -24,9 +25,15 @@ COMMANDS
   open                                          launch the Scr33nX app
   close                                         gracefully quit the Scr33nX app
 
+  Ranking note: a rank only applies to a model that's in Saved Models or the
+  Recorder. `rank` on a model that's on neither list returns an error — use
+  `add-saved <model> --rank N` to save AND rate in one call.
+
 EXAMPLES
   python scr33nx_ctl.py record "https://chaturbate.com/name/"
   python scr33nx_ctl.py stop name --site stripchat
+  python scr33nx_ctl.py add-saved "stripchat.com/name" --rank 5
+  python scr33nx_ctl.py rank name 4 --site chaturbate
   python scr33nx_ctl.py stop-all
   python scr33nx_ctl.py clear
   python scr33nx_ctl.py dashboard
@@ -101,11 +108,35 @@ def _resolve(raw: str, site_override: str) -> tuple[str, str, dict | None]:
     return name, site, None
 
 
+def _wait_in(name: str, site: str, key: str, deadline_s: float = 8.0) -> bool:
+    """Poll /status until `key` (in_recorder / in_saved) is true — the add runs
+    on the app's UI thread, so membership isn't instant."""
+    deadline = time.time() + deadline_s
+    while time.time() < deadline:
+        if _request("GET", f"/status?name={name}&site={site}").get(key):
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def _apply_rank(name: str, site: str, rank: int) -> dict:
+    return _request("POST", "/rank",
+                    {"name": name, "site": site, "rank": int(rank)})
+
+
 def cmd_status(a):
     name, site, err = _resolve(a.target, a.site)
     if err:
         return err
     return _request("GET", f"/status?name={name}&site={site}")
+
+
+def cmd_rank(a):
+    name, site, err = _resolve(a.target, a.site)
+    if err:
+        return err
+    # The app rejects ranking a model that's on neither list; relay that error.
+    return _apply_rank(name, site, a.value)
 
 
 def cmd_record(a):
@@ -136,6 +167,9 @@ def cmd_record(a):
         else:
             steps.append({"record": _request("POST", "/record",
                           {"name": name, "site": site, "action": "start"})})
+    if getattr(a, "rank", None) is not None:
+        # Model is in the Recorder by now, so ranking is allowed.
+        steps.append({"rank": _apply_rank(name, site, a.rank)})
     return {"ok": True, "name": name, "site": site, "steps": steps,
             "final_status": _request("GET", f"/status?name={name}&site={site}")}
 
@@ -148,20 +182,36 @@ def cmd_stop(a):
                     {"name": name, "site": site, "action": "stop"})
 
 
-def cmd_add_recorder(a):
+def _add(a, target: str, member_key: str):
+    """Add to `target` ('recorder'/'saved'); with --rank, also set the star
+    rank once the model is on the list. A plain add (no --rank) behaves exactly
+    as before."""
     name, site, err = _resolve(a.target, a.site)
     if err:
         return err
-    return _request("POST", "/add",
-                    {"name": name, "site": site, "target": "recorder"})
+    add = _request("POST", "/add",
+                   {"name": name, "site": site, "target": target})
+    rank = getattr(a, "rank", None)
+    if rank is None:
+        return add
+    # An "already present" add is fine — we still want to (re)rank it.
+    already = (not add.get("ok")) and "already" in str(add.get("error", "")).lower()
+    if not add.get("ok") and not already:
+        return {"ok": False, "name": name, "site": site,
+                "error": add.get("error", "add failed"), "steps": [{"add": add}]}
+    _wait_in(name, site, member_key)
+    rk = _apply_rank(name, site, rank)
+    return {"ok": bool(rk.get("ok")), "name": name, "site": site,
+            "steps": [{"add": add}, {"rank": rk}],
+            "final_status": _request("GET", f"/status?name={name}&site={site}")}
+
+
+def cmd_add_recorder(a):
+    return _add(a, "recorder", "in_recorder")
 
 
 def cmd_add_saved(a):
-    name, site, err = _resolve(a.target, a.site)
-    if err:
-        return err
-    return _request("POST", "/add",
-                    {"name": name, "site": site, "target": "saved"})
+    return _add(a, "saved", "in_saved")
 
 
 def cmd_remove(a):
@@ -248,6 +298,16 @@ def cmd_close(a):
     return r if r.get("ok") else {"ok": True, "note": "quit signal sent"}
 
 
+def _rank_arg(v: str) -> int:
+    try:
+        iv = int(v)
+    except ValueError:
+        raise argparse.ArgumentTypeError("rank must be an integer 0-5")
+    if not 0 <= iv <= 5:
+        raise argparse.ArgumentTypeError("rank must be 0-5 (0 clears)")
+    return iv
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Control Scr33nX from the command line.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -262,10 +322,21 @@ def main() -> int:
     s = sub.add_parser("record");        add_target(s)
     s.add_argument("--auto-only", action="store_true")
     s.add_argument("--no-auto",  action="store_true")
+    s.add_argument("--rank", type=_rank_arg, default=None,
+                   help="also set a 0-5 star rank")
     s.set_defaults(fn=cmd_record)
     s = sub.add_parser("stop");          add_target(s); s.set_defaults(fn=cmd_stop)
-    s = sub.add_parser("add-recorder");  add_target(s); s.set_defaults(fn=cmd_add_recorder)
-    s = sub.add_parser("add-saved");     add_target(s); s.set_defaults(fn=cmd_add_saved)
+    s = sub.add_parser("add-recorder");  add_target(s)
+    s.add_argument("--rank", type=_rank_arg, default=None,
+                   help="also set a 0-5 star rank")
+    s.set_defaults(fn=cmd_add_recorder)
+    s = sub.add_parser("add-saved");     add_target(s)
+    s.add_argument("--rank", type=_rank_arg, default=None,
+                   help="also set a 0-5 star rank")
+    s.set_defaults(fn=cmd_add_saved)
+    s = sub.add_parser("rank");          add_target(s)
+    s.add_argument("value", type=_rank_arg, help="0-5 star rank (0 clears)")
+    s.set_defaults(fn=cmd_rank)
     s = sub.add_parser("remove");        add_target(s); s.set_defaults(fn=cmd_remove)
     s = sub.add_parser("remove-saved");  add_target(s); s.set_defaults(fn=cmd_remove_saved)
     s = sub.add_parser("auto");          add_target(s)

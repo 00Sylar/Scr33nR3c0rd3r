@@ -10,7 +10,19 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
-_Nothing yet — new changes land here before the next version is tagged._
+### Added
+- **Rank models from the OpenClaw bot.** New `scr33nx_ctl.py rank <model> 0-5`
+  command sets a model's star rank, and `add-saved` / `add-recorder` / `record`
+  gained a `--rank N` option so *"save her and rank 5"* adds **and** rates in one
+  step. A bare `rank` requires the model to already be in Saved Models or the
+  Recorder (same rule as the app/extension); the bot relays the error otherwise.
+  Wired into the OpenClaw command map in `OPENCLAW-HOWTO.md`.
+
+### Fixed
+- **Ranks no longer linger in memory after a model leaves both lists.** Removing
+  a model from Saved Models (or the Recorder) while it's on no other list now
+  drops its rank from the live session too, matching the on-save pruning — so a
+  removed model can't report a stale rank until the next restart.
 
 ---
 

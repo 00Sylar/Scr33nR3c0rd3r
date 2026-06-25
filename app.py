@@ -1560,6 +1560,9 @@ class StreamRecorderApp(tk.Tk):
         self._auto_rec.pop(key, None)
         self._model_q.pop(key, None)
         self._checked.discard(key)
+        # Drop the rank if the model is now on neither list (no orphans).
+        if self._saved_key(name, site) not in self._saved_data:
+            self._ranks.pop(self._rank_key(name, site), None)
         site_id = f"_site_{site}"
         # Filtered-out rows are detached (parentless), so check _rows — not
         # get_children() — or we'd delete a header that still owns hidden rows.
@@ -2603,6 +2606,9 @@ class StreamRecorderApp(tk.Tk):
             return
         self._saved_data.pop(sid, None)
         _, site, name = sid.split(":", 2)
+        # Drop the rank if the model is now on neither list (no orphans).
+        if f"{site}:{name}" not in self._rows:
+            self._ranks.pop(self._rank_key(name, site), None)
         if self._stree.exists(sid):
             self._stree.delete(sid)
         self._saved_rows.pop(sid, None)

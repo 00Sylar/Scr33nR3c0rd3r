@@ -47,6 +47,9 @@ Just talk normally. The bot maps your intent to a command:
 | **"clear the recorder"** / "clean slate" | `clear` | stop monitor + all downloads, clear AUTO, **remove every model** (Saved kept) |
 | **"dashboard status"** / "how many are live?" | `dashboard` | per-site (CB/SC/CS/MFC) + totals: total / recording / online / offline |
 | "save her" / "add to saved" | `add-saved <link>` | add to Saved Models |
+| **"save her and rank 5"** / "add to saved, 4 stars" | `add-saved <link> --rank 5` | add to Saved Models **and** set the star rank in one step |
+| **"rank her 4"** / "give `<name>` 3 stars" | `rank <name> 4` | set a 1–5 star rank (model must already be in Saved Models or the Recorder) |
+| **"clear her rank"** / "remove her stars" | `rank <name> 0` | clear the rank |
 | "remove her from saved" | `remove-saved <name>` | remove from Saved Models |
 | "remove her from the recorder" | `remove <name>` | remove from Recorder |
 | "add to recorder (don't record)" | `add-recorder <link>` | add only |
@@ -84,7 +87,8 @@ python scr33nx_ctl.py <command> [args]
 | `status <model> [--site S]` | `python scr33nx_ctl.py status someone --site stripchat` |
 | `record <model> [--site S] [--auto-only] [--no-auto]` | `python scr33nx_ctl.py record "https://chaturbate.com/x/"` |
 | `stop <model> [--site S]` | `python scr33nx_ctl.py stop x --site chaturbate` |
-| `add-recorder` / `add-saved <model>` | `python scr33nx_ctl.py add-saved "stripchat.com/x"` |
+| `add-recorder` / `add-saved <model> [--rank N]` | `python scr33nx_ctl.py add-saved "stripchat.com/x" --rank 5` |
+| `rank <model> 0-5 [--site S]` | `python scr33nx_ctl.py rank x 4 --site chaturbate` |
 | `remove` / `remove-saved <model>` | `python scr33nx_ctl.py remove-saved x --site camsoda` |
 | `auto <model> on|off` | `python scr33nx_ctl.py auto x on --site chaturbate` |
 | `stop-all` | `python scr33nx_ctl.py stop-all` |
@@ -95,8 +99,10 @@ python scr33nx_ctl.py <command> [args]
 | `open` / `close` | `python scr33nx_ctl.py open` |
 
 Behind the scenes it talks to the **Local Control API** (documented in the README):
-`/status`, `/dashboard`, `/add`, `/record`, `/auto`, `/remove`, `/stop_all`,
-`/clear`, `/monitor`, `/pipeline`, `/quit`. `open` launches `StreamRecorder.bat`
+`/status`, `/dashboard`, `/add`, `/record`, `/auto`, `/rank`, `/remove`,
+`/stop_all`, `/clear`, `/monitor`, `/pipeline`, `/quit`. `add-saved --rank` (and
+`add-recorder`/`record --rank`) call `/add` then `/rank`; a bare `rank` calls just
+`/rank`. `open` launches `StreamRecorder.bat`
 and waits for the API to come up; `close` calls `/quit` and waits for the app to
 go down.
 
