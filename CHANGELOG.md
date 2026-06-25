@@ -10,12 +10,13 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
-Changes since **V1.0** that haven't been cut into a numbered release yet —
-newest first, each group dated by when it landed.
+_Nothing yet — new changes land here before the next version is tagged._
 
-### 2026-06-24 — Star ranks & freeze fixes
+---
 
-#### Added
+## V1.3 — 2026-06-24
+
+### Added
 - **⭐ 1–5 star model ranks.** Rate models on both the Recorder and Saved
   Models tabs: a sortable **RANK** column where you click a star to set 1–5
   (click the current star again to clear), or right-click → **Set Rank** to
@@ -33,8 +34,15 @@ newest first, each group dated by when it landed.
   shown disabled with a hint. New `POST /rank {name, site, rank}` endpoint
   (rejects ranking a model that isn't on a list); `GET /status` now also
   returns `rank`.
+- **Live polling in the browser-extension popup.** While the popup is open it
+  keeps polling the backend, so a model's status (and rank / list membership)
+  updates in place without closing and reopening it.
+- **Status dashboard (left panel).** The single "N recording · N offline" line
+  is now a per-site + totals breakdown: one row per site that has models —
+  🟡 CB, 🔴 SC, 🔵 CS, 🟢 MFC (colors match each site's brand) — showing
+  total / ▶ recording / ● online / ○ offline, plus an ALL summary line.
 
-#### Fixed
+### Fixed
 - **Privacy Mode could freeze the whole app.** Moving or resizing the window
   while the idle starfield cover was up popped a **modal** "Exit privacy mode?"
   dialog that rendered *behind* the full-window cover — the window kept the
@@ -53,30 +61,15 @@ newest first, each group dated by when it landed.
   half-working, and its tray icon and the browser extension actually
   controlled the *other* instance. The failed bind is now logged and shown in
   the Activity Log with a clear "another Scr33nX is likely running" warning.
-
-### 2026-06-18 — Extension polling & Saved-tab sync
-
-#### Added
-- **Live polling in the browser-extension popup.** While the popup is open it
-  keeps polling the backend, so a model's status (and now rank / list
-  membership) updates in place without closing and reopening it.
-
-#### Fixed
 - **Saved Models desync between the API and the lazy-built UI rows.** Adding or
   removing models via the extension/bot now stays consistent with the
   on-screen Saved rows even when the Saved tab hasn't been opened yet.
 
-### 2026-06-14 — Status dashboard
+---
 
-#### Added
-- **Status dashboard (left panel).** The single "N recording · N offline" line
-  is now a per-site + totals breakdown: one row per site that has models —
-  🟡 CB, 🔴 SC, 🔵 CS, 🟢 MFC (colors match each site's brand) — showing
-  total / ▶ recording / ● online / ○ offline, plus an ALL summary line.
+## V1.2 — 2026-06-13
 
-### 2026-06-13 — V1.2 (OpenClaw control, fallback toggle, filename standardization)
-
-#### Added
+### Added
 - **🧹 CLEAR RECORDER button** (next to STOP ALL DOWNLOADS). One click to a
   clean slate: stops the recorder monitor, force-stops every active download,
   unchecks all AUTO, and removes every model from the Recorder (all sites).
@@ -105,7 +98,7 @@ newest first, each group dated by when it landed.
   actions use no-dialog code paths so they never block the UI thread that serves
   the API.
 
-#### Changed
+### Changed
 - **Standardized output filenames across all sites.** A recording that never
   splits now keeps NO part suffix (`modelname_CB_20240515_143022.ts`); the
   moment a size-split happens, the first segment is renamed and the set reads
@@ -113,15 +106,17 @@ newest first, each group dated by when it landed.
   timestamp, and the Telegram-pipeline `.mp4` splits use the same 3-digit
   `_partNNN` padding as the recorder (was `_part1`).
 
-#### Fixed
+### Fixed
 - **STOP TELEGRAM PIPELINE now halts the uploader workers.** Previously the
   converter stopped but the Telegram upload clients kept draining the queued
   backlog. Stopping now lets the in-flight upload finish, then halts the
   uploaders and closes the TDLib clients until the pipeline is resumed.
 
-### 2026-06-11 – 06-12 — V1.1 (intelligent selection & status filtering)
+---
 
-#### Added
+## V1.1 — 2026-06-12
+
+### Added
 - **OneTab / browser integration.** Right-click on either tab now offers
   "🌐 Open in Browser" (opens each model's page as a browser tab; asks for
   confirmation above 10 tabs) and, for multi-selections, "📋 Copy as OneTab
