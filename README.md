@@ -38,7 +38,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 
 ---
 
-> 📜 See **[CHANGELOG.md](CHANGELOG.md)** for a running history of changes, and **[RercordingLogics.md](RercordingLogics.md)** for the deep technical recording reference.
+> 📜 See **[CHANGELOG.md](CHANGELOG.md)** for a running history of changes, **[RercordingLogics.md](RercordingLogics.md)** for the deep technical recording reference, and **[CONTRIBUTING.md](CONTRIBUTING.md)** for the documentation/release workflow.
 
 ---
 
