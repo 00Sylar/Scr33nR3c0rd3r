@@ -10,7 +10,12 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
-### Added
+Changes since **V1.0** that haven't been cut into a numbered release yet —
+newest first, each group dated by when it landed.
+
+### 2026-06-24 — Star ranks & freeze fixes
+
+#### Added
 - **⭐ 1–5 star model ranks.** Rate models on both the Recorder and Saved
   Models tabs: a sortable **RANK** column where you click a star to set 1–5
   (click the current star again to clear), or right-click → **Set Rank** to
@@ -28,10 +33,50 @@ grouped by date / milestone.
   shown disabled with a hint. New `POST /rank {name, site, rank}` endpoint
   (rejects ranking a model that isn't on a list); `GET /status` now also
   returns `rank`.
+
+#### Fixed
+- **Privacy Mode could freeze the whole app.** Moving or resizing the window
+  while the idle starfield cover was up popped a **modal** "Exit privacy mode?"
+  dialog that rendered *behind* the full-window cover — the window kept the
+  modal's input grab but the dialog was invisible, so the UI looked frozen
+  (recordings and background threads kept running). Moving the window no
+  longer prompts; clicking the cover now shows an **Exit / Stay panel drawn on
+  the cover itself** — no modal, no grab, nothing that can hang the event loop.
+- **UI freeze when starting (or stopping) many recordings at once.** A burst
+  of starts — the monitor finding many models online, AUTO firing on all of
+  them, or "Start" on a large selection — spawned one thread *and one ffmpeg
+  subprocess per model simultaneously*, storming the CPU/disk and freezing
+  the window. Launches now go through a bounded pool (4 concurrent) with
+  per-model dedupe, so a big batch staggers smoothly instead of stampeding.
+- **Silent duplicate-instance.** Starting a second Scr33nX while one was
+  already running left the new one unable to bind the API port (5200); it ran
+  half-working, and its tray icon and the browser extension actually
+  controlled the *other* instance. The failed bind is now logged and shown in
+  the Activity Log with a clear "another Scr33nX is likely running" warning.
+
+### 2026-06-18 — Extension polling & Saved-tab sync
+
+#### Added
+- **Live polling in the browser-extension popup.** While the popup is open it
+  keeps polling the backend, so a model's status (and now rank / list
+  membership) updates in place without closing and reopening it.
+
+#### Fixed
+- **Saved Models desync between the API and the lazy-built UI rows.** Adding or
+  removing models via the extension/bot now stays consistent with the
+  on-screen Saved rows even when the Saved tab hasn't been opened yet.
+
+### 2026-06-14 — Status dashboard
+
+#### Added
 - **Status dashboard (left panel).** The single "N recording · N offline" line
   is now a per-site + totals breakdown: one row per site that has models —
   🟡 CB, 🔴 SC, 🔵 CS, 🟢 MFC (colors match each site's brand) — showing
   total / ▶ recording / ● online / ○ offline, plus an ALL summary line.
+
+### 2026-06-13 — V1.2 (OpenClaw control, fallback toggle, filename standardization)
+
+#### Added
 - **🧹 CLEAR RECORDER button** (next to STOP ALL DOWNLOADS). One click to a
   clean slate: stops the recorder monitor, force-stops every active download,
   unchecks all AUTO, and removes every model from the Recorder (all sites).
@@ -59,6 +104,24 @@ grouped by date / milestone.
   also accepts `target: "saved"` to remove from Saved Models. All API-triggered
   actions use no-dialog code paths so they never block the UI thread that serves
   the API.
+
+#### Changed
+- **Standardized output filenames across all sites.** A recording that never
+  splits now keeps NO part suffix (`modelname_CB_20240515_143022.ts`); the
+  moment a size-split happens, the first segment is renamed and the set reads
+  `_part001`, `_part002`, … All parts of one recording share a single
+  timestamp, and the Telegram-pipeline `.mp4` splits use the same 3-digit
+  `_partNNN` padding as the recorder (was `_part1`).
+
+#### Fixed
+- **STOP TELEGRAM PIPELINE now halts the uploader workers.** Previously the
+  converter stopped but the Telegram upload clients kept draining the queued
+  backlog. Stopping now lets the in-flight upload finish, then halts the
+  uploaders and closes the TDLib clients until the pipeline is resumed.
+
+### 2026-06-11 – 06-12 — V1.1 (intelligent selection & status filtering)
+
+#### Added
 - **OneTab / browser integration.** Right-click on either tab now offers
   "🌐 Open in Browser" (opens each model's page as a browser tab; asks for
   confirmation above 10 tabs) and, for multi-selections, "📋 Copy as OneTab
@@ -86,38 +149,6 @@ grouped by date / milestone.
 - **Saved-tab bulk actions.** Right-click acts on the checked set (or the
   multi-selection): "Add to Recorder (N)" with duplicate-skipping and
   "Remove from Saved (N)" with a single log/persist instead of N.
-
-### Changed
-- **Standardized output filenames across all sites.** A recording that never
-  splits now keeps NO part suffix (`modelname_CB_20240515_143022.ts`); the
-  moment a size-split happens, the first segment is renamed and the set reads
-  `_part001`, `_part002`, … All parts of one recording share a single
-  timestamp, and the Telegram-pipeline `.mp4` splits use the same 3-digit
-  `_partNNN` padding as the recorder (was `_part1`).
-
-### Fixed
-- **Privacy Mode could freeze the whole app.** Moving or resizing the window
-  while the idle starfield cover was up popped a **modal** "Exit privacy mode?"
-  dialog that rendered *behind* the full-window cover — the window kept the
-  modal's input grab but the dialog was invisible, so the UI looked frozen
-  (recordings and background threads kept running). Moving the window no
-  longer prompts; clicking the cover now shows an **Exit / Stay panel drawn on
-  the cover itself** — no modal, no grab, nothing that can hang the event loop.
-- **UI freeze when starting (or stopping) many recordings at once.** A burst
-  of starts — the monitor finding many models online, AUTO firing on all of
-  them, or "Start" on a large selection — spawned one thread *and one ffmpeg
-  subprocess per model simultaneously*, storming the CPU/disk and freezing
-  the window. Launches now go through a bounded pool (4 concurrent) with
-  per-model dedupe, so a big batch staggers smoothly instead of stampeding.
-- **Silent duplicate-instance.** Starting a second Scr33nX while one was
-  already running left the new one unable to bind the API port (5200); it ran
-  half-working, and its tray icon and the browser extension actually
-  controlled the *other* instance. The failed bind is now logged and shown in
-  the Activity Log with a clear "another Scr33nX is likely running" warning.
-- **STOP TELEGRAM PIPELINE now halts the uploader workers.** Previously the
-  converter stopped but the Telegram upload clients kept draining the queued
-  backlog. Stopping now lets the in-flight upload finish, then halts the
-  uploaders and closes the TDLib clients until the pipeline is resumed.
 
 ---
 
