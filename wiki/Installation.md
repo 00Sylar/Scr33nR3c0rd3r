@@ -46,7 +46,7 @@ page" helper (Chromium **and** Firefox).
 
 ## Checking your version & updates
 
-The running version shows in the header next to the logo (e.g. `v1.3`). On
+The running version shows in the header next to the logo (e.g. `v1.4`). On
 startup Scr33nX quietly checks GitHub for the latest **published release**; if a
 newer one exists, a clickable **● Update available** indicator appears in the
 header and opens the [Releases page](https://github.com/00Sylar/Scr33nX/releases).

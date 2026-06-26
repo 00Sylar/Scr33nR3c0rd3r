@@ -10,6 +10,13 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+---
+
+## V1.4 — 2026-06-26
+
+First release published as an official GitHub Release — from this version on,
+Scr33nX checks GitHub on startup and flags when a newer build is available.
+
 ### Added
 - **Version number in the header.** The running build (e.g. `v1.3`) now shows
   next to the Scr33nX logo, so it's easy to tell which version you have when

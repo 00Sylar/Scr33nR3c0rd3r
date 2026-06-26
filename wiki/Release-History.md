@@ -6,6 +6,29 @@ in the repository, and each version is also a
 
 ---
 
+## V1.4 — 2026‑06‑26
+
+First version published as an official GitHub Release; the in‑app update check
+goes live from here.
+
+**Added**
+- **Version number + automatic update check** in the header — shows the running
+  build and flags when a newer GitHub release exists.
+- **⛔ Force Quit / Terminate** — header button + tray "Force Quit" item that
+  hard‑kills the whole process tree (ffmpeg, relay, Chromium) like Task Manager's
+  *End Task*; confirms only when a recording is active.
+- **Rank models from the OpenClaw bot** — `rank <model> 0‑5`, plus `--rank N` on
+  `add‑saved` / `add‑recorder` / `record`.
+
+**Changed**
+- **Cleaner repo layout** — source under `src/`, docs under `docs/`. No change to
+  how you run it (double‑click `StreamRecorder.bat`).
+
+**Fixed**
+- **Blank taskbar icon** — the `.ico` is now pushed to the taskbar via
+  `WM_SETICON`.
+- **Stale ranks** no longer linger after a model leaves both lists.
+
 ## V1.3 — 2026‑06‑24
 
 **Added**
