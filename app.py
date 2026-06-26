@@ -1,8 +1,12 @@
 """
-app.py — Scr33nX V1.0 — GUI
+app.py — Scr33nX — GUI
 """
 
-APP_VERSION = "1.0"
+# Single source of truth for the running version. Shown in the header and
+# compared against the latest GitHub release by the update checker.
+# When cutting a release (see CONTRIBUTING.md), bump this to match the new tag.
+APP_VERSION = "1.3"
+GITHUB_REPO = "00Sylar/Scr33nX"   # owner/repo, used for the update check
 
 import os
 import sys
@@ -568,9 +572,45 @@ class StreamRecorderApp(tk.Tk):
         self.after(500, self._stats_tick)
         self.after(1000, self._bw_tick)
         self.after(5000, self._sync_monitor_buttons)
+        threading.Thread(target=self._check_for_updates, daemon=True,
+                         name="update-check").start()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         if WinTray is not None:
             self.bind("<Unmap>", self._on_window_unmap)
+
+    # ── Update check ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _parse_ver(s: str) -> tuple:
+        """'v1.3' / '1.3.2' → (1, 3) / (1, 3, 2) for comparison. Junk → ()."""
+        nums = []
+        for part in str(s).lstrip("vV").split("."):
+            part = "".join(c for c in part if c.isdigit())
+            if not part:
+                break
+            nums.append(int(part))
+        return tuple(nums)
+
+    def _check_for_updates(self):
+        """Background: ask GitHub for the latest release and, if it's newer
+        than APP_VERSION, reveal the header update indicator. Runs off the Tk
+        thread; fails silently when offline. Never pops a modal (would freeze
+        the event loop) — see CLAUDE.md."""
+        import urllib.request
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        try:
+            req = urllib.request.Request(
+                url, headers={"Accept": "application/vnd.github+json",
+                              "User-Agent": f"Scr33nX/{APP_VERSION}"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return   # offline / rate-limited / no releases — stay quiet
+        latest = str(data.get("tag_name") or "").strip()
+        cur, new = self._parse_ver(APP_VERSION), self._parse_ver(latest)
+        if new and new > cur:
+            self.after(0, lambda: self._lbl_update.config(
+                text=f"● Update available ({latest})"))
 
     # ── App icon ──────────────────────────────────────────────────────────────
 
@@ -670,6 +710,20 @@ class StreamRecorderApp(tk.Tk):
                  font=("Segoe UI Black", 15)).pack(side="left")
         tk.Label(hdr, text="X", fg=ACCENT, bg=BG2,
                  font=("Segoe UI Black", 15)).pack(side="left", padx=(1,0))
+        # Version tag — dim, just after the logo. Single source of truth is
+        # APP_VERSION so it never drifts from the released tag.
+        tk.Label(hdr, text=f"v{APP_VERSION}", fg=TEXT3, bg=BG2,
+                 font=("Segoe UI Semibold", 9)).pack(side="left", padx=(6, 0),
+                                                     pady=(6, 0), anchor="s")
+        # Update indicator — hidden until the GitHub check finds a newer release.
+        # Click opens the releases page. No modal (would freeze the Tk loop).
+        self._lbl_update = tk.Label(hdr, text="", fg=ACCENT, bg=BG2, cursor="hand2",
+                                    font=("Segoe UI Semibold", 9))
+        self._lbl_update.pack(side="left", padx=(8, 0), anchor="s", pady=(6, 0))
+        self._lbl_update.bind(
+            "<Button-1>",
+            lambda _e: __import__("webbrowser").open(
+                f"https://github.com/{GITHUB_REPO}/releases/latest"))
         self._lbl_hdr_status = tk.Label(hdr, text="● IDLE", fg=TEXT3, bg=BG2,
                                          font=("Segoe UI Semibold", 10))
         self._lbl_hdr_status.pack(side="right", padx=12)

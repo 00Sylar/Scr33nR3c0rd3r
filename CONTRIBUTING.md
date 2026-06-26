@@ -60,14 +60,19 @@ When a batch of `[Unreleased]` work is ready to be a version:
 
 1. **Move** the `[Unreleased]` entries into a new dated version section, e.g.
    `## V1.4 — YYYY-MM-DD`, and reset `[Unreleased]` to empty.
-2. **Commit** that change.
-3. **Tag** it and push:
+2. **Bump `APP_VERSION`** in `app.py` to match the new tag (e.g. `"1.4"`). This
+   is what shows in the header and what the update checker compares against.
+3. **Commit** that change.
+4. **Tag** it and push:
    ```
    git tag -a v1.4 -m "Scr33nX V1.4 — <one-line summary>"
    git push origin main v1.4
    ```
-4. *(Optional, on github.com)* Releases → **Draft a new release** → choose the
-   `v1.4` tag → paste that version's changelog section → **Publish**.
+5. **Publish the GitHub Release** (on github.com) → Releases → **Draft a new
+   release** → choose the `v1.4` tag → paste that version's changelog section →
+   **Publish**. *Not optional:* the in-app update checker reads the latest
+   **published release** via the GitHub API — a pushed tag alone won't trigger it.
+   (Equivalent CLI: `gh release create v1.4 --notes-from-tag`.)
 
 Versioning follows the existing cadence: bump the **minor** (`V1.3 → V1.4`) for a
 feature batch, the **patch** (`V1.3 → V1.3.1`) for a fix-only release. Never move

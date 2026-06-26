@@ -11,6 +11,14 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **Version number in the header.** The running build (e.g. `v1.3`) now shows
+  next to the Scr33nX logo, so it's easy to tell which version you have when
+  comparing with someone else. Driven by a single `APP_VERSION` constant.
+- **Automatic update check.** On startup Scr33nX checks GitHub for the latest
+  published release in the background. If a newer version exists, a clickable
+  `● Update available (vX.Y)` indicator appears in the header and opens the
+  releases page. It fails silently when offline and never interrupts you with a
+  popup. *Note: requires releases to be published on GitHub, not just tags.*
 - **Rank models from the OpenClaw bot.** New `scr33nx_ctl.py rank <model> 0-5`
   command sets a model's star rank, and `add-saved` / `add-recorder` / `record`
   gained a `--rank N` option so *"save her and rank 5"* adds **and** rates in one
