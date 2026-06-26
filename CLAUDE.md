@@ -1,20 +1,27 @@
 # Scr33nX — assistant working notes
 
 Windows desktop app (Tkinter) that auto-records live streams from Chaturbate,
-Stripchat, Camsoda, and MyFreeCams through a local HLS relay. Key files:
-`app.py` (GUI + local API on port 5200), `recorder.py` (engine), `cb_relay.py`
-(relay), `settings.py`, `mfc.py`/`stripchat_*` (resolvers), `extension/` (Chrome
-+ Firefox popups), `scr33nx_ctl.py` (OpenClaw bot control).
+Stripchat, Camsoda, and MyFreeCams through a local HLS relay.
+
+> **Repo layout:** Python source lives in `src/` and docs live in `docs/`.
+> `README.md`, `CLAUDE.md`, `requirements.txt`, and `StreamRecorder.bat` stay in
+> the root.
+
+Key files:
+`src/app.py` (GUI + local API on port 5200), `src/recorder.py` (engine),
+`src/cb_relay.py` (relay), `src/settings.py`, `src/mfc.py`/`src/stripchat_*`
+(resolvers), `extension/` (Chrome + Firefox popups), `src/scr33nx_ctl.py`
+(OpenClaw bot control).
 
 ## Documentation discipline — required
 
 **Every functional change must update its docs in the same change.** Full rules
-and the "if you change X, update Y" map are in **[CONTRIBUTING.md](CONTRIBUTING.md)** —
+and the "if you change X, update Y" map are in **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** —
 follow it. The short version:
 
-- **API endpoint** (`app.py` `_ApiHandler`) → README *Local Control API* table + `OPENCLAW-HOWTO.md` (if bot-relevant) + CHANGELOG.
+- **API endpoint** (`src/app.py` `_ApiHandler`) → README *Local Control API* table + `docs/OPENCLAW-HOWTO.md` (if bot-relevant) + CHANGELOG.
 - **UI feature / setting / extension change** → README *Features* / *Usage* / *Settings* + CHANGELOG.
-- **Recording internals** (relay/resolvers/ffmpeg) → `RercordingLogics.md` + CHANGELOG.
+- **Recording internals** (relay/resolvers/ffmpeg) → `docs/RecordingLogics.md` + CHANGELOG.
 - **New dependency** → `requirements.txt` + README *Requirements* + CHANGELOG.
 
 Always add a `CHANGELOG.md` entry under `## [Unreleased]` (`Added`/`Changed`/`Fixed`),

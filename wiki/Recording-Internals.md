@@ -1,6 +1,6 @@
 # Recording Internals
 
-> **Full technical reference:** `RercordingLogics.md` in the repository is the
+> **Full technical reference:** `docs/RecordingLogics.md` in the repository is the
 > complete, per‑site "how to make it work" documentation — resolver protocols,
 > relay internals, the Stripchat MOUFLON/Playwright paths, the MyFreeCams FCS
 > websocket, exit codes, and a troubleshooting map. This page is the overview.

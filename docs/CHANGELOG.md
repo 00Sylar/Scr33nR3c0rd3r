@@ -26,7 +26,30 @@ grouped by date / milestone.
   Recorder (same rule as the app/extension); the bot relays the error otherwise.
   Wired into the OpenClaw command map in `OPENCLAW-HOWTO.md`.
 
+- **⛔ Force Quit / Terminate.** A new red **Terminate** button in the header
+  (and a **Force Quit (Terminate)** item in the system-tray right-click menu)
+  instantly hard-kills Scr33nX and its whole child-process tree — ffmpeg, the
+  relay, any Playwright/Chromium — like Task Manager's *End Task*, instead of the
+  graceful Quit that flushes recordings first. It confirms only when a recording
+  is active, so an idle app dies immediately and a misclick mid-recording can't
+  silently drop footage.
+
+### Changed
+- **Reorganized the project into a cleaner layout.** All Python source (and
+  `icons/`) now lives under `src/`, and the docs (`CHANGELOG`, `CONTRIBUTING`,
+  `OPENCLAW-HOWTO`, the renamed `RecordingLogics`) under `docs/`. The repo root
+  is now just `README`, `CLAUDE.md`, `requirements.txt`, `StreamRecorder.bat`,
+  and the top-level folders. **No change to how you run it** — double-click
+  `StreamRecorder.bat` exactly as before. Stray/private files (a leftover
+  `saved_models.json`, the outdated `Sample Content/` samples) were removed from
+  the repo and are now git-ignored.
+
 ### Fixed
+- **Taskbar icon could show blank.** With the app's explicit taskbar identity
+  set, Tk's `iconbitmap`/`iconphoto` didn't reliably reach the Windows taskbar
+  button, leaving a blank icon. The `.ico` is now pushed to the taskbar directly
+  via `WM_SETICON` (both icon sizes), with 64-bit handle types declared so the
+  handles aren't truncated.
 - **Ranks no longer linger in memory after a model leaves both lists.** Removing
   a model from Saved Models (or the Recorder) while it's on no other list now
   drops its rank from the live session too, matching the on-save pruning — so a

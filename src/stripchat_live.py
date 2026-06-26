@@ -61,7 +61,7 @@ def find_ffmpeg() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     for c in [
         os.path.join(here, "ffmpeg.exe"),
-        os.path.join(here, "..", "..", "ffmpeg.exe"),       # TEST/v2/ -> root
+        os.path.join(here, "..", "ffmpeg.exe"),             # src/ -> repo root
         os.path.join(here, "ffmpeg", "ffmpeg.exe"),
         "ffmpeg.exe", "ffmpeg",
     ]:

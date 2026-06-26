@@ -29,6 +29,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 - ✅ **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab (click a star, click it again to clear; or right-click → **Set Rank** for one row or a whole selection at once). Sortable **RANK** column, shared per-model across both tabs, and saved between sessions
 - ✅ Windows desktop notifications (recording started/stopped/split/dropped segments)
 - ✅ Minimize to system tray
+- ✅ **⛔ Force Quit / Terminate** — a header button (and tray-menu item) that hard-kills Scr33nX and all its child processes (ffmpeg, relay, Chromium) instantly, like Task Manager's *End Task*; confirms first only if a recording is active
 - ✅ 🔒 Privacy Mode — idle screen cover
 - ✅ Activity log with timestamps
 - ✅ Settings saved between sessions (models, output folder, max size, etc.)
@@ -36,11 +37,11 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 ### Integrations
 - ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page, plus 1–5 star rating right from the popup (for models already in Saved Models or Recorder); local API, port 5200
 - ✅ Telegram upload pipeline (optional) — converts finished recordings and uploads them to a Telegram group/topic
-- ✅ **Chat-bot / agent control (OpenClaw)** — drive Scr33nX from your phone over Telegram/WhatsApp: text a link to record, stop one or all, add/remove from Saved, toggle the monitors/scanner/pipeline, and even open or close the app. Everything runs through the same local API. Full setup: **[OPENCLAW-HOWTO.md](OPENCLAW-HOWTO.md)**.
+- ✅ **Chat-bot / agent control (OpenClaw)** — drive Scr33nX from your phone over Telegram/WhatsApp: text a link to record, stop one or all, add/remove from Saved, toggle the monitors/scanner/pipeline, and even open or close the app. Everything runs through the same local API. Full setup: **[OPENCLAW-HOWTO.md](docs/OPENCLAW-HOWTO.md)**.
 
 ---
 
-> 📜 See **[CHANGELOG.md](CHANGELOG.md)** for a running history of changes, **[RercordingLogics.md](RercordingLogics.md)** for the deep technical recording reference, and **[CONTRIBUTING.md](CONTRIBUTING.md)** for the documentation/release workflow.
+> 📜 See **[CHANGELOG.md](docs/CHANGELOG.md)** for a running history of changes, **[RecordingLogics.md](docs/RecordingLogics.md)** for the deep technical recording reference, and **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the documentation/release workflow.
 
 ---
 
@@ -165,7 +166,7 @@ Settings are stored in `Pipeline/pipeline_settings.json`. Requires the `tdjson` 
 
 ## Local Control API (port 5200)
 
-While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, used by the browser extensions **and** by external automation (e.g. the OpenClaw chat bot — see **[OPENCLAW-HOWTO.md](OPENCLAW-HOWTO.md)**). It is loopback-only (no remote access) and unauthenticated.
+While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, used by the browser extensions **and** by external automation (e.g. the OpenClaw chat bot — see **[OPENCLAW-HOWTO.md](docs/OPENCLAW-HOWTO.md)**). It is loopback-only (no remote access) and unauthenticated.
 
 | Method & path | Body | Action |
 |---|---|---|
@@ -182,23 +183,23 @@ While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, 
 | `POST /pipeline` | `{enabled}` | start/stop the Telegram upload pipeline |
 | `POST /quit` | — | gracefully shut the app down |
 
-A command-line helper, **`scr33nx_ctl.py`**, wraps all of these (plus `open`, which launches the app) — run `python scr33nx_ctl.py --help` for the subcommands.
+A command-line helper, **`src/scr33nx_ctl.py`**, wraps all of these (plus `open`, which launches the app) — run `python src/scr33nx_ctl.py --help` for the subcommands.
 
 ---
 
 ## How recording works (architecture notes)
 
-> 📄 **Full technical reference:** see **[RercordingLogics.md](RercordingLogics.md)** for the complete, per-site "how to make it work" documentation — resolver protocols, the relay internals, the Stripchat MOUFLON/Playwright paths, the MyFreeCams FCS websocket, exit codes, and a troubleshooting map. That file is written so another engineer (or LLM) can pick up the recording pipeline cold.
+> 📄 **Full technical reference:** see **[RecordingLogics.md](docs/RecordingLogics.md)** for the complete, per-site "how to make it work" documentation — resolver protocols, the relay internals, the Stripchat MOUFLON/Playwright paths, the MyFreeCams FCS websocket, exit codes, and a troubleshooting map. That file is written so another engineer (or LLM) can pick up the recording pipeline cold.
 
-- **Local relay** (`cb_relay.py`): ffmpeg never talks to the CDN directly. All HLS traffic goes through a relay on `127.0.0.1` which:
+- **Local relay** (`src/cb_relay.py`): ffmpeg never talks to the CDN directly. All HLS traffic goes through a relay on `127.0.0.1` which:
   - pins the **highest-bitrate variant within your quality cap** (per-model override → global setting → unlimited) so quality can't silently change mid-recording,
   - **prefetches upcoming segments in parallel** (64 shared workers, in-memory cache) so ffmpeg is served instantly and falling behind the live window — the cause of 1–2 s timestamp jumps — is avoided,
   - survives the CDN's mid-segment TLS resets that corrupt direct ffmpeg downloads,
   - detects segments that expired before they could be downloaded and reports them (Activity Log + optional notification),
   - feeds the **bandwidth meter** (counts every byte fetched upstream).
 - **Chaturbate / Camsoda**: public HLS resolver → relay → `ffmpeg -c copy`
-- **MyFreeCams**: no public API — a guest login over MFC's FCS websocket (`mfc.py`) resolves the model's video state + HLS edge, then relay → `ffmpeg -c copy`
-- **Stripchat**: native MOUFLON-decrypting path through the relay (no browser) when possible; otherwise a Playwright-driven Chromium session (`stripchat_live.py`) writes the MPEG-TS directly. *Note: the browser fallback doesn't pass through the relay, so it isn't counted by the bandwidth meter.*
+- **MyFreeCams**: no public API — a guest login over MFC's FCS websocket (`src/mfc.py`) resolves the model's video state + HLS edge, then relay → `ffmpeg -c copy`
+- **Stripchat**: native MOUFLON-decrypting path through the relay (no browser) when possible; otherwise a Playwright-driven Chromium session (`src/stripchat_live.py`) writes the MPEG-TS directly. *Note: the browser fallback doesn't pass through the relay, so it isn't counted by the bandwidth meter.*
 - **Extension API**: the app serves a small local HTTP API on **port 5200** used by the browser extensions
 
 ---

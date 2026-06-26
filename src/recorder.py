@@ -355,6 +355,10 @@ def find_ffmpeg(override: str = "") -> str:
             yield "settings ffmpeg_path", override
         yield "app folder", os.path.join(here, "ffmpeg", "ffmpeg.exe")
         yield "app folder", os.path.join(here, "ffmpeg.exe")
+        # repo root (one level up from src/) — where the README says to drop ffmpeg
+        root = os.path.dirname(here)
+        yield "project root", os.path.join(root, "ffmpeg", "ffmpeg.exe")
+        yield "project root", os.path.join(root, "ffmpeg.exe")
         yield "PATH", shutil.which("ffmpeg") or "(no 'ffmpeg' on PATH)"
         if local:
             yield "WinGet links", os.path.join(

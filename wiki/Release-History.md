@@ -1,6 +1,6 @@
 # Release History
 
-This is a readable summary. The authoritative, full changelog is `CHANGELOG.md`
+This is a readable summary. The authoritative, full changelog is `docs/CHANGELOG.md`
 in the repository, and each version is also a
 [GitHub Release](https://github.com/00Sylar/Scr33nX/releases).
 
@@ -36,7 +36,7 @@ in the repository, and each version is also a
 - **Bot dashboard + clear (OpenClaw)** — `GET /dashboard`, wired into the script.
 - **🎭 Stripchat Browser Fallback toggle** in Settings.
 - **Chat‑bot / agent control via the local API (OpenClaw)** — `scr33nx_ctl.py`
-  wraps every action; full walkthrough in `OPENCLAW-HOWTO.md`.
+  wraps every action; full walkthrough in `docs/OPENCLAW-HOWTO.md`.
 - **New API endpoints** — `POST /stop_all`, `/monitor`, `/pipeline`, `/quit`;
   `POST /remove` gained `target: "saved"`.
 
@@ -75,4 +75,4 @@ in the repository, and each version is also a
 ---
 
 > Newer, not‑yet‑released changes accumulate under `## [Unreleased]` in
-> `CHANGELOG.md`.
+> `docs/CHANGELOG.md`.

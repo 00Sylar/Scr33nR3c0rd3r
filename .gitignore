@@ -8,6 +8,11 @@ __pycache__/
 *.binlog
 pipeline_settings.json
 
+# Private/runtime data (not shipped)
+saved_models.json
+_app_v2
+streamrecorder_crash.log
+
 # Recording artifacts
 *.ts
 *.mp4

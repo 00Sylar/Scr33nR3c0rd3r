@@ -31,7 +31,7 @@
 
 ## OpenClaw bot
 
-See the full table in `OPENCLAW-HOWTO.md`. Quick hits:
+See the full table in `docs/OPENCLAW-HOWTO.md`. Quick hits:
 
 | Symptom | Cause / fix |
 |---|---|

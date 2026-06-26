@@ -45,6 +45,6 @@ segments when bandwidth gets tight.
 - **Playwright Chromium** — only for the Stripchat browser fallback
 
 > The canonical, code‑level documentation lives in the repository: `README.md`,
-> `RercordingLogics.md`, `OPENCLAW-HOWTO.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.
+> `docs/RecordingLogics.md`, `docs/OPENCLAW-HOWTO.md`, `docs/CONTRIBUTING.md`, and `docs/CHANGELOG.md`.
 > This wiki mirrors those for easy browsing — when something is described in more
 > depth in the repo, the relevant page links to it.

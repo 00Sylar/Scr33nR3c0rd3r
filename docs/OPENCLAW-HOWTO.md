@@ -6,7 +6,7 @@ This document explains how Scr33nX is wired to **OpenClaw** so you can text a bo
 made it work, the gotchas hit along the way, and how to teach the bot new tricks.
 
 > **TL;DR** — Scr33nX runs a tiny local API (port 5200). A small script
-> (`scr33nx_ctl.py`) calls that API. OpenClaw (an AI agent running on your PC)
+> (`src/scr33nx_ctl.py`) calls that API. OpenClaw (an AI agent running on your PC)
 > reads your chat message, decides which command to run, and runs the script.
 > You never touch a terminal once it's set up.
 
@@ -15,7 +15,7 @@ made it work, the gotchas hit along the way, and how to teach the bot new tricks
 ## 1. The big picture
 
 ```
-  You (Telegram) ──▶ OpenClaw bot ──▶ scr33nx_ctl.py ──▶ Scr33nX local API ──▶ the app does it
+  You (Telegram) ──▶ OpenClaw bot ──▶ src/scr33nx_ctl.py ──▶ Scr33nX local API ──▶ the app does it
    "record this"      (Claude reads      (one command       (port 5200,            (adds model,
                        your message)      per action)         loopback only)         records, etc.)
 ```
@@ -24,8 +24,8 @@ Three moving parts, each in its own place:
 
 | Layer | What it is | Where it lives |
 |---|---|---|
-| **The muscles** | Scr33nX's local API — the actions the app can perform | `app.py` (the `_ApiHandler` class, port 5200) |
-| **The hands** | A command-line script that calls the API | `scr33nx_ctl.py` (in the Scr33nX folder) |
+| **The muscles** | Scr33nX's local API — the actions the app can perform | `src/app.py` (the `_ApiHandler` class, port 5200) |
+| **The hands** | A command-line script that calls the API | `src/scr33nx_ctl.py` (in the `src/` folder) |
 | **The brain** | The bot's instructions — when to run what | `C:\Users\luiis\.openclaw\workspace\AGENTS.md` |
 
 To add a new ability you touch all three: expose it in the API, add a script
@@ -73,13 +73,13 @@ the bot will check with you first if anything is actively recording.
 
 ---
 
-## 3. The control script (`scr33nx_ctl.py`)
+## 3. The control script (`src/scr33nx_ctl.py`)
 
-A self-contained Python script in the Scr33nX folder. The bot runs it; you can
+A self-contained Python script in the `src/` folder. The bot runs it; you can
 run it by hand too. It prints one line of JSON per call.
 
 ```
-python scr33nx_ctl.py <command> [args]
+python src/scr33nx_ctl.py <command> [args]
 ```
 
 | Command | Example |
@@ -106,8 +106,8 @@ Behind the scenes it talks to the **Local Control API** (documented in the READM
 and waits for the API to come up; `close` calls `/quit` and waits for the app to
 go down.
 
-> There's also an older single-purpose script, `openclaw_record.py`, that only
-> does the record flow. `scr33nx_ctl.py record ...` supersedes it.
+> There's also an older single-purpose script, `src/openclaw_record.py`, that only
+> does the record flow. `src/scr33nx_ctl.py record ...` supersedes it.
 
 ---
 
@@ -162,7 +162,7 @@ openclaw capability model run --model anthropic/claude-sonnet-4-6 --prompt "OK" 
 
 ## 5. First-time activation / after changes
 
-Whenever Scr33nX's API code (`app.py`) changes, or the bot's instructions
+Whenever Scr33nX's API code (`src/app.py`) changes, or the bot's instructions
 (`AGENTS.md`) change:
 
 1. **Restart Scr33nX** (close and reopen the app) so new API endpoints load.
@@ -175,12 +175,12 @@ Whenever Scr33nX's API code (`app.py`) changes, or the bot's instructions
 
 The mental model from [§1](#1-the-big-picture): **muscles → hands → brain.**
 
-1. **Muscles — add an API endpoint** in `app.py`. Inside `_ApiHandler.do_POST`
+1. **Muscles — add an API endpoint** in `src/app.py`. Inside `_ApiHandler.do_POST`
    (or `do_GET`), route a new path to a handler that reads JSON and schedules
    the real work on the UI thread via `app.after(0, …)`. **Never** call a method
    that opens a modal dialog (`messagebox`) from the API — it freezes the app
    that serves the API. Use a no-dialog variant (see the `_api_*` methods).
-2. **Hands — add a subcommand** to `scr33nx_ctl.py`: a `cmd_*` function that
+2. **Hands — add a subcommand** to `src/scr33nx_ctl.py`: a `cmd_*` function that
    POSTs to your new endpoint, plus an `add_parser` line in `main()`.
 3. **Brain — describe it** in `AGENTS.md` under "🔴 Scr33nX — Control": add a row
    to the command-map table (what the user might say → which command).
@@ -194,7 +194,7 @@ Then restart Scr33nX and send `/new`. That's the whole loop.
 | Symptom | Cause / fix |
 |---|---|
 | Bot: *"Is the app running?"* | Scr33nX is closed → say *"open Scr33nX"* or launch it. |
-| New command does nothing / 404 | Scr33nX wasn't restarted after the `app.py` change. Restart it. |
+| New command does nothing / 404 | Scr33nX wasn't restarted after the `src/app.py` change. Restart it. |
 | Bot ignores a new phrasing | You didn't send `/new` after editing `AGENTS.md`. |
 | Bot: *"Unknown model"* | Model id missing the `provider/` prefix in `openclaw.json`. |
 | Bot: *"out of extra usage"* | It's on the direct-API runtime (paid credits). Switch the model to the **Claude CLI** runtime (see §4). |
@@ -208,9 +208,9 @@ Then restart Scr33nX and send `/new`. That's the whole loop.
 
 | File | Role |
 |---|---|
-| `app.py` | Scr33nX + its local API (`_ApiHandler`, the `_api_*` methods) |
-| `scr33nx_ctl.py` | The control script the bot runs |
-| `openclaw_record.py` | Older record-only script (superseded by `scr33nx_ctl.py record`) |
+| `src/app.py` | Scr33nX + its local API (`_ApiHandler`, the `_api_*` methods) |
+| `src/scr33nx_ctl.py` | The control script the bot runs |
+| `src/openclaw_record.py` | Older record-only script (superseded by `src/scr33nx_ctl.py record`) |
 | `StreamRecorder.bat` | GUI launcher (used by `open`) |
 | `C:\Users\luiis\.openclaw\workspace\AGENTS.md` | The bot's instructions / command map |
 | `C:\Users\luiis\.openclaw\openclaw.json` | OpenClaw config (model, auth, channel) |

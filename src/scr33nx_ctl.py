@@ -268,7 +268,8 @@ def _api_up() -> bool:
 def cmd_open(a):
     if _api_up():
         return {"ok": True, "note": "Scr33nX is already running"}
-    bat = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+    # Launcher lives in the project root, one level up from src/.
+    bat = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "StreamRecorder.bat")
     if not os.path.exists(bat):
         return {"ok": False, "error": f"launcher not found: {bat}"}

@@ -63,6 +63,7 @@ HWND_MESSAGE = -3
 
 ID_SHOW = 1001
 ID_EXIT = 1002
+ID_TERM = 1003
 
 _CLASS_NAME = "StreamRecorderTrayWnd"
 
@@ -171,10 +172,11 @@ class WinTray:
     thread-safe (set a flag/Event; never call tkinter directly).
     """
 
-    def __init__(self, tooltip: str, on_show, on_quit):
+    def __init__(self, tooltip: str, on_show, on_quit, on_terminate=None):
         self.tooltip = tooltip
         self.on_show = on_show
         self.on_quit = on_quit
+        self.on_terminate = on_terminate
         self.uID = 1
         self.hwnd = None
         self._thread: threading.Thread | None = None
@@ -282,6 +284,8 @@ class WinTray:
         user32.AppendMenuW(menu, MF_STRING, ID_SHOW, "Show Scr33nX")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_EXIT, "Exit")
+        if self.on_terminate is not None:
+            user32.AppendMenuW(menu, MF_STRING, ID_TERM, "Force Quit (Terminate)")
         pos = wintypes.POINT()
         user32.GetCursorPos(ctypes.byref(pos))
         user32.SetForegroundWindow(hwnd)
@@ -302,6 +306,8 @@ class WinTray:
             self.on_show()
         elif cmd == ID_EXIT:
             self.on_quit()
+        elif cmd == ID_TERM and self.on_terminate is not None:
+            self.on_terminate()
 
     def pump(self):
         pass

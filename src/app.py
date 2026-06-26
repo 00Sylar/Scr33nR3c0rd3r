@@ -513,6 +513,7 @@ class StreamRecorderApp(tk.Tk):
         # which a Tk after-loop polls (never call Tk from the tray thread).
         self._tray_show_evt = threading.Event()
         self._tray_quit_evt = threading.Event()
+        self._tray_term_evt = threading.Event()
         self._tray_poll_id: Optional[str] = None
         # Worker-thread log lines arrive at a high rate when many recordings
         # struggle (ffmpeg stderr + relay warnings). Queue them and insert in
@@ -635,6 +636,35 @@ class StreamRecorderApp(tk.Tk):
             self._hdr_icon = png.subsample(18, 18)
         except Exception:
             pass
+        # Force the .ico onto the taskbar button via WM_SETICON. With an explicit
+        # AppUserModelID set above, iconbitmap/iconphoto don't reliably reach the
+        # taskbar, so push both icon sizes directly. restype/argtypes are declared
+        # so 64-bit handles aren't truncated (same class of bug as the tray crashes).
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u32 = ctypes.windll.user32
+            u32.LoadImageW.restype  = wintypes.HANDLE
+            u32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
+                                       wintypes.UINT, ctypes.c_int, ctypes.c_int,
+                                       wintypes.UINT]
+            u32.GetParent.restype  = wintypes.HWND
+            u32.GetParent.argtypes = [wintypes.HWND]
+            u32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+                                         wintypes.WPARAM, wintypes.LPARAM]
+            ico = os.path.join(base, "icons", "devil.ico")
+            hwnd = u32.GetParent(self.winfo_id())
+            IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x10, 0x40
+            WM_SETICON, ICON_SMALL, ICON_BIG = 0x0080, 0, 1
+            big   = u32.LoadImageW(None, ico, IMAGE_ICON, 0, 0,
+                                   LR_LOADFROMFILE | LR_DEFAULTSIZE)
+            small = u32.LoadImageW(None, ico, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+            if big:
+                u32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+            if small:
+                u32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+        except Exception:
+            pass
 
     # ── Styles ────────────────────────────────────────────────────────────────
 
@@ -724,6 +754,14 @@ class StreamRecorderApp(tk.Tk):
             "<Button-1>",
             lambda _e: __import__("webbrowser").open(
                 f"https://github.com/{GITHUB_REPO}/releases/latest"))
+        # Force Quit / Terminate — hard-kills the process tree (End-Task style),
+        # confirming first only if a recording is active. Far-right of the header.
+        self._btn_terminate = tk.Button(
+            hdr, text="⛔ Terminate", command=self._force_terminate,
+            bg=ACCENT, fg=TEXT, activebackground=ACCENT2, activeforeground=TEXT,
+            font=("Segoe UI Semibold", 9), relief="flat", bd=0,
+            cursor="hand2", padx=10, pady=3)
+        self._btn_terminate.pack(side="right", padx=(0, 12), pady=10)
         self._lbl_hdr_status = tk.Label(hdr, text="● IDLE", fg=TEXT3, bg=BG2,
                                          font=("Segoe UI Semibold", 10))
         self._lbl_hdr_status.pack(side="right", padx=12)
@@ -3060,7 +3098,7 @@ class StreamRecorderApp(tk.Tk):
         cfg.output_folder = (self._pipe_vars["pipeline_converted_dir"].get().strip()
                              or os.path.join(s.output_dir, "converted"))
         cfg.tdlib_dir = (self._pipe_vars["telegram_session_dir"].get().strip()
-                         or os.path.join(os.path.dirname(__file__), "Pipeline", ".tdlib"))
+                         or os.path.join(os.path.dirname(os.path.dirname(__file__)), "Pipeline", ".tdlib"))
         cfg.uploaded_log = os.path.join(cfg.tdlib_dir, "uploaded.txt")
         # ffmpeg bundled with the app
         cfg.ffmpeg_path = self.recorder.ffmpeg_path or "ffmpeg"
@@ -3109,7 +3147,7 @@ class StreamRecorderApp(tk.Tk):
     def _pipeline_reauth(self):
         import shutil
         dir_ = (self._pipe_vars["telegram_session_dir"].get().strip()
-                or os.path.join(os.path.dirname(__file__), "Pipeline", ".tdlib"))
+                or os.path.join(os.path.dirname(os.path.dirname(__file__)), "Pipeline", ".tdlib"))
         if not os.path.isdir(dir_):
             messagebox.showinfo("Re-auth",
                 "No TDLib session folder found — next Start will begin a fresh login.")
@@ -3502,6 +3540,7 @@ class StreamRecorderApp(tk.Tk):
                 "Scr33nX",
                 on_show=self._tray_show_evt.set,
                 on_quit=self._tray_quit_evt.set,
+                on_terminate=self._tray_term_evt.set,
             )
             # Asynchronous — failure is picked up by _poll_tray, so the Tk
             # thread never blocks waiting for the tray thread.
@@ -3516,6 +3555,13 @@ class StreamRecorderApp(tk.Tk):
             self._remove_tray()
             self.deiconify()
             return
+        if self._tray_term_evt.is_set():
+            self._tray_term_evt.clear()
+            # Restore first so the confirm dialog (if any) isn't stuck behind
+            # a hidden window, then hard-kill the process tree.
+            self._do_restore_from_tray()
+            self._force_terminate()
+            return
         if self._tray_quit_evt.is_set():
             self._tray_quit_evt.clear()
             self._on_close()
@@ -3525,6 +3571,39 @@ class StreamRecorderApp(tk.Tk):
             self._do_restore_from_tray()
         if self._tray is not None:
             self._tray_poll_id = self.after(150, self._poll_tray)
+
+    def _active_recording_count(self) -> int:
+        """Read-only count of models currently in the RECORDING state."""
+        try:
+            return sum(1 for cfg in self.recorder.models.values()
+                       if getattr(cfg, "status", None) == ModelStatus.RECORDING)
+        except Exception:
+            return 0
+
+    def _force_terminate(self):
+        """Hard-kill Scr33nX and its whole child-process tree (ffmpeg, the
+        relay, any Playwright/Chromium) immediately — the equivalent of Task
+        Manager's End Task. Skips the graceful flush, so it confirms first only
+        when a recording is active to avoid losing footage on a misclick.
+        Called only from the Tk thread (header button / tray poll)."""
+        active = self._active_recording_count()
+        if active > 0:
+            if not messagebox.askyesno(
+                    "Terminate Scr33nX",
+                    f"{active} recording(s) still active.\n\n"
+                    "Force-terminate now? Their final segments will be dropped.",
+                    icon="warning", parent=self):
+                return
+        try:
+            # taskkill /T kills the children first, then this process, so no
+            # orphaned ffmpeg keeps writing. CREATE_NO_WINDOW: no console flash.
+            import subprocess
+            subprocess.Popen(
+                ["taskkill", "/F", "/T", "/PID", str(os.getpid())],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception:
+            # Last-resort fallback if taskkill is somehow unavailable.
+            os._exit(1)
 
     def _do_restore_from_tray(self):
         # Window was withdrawn while iconic — force normal state first so

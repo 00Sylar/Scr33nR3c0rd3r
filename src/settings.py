@@ -15,7 +15,7 @@ CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".streamrecorder_config.json
 
 # Pipeline settings live alongside the standalone pipeline.py so the app UI
 # and the standalone script share one source of truth.
-_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # src/ -> repo root
 PIPELINE_CONFIG_FILE = os.path.join(_PROJECT_DIR, "Pipeline", "pipeline_settings.json")
 
 _PIPELINE_KEYS = (

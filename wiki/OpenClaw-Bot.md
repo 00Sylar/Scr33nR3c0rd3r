@@ -13,7 +13,7 @@ Three moving parts: the **API** (`app.py`, port 5200), the **control script**
 (`scr33nx_ctl.py`), and the **bot's instructions** (`AGENTS.md`).
 
 > The complete, authoritative setup — including the exact working OpenClaw
-> config and every gotcha — is in **`OPENCLAW-HOWTO.md`** in the repository. This
+> config and every gotcha — is in **`docs/OPENCLAW-HOWTO.md`** in the repository. This
 > page is a quick reference.
 
 ## What you can ask
@@ -61,4 +61,4 @@ Whenever the API code (`app.py`) or the bot instructions (`AGENTS.md`) change:
 3. Try a command.
 
 For provider/model setup, the Claude‑CLI runtime, billing pools, and the full
-troubleshooting table, see **`OPENCLAW-HOWTO.md`** in the repo.
+troubleshooting table, see **`docs/OPENCLAW-HOWTO.md`** in the repo.

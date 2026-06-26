@@ -6,7 +6,7 @@ the app *does* or *how it's used*, the matching docs are updated **in the same
 change** — not "later."
 
 > Working with an AI assistant (Claude)? This rule is also mirrored in
-> [`CLAUDE.md`](CLAUDE.md), which the assistant reads automatically, so docs get
+> [`CLAUDE.md`](../CLAUDE.md), which the assistant reads automatically, so docs get
 > updated without being asked.
 
 ---
@@ -24,21 +24,21 @@ reflected in the relevant docs and in the changelog, as part of the same commit
 
 | If you change… | Update… |
 |---|---|
-| A **local-API endpoint** (`app.py` `_ApiHandler`) | `README.md` → *Local Control API* table · `OPENCLAW-HOWTO.md` (if the bot should use it: §2 command map, §3 script table, and add the `scr33nx_ctl.py` command) · `CHANGELOG.md` |
-| A **UI feature / tab / right-click action** | `README.md` → *Features* and/or *Usage* · `CHANGELOG.md` |
-| A **Settings option** (checkbox/field) | `README.md` → *Settings (left panel)* table · `CHANGELOG.md` |
-| The **browser extension** (popup/behavior) | `README.md` → *Features* / extension-install section · `CHANGELOG.md` |
-| **Recording internals** (relay, resolvers, ffmpeg, exit codes) | `RercordingLogics.md` · `CHANGELOG.md` |
-| **Output filename / file format** | `README.md` → *Output Files* · `CHANGELOG.md` |
+| A **local-API endpoint** (`src/app.py` `_ApiHandler`) | `../README.md` → *Local Control API* table · `OPENCLAW-HOWTO.md` (if the bot should use it: §2 command map, §3 script table, and add the `src/scr33nx_ctl.py` command) · `CHANGELOG.md` |
+| A **UI feature / tab / right-click action** | `../README.md` → *Features* and/or *Usage* · `CHANGELOG.md` |
+| A **Settings option** (checkbox/field) | `../README.md` → *Settings (left panel)* table · `CHANGELOG.md` |
+| The **browser extension** (popup/behavior) | `../README.md` → *Features* / extension-install section · `CHANGELOG.md` |
+| **Recording internals** (relay, resolvers, ffmpeg, exit codes) | `RecordingLogics.md` · `CHANGELOG.md` |
+| **Output filename / file format** | `../README.md` → *Output Files* · `CHANGELOG.md` |
 | A **persisted config field** (e.g. `~/.streamrecorder_config.json`, `Pipeline/pipeline_settings.json`) | Note it in the relevant README/CHANGELOG entry so users know what's stored |
-| A **new dependency** | `requirements.txt` · `README.md` → *Requirements* / *Installation* · `CHANGELOG.md` |
-| The **OpenClaw bot wiring** (`scr33nx_ctl.py`, AGENTS.md flow) | `OPENCLAW-HOWTO.md` · `CHANGELOG.md` |
+| A **new dependency** | `requirements.txt` · `../README.md` → *Requirements* / *Installation* · `CHANGELOG.md` |
+| The **OpenClaw bot wiring** (`src/scr33nx_ctl.py`, AGENTS.md flow) | `OPENCLAW-HOWTO.md` · `CHANGELOG.md` |
 
 When in doubt: if a user or another developer could be surprised by the change,
 document it.
 
 > Tip: the OpenClaw "muscles → hands → brain" loop (expose API → add
-> `scr33nx_ctl.py` command → describe in `AGENTS.md`) is documented in
+> `src/scr33nx_ctl.py` command → describe in `AGENTS.md`) is documented in
 > [`OPENCLAW-HOWTO.md` §6](OPENCLAW-HOWTO.md). Touching one of those three almost
 > always means touching the other two.
 
@@ -60,7 +60,7 @@ When a batch of `[Unreleased]` work is ready to be a version:
 
 1. **Move** the `[Unreleased]` entries into a new dated version section, e.g.
    `## V1.4 — YYYY-MM-DD`, and reset `[Unreleased]` to empty.
-2. **Bump `APP_VERSION`** in `app.py` to match the new tag (e.g. `"1.4"`). This
+2. **Bump `APP_VERSION`** in `src/app.py` to match the new tag (e.g. `"1.4"`). This
    is what shows in the header and what the update checker compares against.
 3. **Commit** that change.
 4. **Tag** it and push:
@@ -86,6 +86,6 @@ or delete a tag that's already pushed — cut a new one instead.
 - [ ] Docs updated per the map above.
 - [ ] `CHANGELOG.md` `[Unreleased]` has an entry.
 - [ ] If the API changed: README API table **and** (if bot-relevant) `OPENCLAW-HOWTO.md`.
-- [ ] `python -m py_compile <changed .py files>` passes; both extension
+- [ ] `python -m py_compile <changed src/*.py files>` passes; both extension
       `popup.js` files validate and stay in sync (only the `chrome`/`browser`
       lines differ).
