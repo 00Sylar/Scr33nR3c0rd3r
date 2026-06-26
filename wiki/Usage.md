@@ -1,0 +1,58 @@
+# Usage
+
+1. **Add models** using the left panel — enter the username (or paste a full
+   model URL; the site is auto‑detected) and select the site: `chaturbate`,
+   `stripchat`, `camsoda`, or `myfreecams`.
+2. Click **▶ START MONITOR** — the app polls each model at the configured
+   interval.
+3. When a model goes live, recording starts automatically and you get a
+   notification.
+4. When the model goes offline, the recording stops automatically.
+5. If you set a **Max File Size**, the recording splits into numbered parts
+   (`_part001`, `_part002`, …). A recording that never reaches the limit stays a
+   single, unsuffixed file.
+6. Watch the **↓ Mbps** meter in the header while recording several models — if
+   streams start dropping segments you'll also get a warning notification.
+7. **Rate models** — give any model 1–5 stars on the Recorder or Saved Models
+   tab (click a star in the **RANK** column, or right‑click → **Set Rank** to
+   rate a whole selection), then click the `RANK` header to sort. Ranks stay
+   with the model across both tabs and persist between sessions.
+
+---
+
+## Output files
+
+Saved to the configured output folder (default `~/Videos/StreamRecorder`).
+
+```
+modelname_CB_20240515_143022.ts            ← single file (no split)
+modelname_ST_20240515_143022.ts
+modelname_CS_20240515_143022_part001.ts    ← split into parts
+modelname_CS_20240515_143022_part002.ts
+```
+
+- A recording that never hits **Max File Size** is one unsuffixed file. When it
+  splits, every part shares the same timestamp and is numbered `_part001`,
+  `_part002`, … (3‑digit). The Telegram pipeline uses the same scheme for `.mp4`
+  splits.
+- Site codes: `CB` = Chaturbate, `ST` = Stripchat, `CS` = Camsoda,
+  `MFC` = MyFreeCams.
+- `.ts` container — plays in VLC, MPV, or any MPEG‑TS player.
+- Convert to `.mp4`: `ffmpeg -i input.ts -c copy output.mp4`
+
+## File splitting
+
+Set **Max File Size (MB)** in Settings. When the current file reaches that size
+the recorder stops the current ffmpeg/Playwright process gracefully (so the
+`.ts` trailer flushes), re‑fetches the stream URL, starts a new part, and sends
+a notification — without missing a moment of the stream.
+
+## Bandwidth & quality tips
+
+- Each 1080p stream needs roughly **5–6 Mbps** sustained.
+- If many recordings drop segments (watch for ⚠ warnings), your total internet
+  bandwidth is the limit. In order of preference: set a global **Max Quality**
+  cap (720p roughly halves usage vs. unlimited), enable **⬇ Auto‑Downgrade** so
+  only struggling streams lose quality, or record fewer models at once.
+
+See [[Settings]] for every option, and [[Troubleshooting]] if something misbehaves.
