@@ -20,6 +20,8 @@ PIPELINE_CONFIG_FILE = os.path.join(_PROJECT_DIR, "Pipeline", "pipeline_settings
 
 _PIPELINE_KEYS = (
     "pipeline_enabled",
+    "pipeline_do_convert",
+    "pipeline_do_upload",
     "pipeline_converted_dir",
     "telegram_api_id",
     "telegram_api_hash",
@@ -47,6 +49,8 @@ class AppSettings:
     ranks: dict = None                         # "site:name" → 0-5 star rank
     # Pipeline / Telegram upload — persisted to PIPELINE_CONFIG_FILE
     pipeline_enabled: bool = False
+    pipeline_do_convert: bool = True           # stage 1: .ts → .mp4
+    pipeline_do_upload: bool = True            # stage 2: upload .mp4 to Telegram
     pipeline_converted_dir: str = ""           # empty = <output_dir>/converted
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
@@ -122,6 +126,8 @@ def load_settings() -> AppSettings:
         _save_json(PIPELINE_CONFIG_FILE, pipe)
 
     s.pipeline_enabled        = pipe.get("pipeline_enabled", s.pipeline_enabled)
+    s.pipeline_do_convert     = pipe.get("pipeline_do_convert", s.pipeline_do_convert)
+    s.pipeline_do_upload      = pipe.get("pipeline_do_upload", s.pipeline_do_upload)
     s.pipeline_converted_dir  = pipe.get("pipeline_converted_dir", "")
     s.telegram_api_id         = pipe.get("telegram_api_id", "")
     s.telegram_api_hash       = pipe.get("telegram_api_hash", "")
@@ -159,6 +165,8 @@ def save_settings(s: AppSettings):
 def save_pipeline_settings(s: AppSettings):
     data = {
         "pipeline_enabled":        s.pipeline_enabled,
+        "pipeline_do_convert":     s.pipeline_do_convert,
+        "pipeline_do_upload":      s.pipeline_do_upload,
         "pipeline_converted_dir":  s.pipeline_converted_dir,
         "telegram_api_id":         s.telegram_api_id,
         "telegram_api_hash":       s.telegram_api_hash,

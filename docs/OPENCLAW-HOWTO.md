@@ -57,7 +57,9 @@ Just talk normally. The bot maps your intent to a command:
 | "is she recording?" | `status <name>` | report her state |
 | "start/stop the monitor" | `monitor recorder on` / `off` | recorder monitor |
 | "start/stop the scanner" | `monitor saved on` / `off` | saved-models scanner |
-| "start/stop the pipeline" | `pipeline on` / `off` | Telegram upload pipeline |
+| "start/stop the pipeline" | `pipeline on` / `off` | starts in stand-by |
+| "turn convert on/off" | `pipeline convert on` / `off` | tick/untick the Convert stage |
+| "turn upload on/off" | `pipeline upload on` / `off` | tick/untick the Upload stage |
 | "open / launch Scr33nX" | `open` | start the app |
 | "close / quit Scr33nX" | `close` | gracefully shut it down |
 
@@ -96,11 +98,12 @@ python src/scr33nx_ctl.py <command> [args]
 | `dashboard` | `python scr33nx_ctl.py dashboard` |
 | `monitor recorder|saved on|off` | `python scr33nx_ctl.py monitor recorder on` |
 | `pipeline on|off` | `python scr33nx_ctl.py pipeline on` |
+| `pipeline convert|upload on|off` | `python scr33nx_ctl.py pipeline upload off` |
 | `open` / `close` | `python scr33nx_ctl.py open` |
 
 Behind the scenes it talks to the **Local Control API** (documented in the README):
 `/status`, `/dashboard`, `/add`, `/record`, `/auto`, `/rank`, `/remove`,
-`/stop_all`, `/clear`, `/monitor`, `/pipeline`, `/quit`. `add-saved --rank` (and
+`/stop_all`, `/clear`, `/monitor`, `/pipeline`, `/pipeline/stage`, `/quit`. `add-saved --rank` (and
 `add-recorder`/`record --rank`) call `/add` then `/rank`; a bare `rank` calls just
 `/rank`. `open` launches `StreamRecorder.bat`
 and waits for the API to come up; `close` calls `/quit` and waits for the app to

@@ -157,11 +157,22 @@ This keeps individual files manageable while never missing a moment of the strea
 
 The **Output / Upload** tab can convert finished `.ts` recordings to `.mp4` and upload them to a Telegram group/topic automatically.
 
+The pipeline has **two independent stages** you can run alone or together, via the **Stages** checkboxes at the top of the tab:
+
+- **① Convert .ts → .mp4** — converts (and size-splits) finished recordings into `.mp4` files in the converted folder, and *keeps* them. Use this on its own to get `.mp4` files without uploading anywhere. No Telegram setup needed.
+- **② Upload .mp4 to Telegram** — uploads `.mp4` files from the converted folder to your Telegram group/topic. Run it together with ① for the full convert-then-upload flow, or on its own to upload `.mp4` files you already have.
+
+**Stand-by model:** the pipeline starts even with *no* stage checked — it simply sits in **● STAND BY** doing nothing. Tick stages at any time and they take effect immediately; the header shows **● CONVERTING**, **● UPLOADING**, or **● CONVERTING & UPLOADING** accordingly. Unchecking a stage stops it after its current task finishes (a conversion or an upload in progress is never interrupted). No stop/restart is ever needed to change stages — including turning Upload on for the first time (it connects to Telegram on demand, reusing your saved session).
+
+Telegram credentials are only required once you enable **②**; if they're missing, the pipeline log says so and Upload stays idle until you fill them in, save, and re-tick Upload.
+
+To use the Upload stage:
+
 1. Get your `api_id` / `api_hash` from https://my.telegram.org
 2. Fill in the **Telegram / Pipeline settings** in the Output / Upload tab (group ID, optional topic ID)
-3. Save and enable the pipeline
+3. Start the pipeline and tick the stages you want, whenever you want
 
-Settings are stored in `Pipeline/pipeline_settings.json`. Requires the `tdjson` package (installed via `requirements.txt`).
+Settings (including the stage choices) are stored in `Pipeline/pipeline_settings.json`. The Upload stage requires the `tdjson` package (installed via `requirements.txt`); the Convert-only stage does not.
 
 ---
 
@@ -181,7 +192,8 @@ While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, 
 | `POST /stop_all` | — | stop every active download + clear all AUTO |
 | `POST /clear` | — | stop monitor + all downloads, clear AUTO, remove every Recorder model (Saved kept) |
 | `POST /monitor` | `{target, enabled}` | start/stop the `recorder` monitor or `saved` scanner |
-| `POST /pipeline` | `{enabled}` | start/stop the Telegram upload pipeline |
+| `POST /pipeline` | `{enabled}` | start/stop the pipeline (starts in stand-by) |
+| `POST /pipeline/stage` | `{convert?, upload?}` | tick/untick the Convert and/or Upload stages; applies live if running, otherwise on next start |
 | `POST /quit` | — | gracefully shut the app down |
 
 A command-line helper, **`src/scr33nx_ctl.py`**, wraps all of these (plus `open`, which launches the app) — run `python src/scr33nx_ctl.py --help` for the subcommands.

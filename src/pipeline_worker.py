@@ -34,6 +34,8 @@ class PipelineConfig:
     output_folder: str = ""         # where converted .mp4 files live before upload
     tdlib_dir: str = ""             # holds clientN/ subfolders (tdlib db)
     uploaded_log: str = ""          # text log of already-uploaded basenames
+    do_convert: bool = True         # stage 1: convert .ts → .mp4
+    do_upload: bool = True          # stage 2: upload .mp4 to Telegram
     upload_workers: int = 2
     max_bytes: float = 3.8 * 1e9    # Telegram file-size cap
     ffmpeg_path: str = "ffmpeg"
@@ -70,6 +72,7 @@ class PipelineWorker:
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._clients: list = []
+        self._has_uploaders = False   # True once a TDLib client has connected
 
     # ── Public control ───────────────────────────────────────────────────────
 
@@ -122,57 +125,29 @@ class PipelineWorker:
                 os.makedirs(d, exist_ok=True)
 
         uploaded = self._load_uploaded()
-        processed: set = set()
+        processed: set = set()      # .ts paths already converted
+        queued: set = set()         # .mp4 basenames already handed to the uploaders
         upload_queue: asyncio.Queue = asyncio.Queue()
-
-        # Lazy-import tdjson so the rest of the app doesn't crash if TDLib is
-        # not installed (it's a heavy, optional dependency).
-        try:
-            import tdjson  # type: ignore
-        except Exception as e:
-            self.on_log(f"[pipeline] tdjson import failed: {e}. "
-                         f"Install TDLib python bindings to enable uploads.")
-            self.on_state("error")
-            return
-
-        # Spin up TDLib clients
-        global_recv_started = _start_global_recv_once(tdjson)
-        self.on_log(f"[pipeline] TDLib global receiver: {'ready' if global_recv_started else 'already running'}")
-
         self._clients = []
-        for i in range(cfg.upload_workers):
-            db = os.path.join(cfg.tdlib_dir, f"client{i+1}")
-            os.makedirs(db, exist_ok=True)
-            td = _TDLibClient(tdjson, cfg, db_path=db,
-                               on_log=self.on_log, prompt_cb=self.prompt_cb)
-            self.on_log(f"[pipeline] Connecting client {i+1}…")
-            try:
-                await td.start()
-            except Exception as e:
-                self.on_log(f"[pipeline] client{i+1} auth failed: {e}")
-                self.on_state("error")
-                return
-            self._clients.append(td)
+        self._has_uploaders = False  # set True once a TDLib client connects
 
+        # The pipeline always starts and sits in stand-by. Nothing happens until
+        # a stage is checked. A single coordinator converts .ts → .mp4 when the
+        # Convert stage is on and feeds .mp4s to the upload queue when the Upload
+        # stage is on; N uploader workers lazily connect TDLib the first time
+        # Upload is enabled (reusing the cached session, so normally no re-login).
+        # All of it is driven by the live cfg flags, so checking/unchecking a box
+        # takes effect immediately and a stage stops after its current task.
         self.on_state("running")
-        self.on_log(f"[pipeline] running — {len(uploaded)} already uploaded")
-
-        # Pre-queue any leftover .mp4s
-        try:
-            for f in sorted(os.listdir(cfg.output_folder)):
-                if f.endswith(".mp4") and f not in uploaded:
-                    await upload_queue.put(os.path.join(cfg.output_folder, f))
-        except Exception:
-            pass
+        self.on_log("[pipeline] running (stand by) — toggle Convert / Upload any "
+                    "time; changes apply immediately.")
 
         loop = asyncio.get_running_loop()
-        tasks = [
-            loop.create_task(self._converter_worker(loop, upload_queue, processed)),
-        ]
-        for i, td in enumerate(self._clients):
+        tasks = [loop.create_task(
+            self._converter_worker(loop, upload_queue, processed, queued, uploaded))]
+        for i in range(cfg.upload_workers):
             tasks.append(loop.create_task(
-                self._uploader_worker(td, i + 1, upload_queue, uploaded)
-            ))
+                self._uploader_worker(i + 1, upload_queue, uploaded)))
         try:
             await asyncio.gather(*tasks)
         finally:
@@ -182,60 +157,116 @@ class PipelineWorker:
                 except Exception:
                     pass
 
+    async def _connect_client(self, slot: int):
+        """Lazily connect a TDLib client for `slot`. Returns the client, or None
+        on failure (missing bindings/credentials/auth). Sets _has_uploaders."""
+        try:
+            import tdjson  # type: ignore
+        except Exception as e:
+            self.on_log(f"[upload #{slot}] tdjson import failed: {e}. "
+                        f"Install TDLib python bindings to enable uploads.")
+            return None
+        cfg = self.cfg
+        missing = [n for n, v in (("API ID", cfg.api_id), ("API Hash", cfg.api_hash),
+                                   ("Chat ID", cfg.chat_id)) if not v]
+        if missing:
+            self.on_log(f"[upload #{slot}] missing Telegram settings: "
+                        f"{', '.join(missing)}. Fill them in, Save, then re-enable Upload.")
+            return None
+        _start_global_recv_once(tdjson)
+        db = os.path.join(cfg.tdlib_dir, f"client{slot}")
+        try:
+            os.makedirs(db, exist_ok=True)
+        except Exception:
+            pass
+        td = _TDLibClient(tdjson, cfg, db_path=db,
+                          on_log=self.on_log, prompt_cb=self.prompt_cb)
+        self.on_log(f"[pipeline] Connecting Telegram client {slot}…")
+        try:
+            await td.start()
+        except Exception as e:
+            self.on_log(f"[upload #{slot}] connect/auth failed: {e}")
+            return None
+        self._clients.append(td)
+        self._has_uploaders = True
+        return td
+
     # ── Workers ──────────────────────────────────────────────────────────────
 
     async def _converter_worker(self, loop, upload_queue: asyncio.Queue,
-                                 processed: set):
+                                 processed: set, queued: set, uploaded: set):
+        """Coordinator: converts .ts → .mp4 when the Convert stage is on, and
+        feeds .mp4s to the upload queue when the Upload stage is on. Both halves
+        are gated on the live cfg flags, so toggling a stage takes effect on the
+        next cycle and the pipeline does nothing while both are off."""
         while True:
             if self._shutdown:
-                for _ in range(self.cfg.upload_workers):
-                    await upload_queue.put(None)
                 return
-            try:
-                ts_files = [
-                    f for f in os.listdir(self.cfg.watch_folder)
-                    if f.endswith(".ts")
-                    and os.path.isfile(os.path.join(self.cfg.watch_folder, f))
-                ]
-            except Exception as e:
-                self.on_log(f"[convert] scan error: {e}")
-                await asyncio.sleep(10)
-                continue
 
-            for f in ts_files:
-                if self._shutdown:
-                    break
-                path = os.path.join(self.cfg.watch_folder, f)
-                if path in processed or not _is_free(path):
-                    continue
-                processed.add(path)
-                self.on_log(f"[convert] → {f}")
+            # ── Stage ①: convert .ts → .mp4 ──
+            if self.cfg.do_convert:
                 try:
-                    outputs = await loop.run_in_executor(
-                        None, lambda p=path: self._convert_and_split(p)
-                    )
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
-                    self.on_progress("convert", "", 100.0, 0.0)   # → idle
-                    valid = [o for o in outputs if os.path.isfile(o)]
-                    if len(valid) != len(outputs):
-                        self.on_log(f"[convert] ⚠ {f}: {len(outputs)-len(valid)} part(s) missing (ffmpeg error)")
-                    self.on_log(f"[convert] ✓ {f} → {len(valid)} part(s)")
-                    for out in valid:
-                        await upload_queue.put(out)
+                    ts_files = [
+                        f for f in os.listdir(self.cfg.watch_folder)
+                        if f.endswith(".ts")
+                        and os.path.isfile(os.path.join(self.cfg.watch_folder, f))
+                    ]
                 except Exception as e:
-                    self.on_log(f"[convert] ✗ {f}: {e}")
-                    processed.discard(path)
+                    self.on_log(f"[convert] scan error: {e}")
+                    ts_files = []
+
+                for f in ts_files:
+                    if self._shutdown or not self.cfg.do_convert:
+                        break
+                    path = os.path.join(self.cfg.watch_folder, f)
+                    if path in processed or not _is_free(path):
+                        continue
+                    processed.add(path)
+                    self.on_log(f"[convert] → {f}")
+                    try:
+                        outputs = await loop.run_in_executor(
+                            None, lambda p=path: self._convert_and_split(p)
+                        )
+                        try:
+                            os.remove(path)
+                        except Exception:
+                            pass
+                        self.on_progress("convert", "", 100.0, 0.0)   # → idle
+                        valid = [o for o in outputs if os.path.isfile(o)]
+                        if len(valid) != len(outputs):
+                            self.on_log(f"[convert] ⚠ {f}: {len(outputs)-len(valid)} part(s) missing (ffmpeg error)")
+                        self.on_log(f"[convert] ✓ {f} → {len(valid)} part(s)")
+                        # The .mp4s are now on disk; the feed step below queues
+                        # them when Upload is on (so convert-only just keeps them).
+                    except Exception as e:
+                        self.on_log(f"[convert] ✗ {f}: {e}")
+                        processed.discard(path)
+
+            # ── Feed stage ②: queue un-uploaded .mp4s for upload ──
+            # Runs whenever Upload is on and a client is connected — picks up
+            # freshly converted files, leftovers from before, and files made
+            # while Upload was off. Dedup via `queued`.
+            if self.cfg.do_upload and self._has_uploaders:
+                try:
+                    for f in sorted(os.listdir(self.cfg.output_folder)):
+                        if (f.endswith(".mp4") and f not in uploaded
+                                and f not in queued):
+                            queued.add(f)
+                            await upload_queue.put(
+                                os.path.join(self.cfg.output_folder, f))
+                except Exception:
+                    pass
 
             for _ in range(50):
                 if self._shutdown:
                     break
                 await asyncio.sleep(0.1)
 
-    async def _uploader_worker(self, td, slot: int, upload_queue: asyncio.Queue,
+    async def _uploader_worker(self, slot: int, upload_queue: asyncio.Queue,
                                 uploaded: set):
+        td = None
+        connect_failed = False
+        prev_upload = False
         while True:
             # Stop pulling new files the moment the pipeline is stopping. An
             # in-flight send_video already completed this iteration (finish
@@ -243,6 +274,23 @@ class PipelineWorker:
             # worker would drain the whole backlog before noticing _shutdown.
             if self._shutdown:
                 return
+            du = self.cfg.do_upload
+            if du and not prev_upload:
+                connect_failed = False     # re-enabled → allow a fresh attempt
+            prev_upload = du
+            if not du:
+                await asyncio.sleep(0.5)        # Upload stage off — idle
+                continue
+            # Lazily connect this worker's TDLib client the first time Upload is
+            # active. On failure, idle until the user toggles Upload off→on again.
+            if td is None:
+                if connect_failed:
+                    await asyncio.sleep(0.5)
+                    continue
+                td = await self._connect_client(slot)
+                if td is None:
+                    connect_failed = True
+                    continue
             try:
                 path = await asyncio.wait_for(upload_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
@@ -251,7 +299,7 @@ class PipelineWorker:
                 continue
             if path is None:
                 upload_queue.task_done()
-                return
+                continue
 
             name = os.path.basename(path)
             if not os.path.isfile(path):

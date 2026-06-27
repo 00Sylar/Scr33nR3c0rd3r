@@ -11,6 +11,24 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **Split the pipeline into independent Convert and Upload stages, with a
+  live stand-by model.** The Output / Upload tab now has two **Stages**
+  checkboxes — *① Convert .ts → .mp4* and *② Upload .mp4 to Telegram*. The
+  pipeline starts even with nothing checked and sits in **● STAND BY**; tick
+  stages at any time and they apply immediately (the header shows *CONVERTING*,
+  *UPLOADING*, or *CONVERTING & UPLOADING*). Unchecking a stage stops it after
+  its current task finishes — an in-progress conversion or upload is never
+  interrupted. Run Convert alone to get `.mp4` files without uploading (kept in
+  the converted folder, no Telegram setup needed), Upload alone to send `.mp4`s
+  you already have, or both for the full flow. Enabling Upload connects to
+  Telegram on demand (reusing your saved session — no restart, no re-login);
+  credentials are only needed when Upload is on. Stage choices persist across
+  restarts.
+- **Control the pipeline stages from the OpenClaw bot.** New
+  `scr33nx_ctl.py pipeline convert on|off` and `pipeline upload on|off` commands
+  tick/untick the stages from your phone — working whether the pipeline is
+  running or stopped (applied live if running, otherwise on next start). Backed
+  by a new `POST /pipeline/stage` local-API endpoint.
 - **Choose which browser "Open in Browser" uses.** Right-click a model →
   **Open in Browser** now lets you pick the browser (System default, or any of
   Chrome / Edge / Firefox / Brave / Opera / Vivaldi detected on your PC) the

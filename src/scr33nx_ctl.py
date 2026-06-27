@@ -21,7 +21,8 @@ COMMANDS
   clear                                        stop everything + REMOVE all models
   dashboard                                    per-site + totals status snapshot
   monitor       recorder|saved on|off         start/stop a monitor/scanner
-  pipeline      on|off                         start/stop the Telegram pipeline
+  pipeline      on|off                         start/stop the pipeline (stand-by)
+  pipeline      convert|upload on|off          tick/untick a stage (any time)
   open                                          launch the Scr33nX app
   close                                         gracefully quit the Scr33nX app
 
@@ -39,6 +40,8 @@ EXAMPLES
   python scr33nx_ctl.py dashboard
   python scr33nx_ctl.py monitor recorder on
   python scr33nx_ctl.py pipeline on
+  python scr33nx_ctl.py pipeline convert on
+  python scr33nx_ctl.py pipeline upload off
 """
 
 import os
@@ -256,7 +259,14 @@ def cmd_monitor(a):
 
 
 def cmd_pipeline(a):
-    return _request("POST", "/pipeline", {"enabled": a.state == "on"})
+    # pipeline on|off          → start/stop the whole pipeline
+    # pipeline convert on|off  → tick/untick the Convert stage
+    # pipeline upload  on|off  → tick/untick the Upload stage
+    if a.state in ("on", "off"):
+        return _request("POST", "/pipeline", {"enabled": a.state == "on"})
+    if a.state2 not in ("on", "off"):
+        return {"ok": False, "error": f"usage: pipeline {a.state} on|off"}
+    return _request("POST", "/pipeline/stage", {a.state: a.state2 == "on"})
 
 
 def _api_up() -> bool:
@@ -351,7 +361,8 @@ def main() -> int:
     s.add_argument("state", choices=("on", "off"))
     s.set_defaults(fn=cmd_monitor)
     s = sub.add_parser("pipeline")
-    s.add_argument("state", choices=("on", "off"))
+    s.add_argument("state", choices=("on", "off", "convert", "upload"))
+    s.add_argument("state2", nargs="?", choices=("on", "off"))
     s.set_defaults(fn=cmd_pipeline)
     s = sub.add_parser("open");  s.set_defaults(fn=cmd_open)
     s = sub.add_parser("close"); s.set_defaults(fn=cmd_close)

@@ -261,6 +261,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._handle_monitor()
         elif parsed.path == "/pipeline":
             self._handle_pipeline()
+        elif parsed.path == "/pipeline/stage":
+            self._handle_pipeline_stage()
         elif parsed.path == "/quit":
             self._handle_quit()
         else:
@@ -467,6 +469,27 @@ class _ApiHandler(BaseHTTPRequestHandler):
         app = self._app
         app.after(0, lambda e=enabled: app._api_set_pipeline(e))
         self._json({"ok": True, "enabled": enabled})
+
+    def _handle_pipeline_stage(self):
+        """Set the Convert/Upload stage toggles. Body may contain "convert" and/or
+        "upload" (bool). Works whether the pipeline is running or stopped — like
+        ticking the checkboxes in the app."""
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+        convert = body.get("convert", None)
+        upload = body.get("upload", None)
+        if convert is None and upload is None:
+            self._json({"ok": False, "error": "specify 'convert' and/or 'upload'"}, 400)
+            return
+        c = None if convert is None else bool(convert)
+        u = None if upload is None else bool(upload)
+        app = self._app
+        app.after(0, lambda: app._api_set_pipeline_stage(c, u))
+        self._json({"ok": True, "convert": c, "upload": u})
 
     def _handle_quit(self):
         # Reply first, THEN schedule the shutdown (which stops this very
@@ -1498,6 +1521,18 @@ class StreamRecorderApp(tk.Tk):
         if enabled == running:
             return
         self._toggle_pipeline(silent=True)
+
+    def _api_set_pipeline_stage(self, convert=None, upload=None):
+        """API: tick/untick the Convert/Upload stage checkboxes (no dialogs).
+        Persists the choice and applies it live if the pipeline is running —
+        works regardless of pipeline status, mirroring the UI checkboxes."""
+        if not (hasattr(self, "_v_do_convert") and hasattr(self, "_v_do_upload")):
+            return
+        if convert is not None:
+            self._v_do_convert.set(bool(convert))
+        if upload is not None:
+            self._v_do_upload.set(bool(upload))
+        self._on_stage_toggle()
 
     def _api_quit(self):
         """API: graceful shutdown with no confirm dialog (mirrors _on_close
@@ -3138,6 +3173,24 @@ class StreamRecorderApp(tk.Tk):
             style="Flat.TButton",
             command=self._pipeline_reauth).pack(side="right", padx=6, pady=8)
 
+        # Pipeline stage toggles — run either stage alone or both together
+        stages = tk.Frame(p, bg=BG2)
+        stages.pack(fill="x")
+        tk.Label(stages, text="Stages:", fg=TEXT3, bg=BG2, font=UI).pack(
+            side="left", padx=(14, 6), pady=4)
+        self._v_do_convert = tk.BooleanVar(value=self.settings.pipeline_do_convert)
+        self._v_do_upload = tk.BooleanVar(value=self.settings.pipeline_do_upload)
+        tk.Checkbutton(stages, text="① Convert .ts → .mp4",
+                       variable=self._v_do_convert, command=self._on_stage_toggle,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3,
+                       activebackground=BG2, activeforeground=TEXT, font=UI,
+                       relief="flat").pack(side="left", padx=(0, 12))
+        tk.Checkbutton(stages, text="② Upload .mp4 to Telegram",
+                       variable=self._v_do_upload, command=self._on_stage_toggle,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3,
+                       activebackground=BG2, activeforeground=TEXT, font=UI,
+                       relief="flat").pack(side="left")
+
         # Settings grid
         cfg_frame = tk.LabelFrame(p, text=" Telegram / Pipeline settings ",
             bg=BG, fg=TEXT2, font=("Segoe UI Semibold", 9),
@@ -3204,6 +3257,8 @@ class StreamRecorderApp(tk.Tk):
 
     def _save_pipeline_settings(self):
         s = self.settings
+        s.pipeline_do_convert = self._v_do_convert.get()
+        s.pipeline_do_upload  = self._v_do_upload.get()
         s.telegram_api_id   = self._pipe_vars["telegram_api_id"].get().strip()
         s.telegram_api_hash = self._pipe_vars["telegram_api_hash"].get().strip()
         s.telegram_group_id = self._pipe_vars["telegram_group_id"].get().strip()
@@ -3212,6 +3267,48 @@ class StreamRecorderApp(tk.Tk):
         s.telegram_session_dir   = self._pipe_vars["telegram_session_dir"].get().strip()
         save_pipeline_settings(s)
         self._pipe_log_add("Pipeline settings saved.", "success")
+
+    def _on_stage_toggle(self):
+        """Apply a Convert/Upload checkbox change. Persists the choice, and if the
+        pipeline is already running, updates it live (no restart needed)."""
+        dc = self._v_do_convert.get()
+        du = self._v_do_upload.get()
+        self.settings.pipeline_do_convert = dc
+        self.settings.pipeline_do_upload = du
+        save_pipeline_settings(self.settings)
+
+        if self.pipeline and self.pipeline.running:
+            cfg = self.pipeline.cfg
+            # When enabling Upload live, refresh the Telegram credentials from the
+            # fields so a freshly-filled account is picked up on the next attempt.
+            if du and not cfg.do_upload:
+                fresh = self._build_pipeline_config()
+                cfg.api_id, cfg.api_hash = fresh.api_id, fresh.api_hash
+                cfg.chat_id, cfg.topic_id = fresh.chat_id, fresh.topic_id
+            cfg.do_convert = dc
+            cfg.do_upload = du
+            self._pipe_log_add(
+                f"Stages updated live — convert: {'on' if dc else 'off'}, "
+                f"upload: {'on' if du else 'off'}.", "accent")
+        self._update_pipe_mode_label()
+
+    def _pipe_mode_text(self):
+        """State-label text/colour reflecting which stages are active."""
+        dc = self._v_do_convert.get()
+        du = self._v_do_upload.get()
+        if dc and du:
+            return "● CONVERTING & UPLOADING", GREEN
+        if dc:
+            return "● CONVERTING", GREEN
+        if du:
+            return "● UPLOADING", GREEN
+        return "● STAND BY", YELLOW
+
+    def _update_pipe_mode_label(self):
+        if not (self.pipeline and self.pipeline.running):
+            return
+        text, color = self._pipe_mode_text()
+        self._lbl_pipe_state.configure(text=text, fg=color)
 
     def _build_pipeline_config(self):
         cfg = self._PipelineConfig()
@@ -3230,6 +3327,8 @@ class StreamRecorderApp(tk.Tk):
             cfg.topic_id = int(self._pipe_vars["_topic_id"].get().strip() or "0")
         except ValueError:
             cfg.topic_id = 0
+        cfg.do_convert = self._v_do_convert.get()
+        cfg.do_upload = self._v_do_upload.get()
         cfg.watch_folder = s.output_dir
         cfg.output_folder = (self._pipe_vars["pipeline_converted_dir"].get().strip()
                              or os.path.join(s.output_dir, "converted"))
@@ -3248,22 +3347,11 @@ class StreamRecorderApp(tk.Tk):
             self._lbl_pipe_state.configure(text="● STOPPING", fg=ORANGE)
             return
 
+        # The pipeline always starts (even with no stage checked) and sits in
+        # stand-by — stages are turned on/off live afterwards. No up-front
+        # validation: missing Telegram settings are reported by the worker only
+        # if/when the Upload stage is actually enabled.
         cfg = self._build_pipeline_config()
-        missing = []
-        if not cfg.api_id:   missing.append("API ID")
-        if not cfg.api_hash: missing.append("API Hash")
-        if not cfg.chat_id:  missing.append("Chat ID")
-        if missing:
-            # silent=True path is used by the API (no modal dialog on the UI
-            # thread — that would freeze the app that serves the API).
-            if silent:
-                self._log_add("Pipeline start (API) failed — missing settings: "
-                              + ", ".join(missing), "error")
-            else:
-                messagebox.showerror("Missing settings",
-                    "Please fill in: " + ", ".join(missing))
-            return
-
         os.makedirs(cfg.output_folder, exist_ok=True)
         os.makedirs(cfg.tdlib_dir, exist_ok=True)
 
@@ -3275,6 +3363,11 @@ class StreamRecorderApp(tk.Tk):
                 lambda: self._pipeline_progress(k, n, p, s)),
             prompt_cb=self._pipeline_prompt,
         )
+        # Remember the chosen stages so they persist across restarts.
+        self.settings.pipeline_do_convert = cfg.do_convert
+        self.settings.pipeline_do_upload  = cfg.do_upload
+        save_pipeline_settings(self.settings)
+
         self.pipeline.start()
         self._btn_pipeline.configure(text="⏹  STOP PIPELINE", style="Red.TButton")
         self._lbl_pipe_state.configure(text="● STARTING", fg=YELLOW)
@@ -3298,9 +3391,12 @@ class StreamRecorderApp(tk.Tk):
             messagebox.showerror("Re-auth failed", str(e))
 
     def _pipeline_state_changed(self, state: str):
+        if state == "running":
+            # Show which stage(s) are active rather than a generic "RUNNING".
+            self._update_pipe_mode_label()
+            return
         colors = {
             "starting":  (YELLOW, "● STARTING"),
-            "running":   (GREEN,  "● RUNNING"),
             "stopping":  (ORANGE, "● STOPPING"),
             "stopped":   (TEXT3,  "● STOPPED"),
             "error":     (RED,    "● ERROR"),
