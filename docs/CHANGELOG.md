@@ -11,6 +11,13 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **Telegram Setup Wizard.** A new **🧙 Setup Wizard** button on the Output /
+  Upload tab walks first-time users through configuring the upload pipeline:
+  API ID / Hash (with a link to my.telegram.org), the destination group/topic
+  ID, and optional folders. It saves everything to the normal settings and can
+  start the pipeline straight away — the phone-number/login-code prompts then run
+  through the usual login flow. Removes the guesswork of filling the raw fields
+  by hand.
 - **Split the pipeline into independent Convert and Upload stages, with a
   live stand-by model.** The Output / Upload tab now has two **Stages**
   checkboxes — *① Convert .ts → .mp4* and *② Upload .mp4 to Telegram*. The

@@ -166,7 +166,9 @@ The pipeline has **two independent stages** you can run alone or together, via t
 
 Telegram credentials are only required once you enable **②**; if they're missing, the pipeline log says so and Upload stays idle until you fill them in, save, and re-tick Upload.
 
-To use the Upload stage:
+**First time? Use the wizard.** Click **🧙 Setup Wizard** at the top of the Output / Upload tab for a guided, step-by-step setup — it walks you through the API ID/Hash, the destination group/topic, and optional folders, saves everything, and can start the pipeline for you (you'll be prompted for your phone number and login code on first connect).
+
+To set it up manually instead:
 
 1. Get your `api_id` / `api_hash` from https://my.telegram.org
 2. Fill in the **Telegram / Pipeline settings** in the Output / Upload tab (group ID, optional topic ID)

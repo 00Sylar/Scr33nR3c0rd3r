@@ -3173,6 +3173,10 @@ class StreamRecorderApp(tk.Tk):
             style="Flat.TButton",
             command=self._pipeline_reauth).pack(side="right", padx=6, pady=8)
 
+        ttk.Button(bar, text="🧙  Setup Wizard",
+            style="Flat.TButton",
+            command=self._telegram_wizard).pack(side="right", padx=6, pady=8)
+
         # Pipeline stage toggles — run either stage alone or both together
         stages = tk.Frame(p, bg=BG2)
         stages.pack(fill="x")
@@ -3267,6 +3271,157 @@ class StreamRecorderApp(tk.Tk):
         s.telegram_session_dir   = self._pipe_vars["telegram_session_dir"].get().strip()
         save_pipeline_settings(s)
         self._pipe_log_add("Pipeline settings saved.", "success")
+
+    def _telegram_wizard(self):
+        """Guided first-time setup for the Telegram upload pipeline. Collects API
+        credentials + destination, writes them into the tab's fields, saves via
+        the normal saver, and can start the pipeline (the actual phone/code login
+        runs through the existing _pipeline_prompt flow). User-triggered modal —
+        never call from the API/background path (it blocks the Tk loop)."""
+        win = tk.Toplevel(self)
+        win.title("Telegram Pipeline — Setup Wizard")
+        win.configure(bg=BG2)
+        win.resizable(False, False)
+        win.transient(self)
+
+        # Working copies, prefilled from the current fields.
+        v_api_id   = tk.StringVar(value=self._pipe_vars["telegram_api_id"].get().strip())
+        v_api_hash = tk.StringVar(value=self._pipe_vars["telegram_api_hash"].get().strip())
+        v_group    = tk.StringVar(value=self._pipe_vars["telegram_group_id"].get().strip())
+        v_topic    = tk.StringVar(value=self._pipe_vars["_topic_id"].get().strip() or "0")
+        v_conv     = tk.StringVar(value=self._pipe_vars["pipeline_converted_dir"].get().strip())
+        v_sess     = tk.StringVar(value=self._pipe_vars["telegram_session_dir"].get().strip())
+        v_start    = tk.BooleanVar(value=True)
+
+        header = tk.Label(win, bg=BG2, fg=TEXT, font=("Segoe UI Semibold", 13))
+        header.pack(anchor="w", padx=20, pady=(16, 0))
+        step_lbl = tk.Label(win, bg=BG2, fg=TEXT3, font=UI)
+        step_lbl.pack(anchor="w", padx=20)
+        body = tk.Frame(win, bg=BG2)
+        body.pack(fill="both", expand=True, padx=20, pady=10)
+        btns = tk.Frame(win, bg=BG2)
+        btns.pack(fill="x", padx=16, pady=(4, 16))
+
+        state = {"step": 0}
+        TOTAL = 4
+
+        def _clear(frame):
+            for w in frame.winfo_children():
+                w.destroy()
+
+        def _label(text, fg=TEXT2, font=UI, pady=(8, 0)):
+            tk.Label(body, text=text, bg=BG2, fg=fg, font=font,
+                     justify="left", wraplength=440).pack(anchor="w", pady=pady)
+
+        def _entry(var, show=None, width=46):
+            ttk.Entry(body, textvariable=var, width=width, show=show).pack(
+                anchor="w", pady=(2, 6))
+
+        def render():
+            _clear(body)
+            s = state["step"]
+            step_lbl.configure(text=f"Step {s + 1} of {TOTAL}")
+            if s == 0:
+                header.configure(text="Welcome")
+                _label("This wizard sets up uploading your recordings to a Telegram "
+                       "group or topic.\n\nYou'll need:\n"
+                       "  •  A Telegram account\n"
+                       "  •  An API ID + API Hash from my.telegram.org\n"
+                       "  •  The target group/chat ID (and topic ID, if any)")
+                _label("Get your API ID / Hash at:")
+                link = tk.Label(body, text="https://my.telegram.org  →  API development tools",
+                                bg=BG2, fg=ACCENT, font=UI, cursor="hand2")
+                link.pack(anchor="w")
+                link.bind("<Button-1>", lambda e: self._launch_urls(
+                    [("Telegram", "", "https://my.telegram.org")],
+                    self.settings.preferred_browser))
+            elif s == 1:
+                header.configure(text="Telegram API credentials")
+                _label("API ID (numbers only):")
+                _entry(v_api_id, width=24)
+                _label("API Hash:")
+                _entry(v_api_hash)
+            elif s == 2:
+                header.configure(text="Destination")
+                _label("Chat / Group ID (e.g. -1001234567890):")
+                _entry(v_group, width=28)
+                _label("Topic ID (0 if the group has no topics):")
+                _entry(v_topic, width=12)
+                _label("Tip: forward a message from the group to a getId bot "
+                       "(e.g. @userinfobot) to find the numeric ID.", fg=TEXT3)
+            else:
+                header.configure(text="Review & finish")
+                _label("Optional — leave blank for sensible defaults:")
+                _label("Converted .mp4 folder:", pady=(6, 0))
+                _entry(v_conv)
+                _label("TDLib session folder:", pady=(2, 0))
+                _entry(v_sess)
+                tk.Checkbutton(body, text="Start the pipeline with Upload enabled now",
+                               variable=v_start, bg=BG2, fg=TEXT2, selectcolor=BG3,
+                               activebackground=BG2, activeforeground=TEXT, font=UI,
+                               relief="flat").pack(anchor="w", pady=(10, 0))
+                _label("On first start you'll be asked for your phone number and the "
+                       "Telegram login code.", fg=TEXT3)
+            _render_buttons()
+
+        def _render_buttons():
+            _clear(btns)
+            s = state["step"]
+            ttk.Button(btns, text="Cancel", style="Ghost.TButton",
+                       command=win.destroy).pack(side="left")
+            if s == TOTAL - 1:
+                ttk.Button(btns, text="✓  Save & Finish", style="Green.TButton",
+                           command=_finish).pack(side="right")
+            else:
+                ttk.Button(btns, text="Next  →", style="Flat.TButton",
+                           command=_next).pack(side="right")
+            if s > 0:
+                ttk.Button(btns, text="←  Back", style="Ghost.TButton",
+                           command=_back).pack(side="right", padx=(0, 8))
+
+        def _next():
+            s = state["step"]
+            if s == 1:
+                if not v_api_id.get().strip().isdigit():
+                    messagebox.showwarning("Setup Wizard", "API ID must be a number.",
+                                           parent=win)
+                    return
+                if not v_api_hash.get().strip():
+                    messagebox.showwarning("Setup Wizard", "API Hash is required.",
+                                           parent=win)
+                    return
+            elif s == 2:
+                if not v_group.get().strip():
+                    messagebox.showwarning("Setup Wizard",
+                                           "Chat / Group ID is required.", parent=win)
+                    return
+            state["step"] = min(TOTAL - 1, s + 1)
+            render()
+
+        def _back():
+            state["step"] = max(0, state["step"] - 1)
+            render()
+
+        def _finish():
+            self._pipe_vars["telegram_api_id"].set(v_api_id.get().strip())
+            self._pipe_vars["telegram_api_hash"].set(v_api_hash.get().strip())
+            self._pipe_vars["telegram_group_id"].set(v_group.get().strip())
+            self._pipe_vars["_topic_id"].set(v_topic.get().strip() or "0")
+            self._pipe_vars["pipeline_converted_dir"].set(v_conv.get().strip())
+            self._pipe_vars["telegram_session_dir"].set(v_sess.get().strip())
+            self._save_pipeline_settings()
+            win.destroy()
+            if v_start.get():
+                self._v_do_upload.set(True)
+                if self.pipeline and self.pipeline.running:
+                    self._on_stage_toggle()
+                else:
+                    self._toggle_pipeline()
+
+        render()
+        win.update_idletasks()
+        win.minsize(520, max(320, win.winfo_height()))
+        win.grab_set()
 
     def _on_stage_toggle(self):
         """Apply a Convert/Upload checkbox change. Persists the choice, and if the
