@@ -10,6 +10,15 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Added
+- **Choose which browser "Open in Browser" uses.** Right-click a model →
+  **Open in Browser** now lets you pick the browser (System default, or any of
+  Chrome / Edge / Firefox / Brave / Opera / Vivaldi detected on your PC) the
+  first time, with a *Remember my choice* option so you're not asked again. A new
+  **Open links with** dropdown in Settings changes or resets the saved default at
+  any time, and an **Open in Browser (choose…)** menu entry re-opens the picker
+  for a one-off browser without touching your saved default.
+
 ---
 
 ## V1.4 — 2026-06-26

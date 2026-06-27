@@ -41,6 +41,7 @@ class AppSettings:
     max_quality: int = 0                       # global cap: variant height px (0 = unlimited)
     auto_downgrade_enabled: bool = False       # step struggling streams down a quality rung
     playwright_fallback_enabled: bool = True   # Stripchat: use browser fallback when native fails
+    preferred_browser: str = ""                # "" = ask each time, "system" = OS default, else exe path
     models: List[dict] = None                  # [{name, site, auto_rec, max_q}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list
     ranks: dict = None                         # "site:name" → 0-5 star rank
@@ -107,6 +108,7 @@ def load_settings() -> AppSettings:
     s.max_quality = main.get("max_quality", s.max_quality)
     s.auto_downgrade_enabled = main.get("auto_downgrade_enabled", s.auto_downgrade_enabled)
     s.playwright_fallback_enabled = main.get("playwright_fallback_enabled", s.playwright_fallback_enabled)
+    s.preferred_browser = main.get("preferred_browser", s.preferred_browser)
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
     s.ranks = main.get("ranks", {}) or {}
@@ -145,6 +147,7 @@ def save_settings(s: AppSettings):
         "max_quality": s.max_quality,
         "auto_downgrade_enabled": s.auto_downgrade_enabled,
         "playwright_fallback_enabled": s.playwright_fallback_enabled,
+        "preferred_browser": s.preferred_browser,
         "models": s.models,
         "saved_models": s.saved_models,
         "ranks": s.ranks,

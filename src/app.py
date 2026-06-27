@@ -14,6 +14,7 @@ import json
 import time
 import math
 import random
+import subprocess
 import threading
 import tkinter as tk
 from collections import deque
@@ -113,6 +114,38 @@ def _quality_label(height: int) -> str:
         if h == height:
             return lbl
     return f"{height}p" if height else "Unlimited (highest)"
+
+
+# ── Browser detection (for "Open in Browser" picker) ──────────────────────────
+# Common Windows install locations per browser; first existing path wins.
+_BROWSER_CANDIDATES = (
+    ("Google Chrome", (r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+                        r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+                        r"%LocalAppData%\Google\Chrome\Application\chrome.exe")),
+    ("Microsoft Edge", (r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe",
+                        r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe")),
+    ("Mozilla Firefox", (r"%ProgramFiles%\Mozilla Firefox\firefox.exe",
+                        r"%ProgramFiles(x86)%\Mozilla Firefox\firefox.exe")),
+    ("Brave", (r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe",
+               r"%ProgramFiles(x86)%\BraveSoftware\Brave-Browser\Application\brave.exe",
+               r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe")),
+    ("Opera", (r"%LocalAppData%\Programs\Opera\opera.exe",
+               r"%ProgramFiles%\Opera\opera.exe")),
+    ("Vivaldi", (r"%LocalAppData%\Vivaldi\Application\vivaldi.exe",
+                 r"%ProgramFiles%\Vivaldi\Application\vivaldi.exe")),
+)
+
+
+def _detect_browsers() -> list:
+    """Return [(display_name, exe_path), ...] for browsers installed on this PC."""
+    found = []
+    for name, paths in _BROWSER_CANDIDATES:
+        for p in paths:
+            ep = os.path.expandvars(p)
+            if os.path.isfile(ep):
+                found.append((name, ep))
+                break
+    return found
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 # Elegant black & red — minimalist. Red is the single signature accent;
@@ -883,6 +916,22 @@ class StreamRecorderApp(tk.Tk):
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,4))
 
+        tk.Label(p, text="Open links with", fg=TEXT2, bg=BG2, font=UI).pack(
+            anchor="w", padx=16, pady=(8, 0))
+        self._browser_choices = [("Ask each time", ""), ("System default", "system")]
+        self._browser_choices += _detect_browsers()
+        # Preserve a remembered browser whose exe isn't auto-detected.
+        pref = self.settings.preferred_browser
+        if pref and pref != "system" and pref not in (v for _, v in self._browser_choices):
+            self._browser_choices.append((f"Custom ({os.path.basename(pref)})", pref))
+        self._v_browser = tk.StringVar()
+        ttk.Combobox(p, textvariable=self._v_browser, state="readonly",
+                     values=[d for d, _ in self._browser_choices]).pack(
+            fill="x", padx=16, pady=(2, 8))
+        self._sync_browser_combo()
+        if not self._v_browser.get():
+            self._v_browser.set("Ask each time")
+
         ttk.Button(p, text="💾  Save Settings", style="Flat.TButton",
                    command=self._save_settings).pack(fill="x", padx=16, pady=(0,0))
 
@@ -1272,6 +1321,8 @@ class StreamRecorderApp(tk.Tk):
                           command=lambda: self._copy_model_url(name, site))
             m.add_command(label="🌐  Open in Browser",
                           command=lambda: self._open_in_browser([iid]))
+            m.add_command(label="🌐  Open in Browser (choose…)",
+                          command=lambda: self._open_in_browser([iid], force_choose=True))
             m.add_command(label="📁  Open Output Folder",
                           command=lambda: os.startfile(self.settings.output_dir))
             m.add_command(label="✕  Remove Model",
@@ -1290,6 +1341,8 @@ class StreamRecorderApp(tk.Tk):
             m.add_separator()
             m.add_command(label=f"🌐  Open in Browser  ({n} selected)",
                           command=lambda s=sel: self._open_in_browser(s))
+            m.add_command(label=f"🌐  Open in Browser (choose…)  ({n} selected)",
+                          command=lambda s=sel: self._open_in_browser(s, force_choose=True))
             m.add_command(label=f"📋  Copy as OneTab List  ({n} selected)",
                           command=lambda s=sel: self._copy_onetab(s))
             m.add_command(label="📁  Open Output Folder",
@@ -1723,16 +1776,95 @@ class StreamRecorderApp(tk.Tk):
             out.append((name, site, url))
         return out
 
-    def _open_in_browser(self, keys: list, saved: bool = False):
+    def _open_in_browser(self, keys: list, saved: bool = False,
+                         force_choose: bool = False):
         items = self._keys_to_models(keys, saved)
+        if not items:
+            return
         if len(items) > 10 and not messagebox.askyesno(
                 "Open in Browser",
                 f"Open {len(items)} tabs in your browser?"):
             return
+        target = self.settings.preferred_browser
+        # Ask when nothing is remembered, or when the user explicitly asked to
+        # pick a one-off browser via the "(choose…)" menu item.
+        if force_choose or not target:
+            choice = self._choose_browser_dialog()
+            if choice is None:          # user cancelled
+                return
+            target, remember = choice
+            if remember:
+                self.settings.preferred_browser = target
+                save_settings(self.settings)
+                self._sync_browser_combo()
+        self._launch_urls(items, target)
+        self._log_add(f"Opened {len(items)} model page(s) in browser")
+
+    def _launch_urls(self, items: list, target: str):
+        """Open each model URL using `target` ("" / "system" = OS default,
+        otherwise a browser exe path)."""
         import webbrowser
         for _, _, url in items:
-            webbrowser.open(url)
-        self._log_add(f"Opened {len(items)} model page(s) in browser")
+            try:
+                if not target or target == "system":
+                    webbrowser.open(url)
+                else:
+                    subprocess.Popen([target, url])
+            except Exception as e:
+                self._log_add(f"Browser launch failed ({e}); using default.", "warn")
+                webbrowser.open(url)
+
+    def _choose_browser_dialog(self):
+        """Modal picker (UI-triggered only). Returns (target, remember) or None
+        if cancelled. `target` is "system" or a browser exe path."""
+        win = tk.Toplevel(self)
+        win.title("Open in Browser")
+        win.configure(bg=BG2)
+        win.resizable(False, False)
+        win.transient(self)
+        result = {"value": None}
+        tk.Label(win, text="Open in which browser?", bg=BG2, fg=TEXT,
+                 font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=16, pady=(14, 8))
+        sel = tk.StringVar(value="system")
+        tk.Radiobutton(win, text="System default", variable=sel, value="system",
+                       bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                       activeforeground=TEXT, font=UI, relief="flat").pack(
+            anchor="w", padx=20)
+        for name, exe in _detect_browsers():
+            tk.Radiobutton(win, text=name, variable=sel, value=exe,
+                           bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                           activeforeground=TEXT, font=UI, relief="flat").pack(
+                anchor="w", padx=20)
+        remember = tk.BooleanVar(value=False)
+        tk.Checkbutton(win, text="Remember my choice (change later in Settings)",
+                       variable=remember, bg=BG2, fg=TEXT2, selectcolor=BG3,
+                       activebackground=BG2, activeforeground=TEXT, font=UI,
+                       relief="flat").pack(anchor="w", padx=16, pady=(10, 4))
+        btns = tk.Frame(win, bg=BG2)
+        btns.pack(fill="x", padx=16, pady=(4, 14))
+
+        def _ok():
+            result["value"] = (sel.get(), remember.get())
+            win.destroy()
+
+        ttk.Button(btns, text="Open", style="Flat.TButton", command=_ok).pack(
+            side="right")
+        ttk.Button(btns, text="Cancel", style="Ghost.TButton",
+                   command=win.destroy).pack(side="right", padx=(0, 8))
+        win.update_idletasks()
+        win.grab_set()
+        win.wait_window()
+        return result["value"]
+
+    def _sync_browser_combo(self):
+        """Reflect the saved preferred_browser in the Settings dropdown."""
+        if not hasattr(self, "_v_browser"):
+            return
+        pref = self.settings.preferred_browser
+        for disp, val in self._browser_choices:
+            if val == pref:
+                self._v_browser.set(disp)
+                return
 
     def _copy_onetab(self, keys: list, saved: bool = False):
         """Copy models in OneTab's import format: one "URL | title" per line.
@@ -2800,6 +2932,8 @@ class StreamRecorderApp(tk.Tk):
                           command=lambda: self._copy_model_url(name, site))
             m.add_command(label="🌐  Open in Browser",
                           command=lambda t=targets: self._open_in_browser(t, saved=True))
+            m.add_command(label="🌐  Open in Browser (choose…)",
+                          command=lambda t=targets: self._open_in_browser(t, saved=True, force_choose=True))
             m.add_separator()
             m.add_command(label="✕  Remove from Saved Models",
                           command=lambda t=targets[0]: self._remove_saved(t))
@@ -2809,6 +2943,8 @@ class StreamRecorderApp(tk.Tk):
                           command=lambda t=targets: self._add_many_to_recorder(t))
             m.add_command(label=f"🌐  Open in Browser  ({n} {src})",
                           command=lambda t=targets: self._open_in_browser(t, saved=True))
+            m.add_command(label=f"🌐  Open in Browser (choose…)  ({n} {src})",
+                          command=lambda t=targets: self._open_in_browser(t, saved=True, force_choose=True))
             m.add_command(label=f"📋  Copy as OneTab List  ({n} {src})",
                           command=lambda t=targets: self._copy_onetab(t, saved=True))
             m.add_separator()
@@ -3300,6 +3436,11 @@ class StreamRecorderApp(tk.Tk):
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
         self.settings.privacy_mode_enabled  = self._v_privacy.get()
+        disp = self._v_browser.get()
+        for d, v in self._browser_choices:
+            if d == disp:
+                self.settings.preferred_browser = v
+                break
         self.recorder.gap_warnings_enabled  = self.settings.gap_warnings_enabled
         self._persist_models()
         save_settings(self.settings)
