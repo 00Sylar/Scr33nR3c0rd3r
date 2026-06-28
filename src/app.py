@@ -25,6 +25,8 @@ from typing import Optional
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import recorder
+import cb_relay
 from recorder import StreamRecorder, ModelStatus
 from settings import AppSettings, load_settings, save_settings, save_pipeline_settings
 from notifier import send_notification
@@ -878,7 +880,35 @@ class StreamRecorderApp(tk.Tk):
         ttk.Button(p, text="＋  Add Model", style="Accent.TButton",
                    command=self._add_model).pack(fill="x", padx=16, pady=(0,14))
 
-        tk.Frame(p, bg=BORDER, height=1).pack(fill="x", padx=12)
+        tk.Frame(p, bg=BORDER, height=1).pack(fill="x", padx=12, pady=(8,0))
+        self._build_stats_panel(p)
+
+    def _build_settings_tab(self, p):
+        """SETTINGS live in their own scrollable tab; the left panel keeps just
+        ADD MODEL + the stats panel, freeing vertical space and decluttering."""
+        canvas = tk.Canvas(p, bg=BG2, highlightthickness=0, bd=0)
+        vsb = ttk.Scrollbar(p, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = tk.Frame(canvas, bg=BG2)
+        win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(win_id, width=e.width))
+        # Mouse-wheel scroll only while the pointer is over this tab.
+        def _wheel(e):
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        self._build_settings_widgets(inner)
+
+    def _build_settings_widgets(self, p):
+        def label(text):
+            tk.Label(p, text=text, fg=TEXT3, bg=BG2,
+                     font=("Segoe UI Semibold", 9)).pack(anchor="w", padx=16, pady=(14,3))
+
         label("SETTINGS")
 
         tk.Label(p, text="Output Folder", fg=TEXT2, bg=BG2, font=UI).pack(anchor="w", padx=16)
@@ -961,11 +991,44 @@ class StreamRecorderApp(tk.Tk):
         if not self._v_browser.get():
             self._v_browser.set("Ask each time")
 
-        ttk.Button(p, text="💾  Save Settings", style="Flat.TButton",
-                   command=self._save_settings).pack(fill="x", padx=16, pady=(0,0))
+        tk.Label(p, text="Stream preview", fg=TEXT2, bg=BG2, font=UI).pack(
+            anchor="w", padx=16, pady=(8, 0))
+        self._v_preview_mode = tk.StringVar(
+            value=("Embedded (in-app)" if self.settings.preview_mode == "embedded"
+                   else "External window"))
+        ttk.Combobox(p, textvariable=self._v_preview_mode, state="readonly",
+                     values=["External window", "Embedded (in-app)"]).pack(
+            fill="x", padx=16, pady=(2, 4))
+        tk.Label(p, text="Preview engine", fg=TEXT3, bg=BG2, font=UI).pack(
+            anchor="w", padx=16)
+        self._v_preview_engine = tk.StringVar(
+            value={"auto": "Auto", "mpv": "mpv", "vlc": "VLC"}.get(
+                self.settings.preview_engine, "Auto"))
+        ttk.Combobox(p, textvariable=self._v_preview_engine, state="readonly",
+                     values=["Auto", "mpv", "VLC"]).pack(fill="x", padx=16, pady=(2, 4))
+        tk.Label(p, text="Player path (optional, mpv.exe / vlc.exe)", fg=TEXT3,
+                 bg=BG2, font=UI).pack(anchor="w", padx=16)
+        self._v_preview_path = tk.StringVar(value=self.settings.preview_player_path)
+        ttk.Entry(p, textvariable=self._v_preview_path).pack(
+            fill="x", padx=16, pady=(2, 8))
 
-        tk.Frame(p, bg=BORDER, height=1).pack(fill="x", padx=12, pady=(16,0))
-        self._build_stats_panel(p)
+        ttk.Button(p, text="💾  Save Settings", style="Flat.TButton",
+                   command=self._save_settings).pack(fill="x", padx=16, pady=(12,4))
+        self._lbl_saved = tk.Label(p, text="", bg=BG2, fg=GREEN, font=UI,
+                                   anchor="center", justify="center",
+                                   wraplength=240)
+        self._lbl_saved.pack(fill="x", padx=16, pady=(0, 12))
+
+        # ── System check: shows whether external tools / packages are found,
+        # with one-click fixes (add-to-PATH for installed-but-unpathed tools,
+        # pip installs). Prevents the silent "can't find it" class of problems.
+        tk.Frame(p, bg=BORDER, height=1).pack(fill="x", padx=12, pady=(4, 0))
+        label("SYSTEM CHECK")
+        ttk.Button(p, text="🔍  Re-check", style="Flat.TButton",
+                   command=self._run_system_check).pack(fill="x", padx=16, pady=(0, 6))
+        self._syscheck_frame = tk.Frame(p, bg=BG2)
+        self._syscheck_frame.pack(fill="x", padx=16, pady=(0, 12))
+        self._run_system_check()
 
     def _build_right(self, p):
         nb = ttk.Notebook(p)
@@ -994,6 +1057,11 @@ class StreamRecorderApp(tk.Tk):
         tab_l = ttk.Frame(nb)
         nb.add(tab_l, text="  Activity Log  ")
         self._build_log_tab(tab_l)
+
+        # Settings tab (moved off the left panel)
+        tab_set = ttk.Frame(nb)
+        nb.add(tab_set, text="  ⚙ Settings  ")
+        self._build_settings_tab(tab_set)
 
     # ── Models tab (Treeview — single native widget, no flicker) ─────────────
 
@@ -1346,6 +1414,8 @@ class StreamRecorderApp(tk.Tk):
                 m.add_command(label="⭐  Add to Saved Models",
                               command=lambda: self._add_to_saved(name, site))
             m.add_separator()
+            m.add_command(label="▶  Preview",
+                          command=lambda: self._preview_model(name, site))
             m.add_command(label="🔗  Copy Model URL",
                           command=lambda: self._copy_model_url(name, site))
             m.add_command(label="🌐  Open in Browser",
@@ -1932,6 +2002,404 @@ class StreamRecorderApp(tk.Tk):
         self.clipboard_clear()
         self.clipboard_append(text)
         self._log_add(f"Copied {len(items)} model(s) as OneTab list")
+
+    # ── Stream preview ─────────────────────────────────────────────────────────
+
+    def _import_mpv(self):
+        """Import python-mpv, making libmpv discoverable if the user dropped
+        libmpv-2.dll into the app's folder (so no PATH fiddling needed).
+        Returns the module, or None if python-mpv / libmpv isn't available."""
+        try:
+            import mpv
+            return mpv
+        except Exception:
+            pass
+        d = os.path.dirname(os.path.abspath(__file__))   # the src/ folder
+        try:
+            if hasattr(os, "add_dll_directory") and os.path.isdir(d):
+                os.add_dll_directory(d)
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+        except Exception:
+            pass
+        try:
+            import mpv
+            return mpv
+        except Exception:
+            return None
+
+    def _import_vlc(self):
+        """Import python-vlc. It auto-locates an installed VLC (libvlc) via the
+        registry, so no manual DLL step. Returns the module or None."""
+        try:
+            import vlc
+            return vlc
+        except Exception:
+            return None
+
+    def _embedded_available(self) -> bool:
+        """True if ANY embedded backend can load. The engine setting only sets
+        preference/order — the open path falls back to the other backend — so
+        availability is not engine-specific (e.g. engine=mpv still works via VLC
+        when only VLC is installed)."""
+        return self._import_mpv() is not None or self._import_vlc() is not None
+
+    def _pip_install(self, pkg: str, on_done=None):
+        """Install a Python package via pip in the background using the app's own
+        interpreter. Logs progress and calls on_done(success: bool) on the UI
+        thread. Used to auto-enable optional preview backends on demand."""
+        self._log_add(f"Installing {pkg} … (one-time, needs internet)")
+        def _do():
+            ok, detail = False, ""
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", pkg],
+                    capture_output=True, text=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                ok = (r.returncode == 0)
+                if not ok:
+                    lines = (r.stderr or r.stdout or "").strip().splitlines()
+                    detail = lines[-1] if lines else "pip failed"
+            except Exception as e:
+                detail = str(e)
+            if ok:
+                try:
+                    import importlib
+                    importlib.invalidate_caches()   # so the new package is importable now
+                except Exception:
+                    pass
+            def _report():
+                if ok:
+                    self._log_add(f"{pkg} installed.", "success")
+                else:
+                    self._log_add(f"Could not install {pkg}: {detail}", "error")
+                if on_done:
+                    on_done(ok)
+            self.after(0, _report)
+        threading.Thread(target=_do, daemon=True, name=f"pip-{pkg}").start()
+
+    def _preview_model(self, name: str, site: str):
+        """Open a live preview of a model's stream. The upstream is resolved off
+        the UI thread, wrapped in the local relay, then played either in an
+        external mpv/ffplay window (default) or an embedded in-app player —
+        per the Preview setting."""
+        # Only preview online/recording models. An offline model resolves to a
+        # dead stream, and handing that to an in-process player (libvlc/libmpv)
+        # can hard-crash the whole app — so block it up front with a clear note.
+        cfg = self.recorder.models.get(f"{site}:{name.lower()}")
+        status = cfg.status if cfg else None
+        if status not in (ModelStatus.ONLINE, ModelStatus.RECORDING):
+            messagebox.showinfo(
+                "Preview unavailable",
+                f"{name} ({site}) isn't online right now — preview only works for "
+                "online or recording models.")
+            return
+        title = f"{name} ({site})"
+        mode = (self.settings.preview_mode or "external").lower()
+        # Embedded needs python-mpv AND a loadable libmpv DLL. Check up front
+        # (actually try to import — find_spec can't tell if libmpv is missing)
+        # so the user gets immediate feedback instead of waiting through resolve.
+        if mode == "embedded" and not self._embedded_available():
+            # Auto-enable: VLC is installed but the python-vlc bridge isn't —
+            # offer to install it for the user, then retry the preview.
+            if self._detect_player("vlc") and self._import_vlc() is None:
+                if messagebox.askyesno(
+                        "Enable in-app preview",
+                        "VLC is installed, but the Python bridge 'python-vlc' is "
+                        "missing.\n\nInstall it now to enable in-app (embedded) "
+                        "preview?  (one-time, needs internet)"):
+                    self._pip_install(
+                        "python-vlc",
+                        on_done=lambda ok: self._preview_model(name, site)
+                        if ok else None)
+                    return
+            if not messagebox.askyesno(
+                    "Embedded preview unavailable",
+                    "In-app (embedded) preview needs one of:\n"
+                    "  • python-vlc + VLC installed  (pip install python-vlc), or\n"
+                    "  • python-mpv + libmpv-2.dll in the 'src' folder.\n\n"
+                    "Open in an external player window instead?"):
+                return
+            mode = "external"
+        self._log_add(f"Preview: resolving {title}…")
+        loading = self._preview_loading_show(title)
+        threading.Thread(target=self._preview_resolve,
+                         args=(name, site, title, mode, loading), daemon=True).start()
+
+    def _preview_loading_show(self, title: str):
+        """Small non-modal 'opening preview' indicator, centered over the app.
+        Returns the Toplevel so it can be closed once the player appears."""
+        win = tk.Toplevel(self)
+        win.title("Preview")
+        win.configure(bg=BG2)
+        win.resizable(False, False)
+        win.transient(self)
+        tk.Label(win, text=f"●  Opening preview for {title}…", bg=BG2, fg=TEXT,
+                 font=("Segoe UI", 11)).pack(padx=28, pady=(20, 4))
+        tk.Label(win, text="Resolving the stream — this can take a few seconds.",
+                 bg=BG2, fg=TEXT3, font=UI).pack(padx=28, pady=(0, 18))
+        win.update_idletasks()
+        try:
+            x = self.winfo_rootx() + (self.winfo_width() - win.winfo_width()) // 2
+            y = self.winfo_rooty() + (self.winfo_height() - win.winfo_height()) // 3
+            win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        except Exception:
+            pass
+        return win
+
+    def _preview_loading_close(self, win):
+        if win is not None:
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+    def _focus_external_window(self, title: str, timeout: float = 6.0):
+        """Poll for the player window by title and bring it to the foreground,
+        so the preview doesn't open hidden behind other windows."""
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+        except Exception:
+            return
+        deadline = time.time() + timeout
+        hwnd = 0
+        while time.time() < deadline:
+            hwnd = user32.FindWindowW(None, title)
+            if hwnd:
+                break
+            time.sleep(0.25)
+        if hwnd:
+            try:
+                user32.ShowWindow(hwnd, 9)        # SW_RESTORE
+                user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+
+    def _preview_resolve(self, name, site, title, mode, loading):
+        """Worker thread: resolve the upstream stream + wrap it in the relay,
+        then hand the localhost URL to the chosen player."""
+        def _fail(msg, tag="error"):
+            self.after(0, lambda: (self._preview_loading_close(loading),
+                                   self._log_add(msg, tag)))
+        try:
+            if site == "stripchat":
+                # Stripchat is MOUFLON-encrypted; resolve the keyed variant the
+                # same way recording does (the relay then decrypts the playlist).
+                import stripchat_native
+                upstream = stripchat_native.resolve(name)
+            else:
+                upstream = recorder.get_stream_url(site, name)
+        except Exception as e:
+            _fail(f"Preview failed for {title}: {e}")
+            return
+        if not upstream:
+            _fail(f"Preview: couldn't resolve {title} "
+                  + ("(Stripchat private/needs browser path?)" if site == "stripchat"
+                     else "(offline?)"), "warn")
+            return
+        try:
+            url = cb_relay.wrap(upstream, recorder.USER_AGENT, mode=site,
+                                label=f"{site}:{name}")
+        except Exception as e:
+            _fail(f"Preview relay error: {e}")
+            return
+        if mode == "embedded":
+            self.after(0, lambda: self._preview_open_embedded(url, title, loading))
+        else:
+            self._preview_launch_external(url, title, loading)
+
+    def _detect_player(self, kind: str):
+        """Path to a specific external player ('mpv' | 'vlc' | 'ffplay'), or None.
+        Honors the optional override path when it matches the kind."""
+        import shutil
+        override = (self.settings.preview_player_path or "").strip()
+        if override and os.path.isfile(override) and kind in os.path.basename(override).lower():
+            return override
+        if kind == "mpv":
+            return shutil.which("mpv")
+        if kind == "vlc":
+            p = shutil.which("vlc")
+            if p:
+                return p
+            for c in (r"%ProgramFiles%\VideoLAN\VLC\vlc.exe",
+                      r"%ProgramFiles(x86)%\VideoLAN\VLC\vlc.exe"):
+                c = os.path.expandvars(c)
+                if os.path.isfile(c):
+                    return c
+            return None
+        if kind == "ffplay":
+            ff = getattr(self.recorder, "ffmpeg_path", "") or ""
+            if ff:
+                cand = os.path.join(os.path.dirname(ff), "ffplay.exe")
+                if os.path.isfile(cand):
+                    return cand
+            return shutil.which("ffplay")
+        return None
+
+    def _find_preview_player(self):
+        """Return (exe_path, kind) for an external player, honoring the engine
+        preference (Auto/mpv/VLC). Auto and any unmet preference fall through to
+        whatever is installed; ffplay is the universal fallback. (None, None) if
+        nothing is found."""
+        engine = (self.settings.preview_engine or "auto").lower()
+        if engine == "vlc":
+            order = ["vlc", "mpv", "ffplay"]
+        elif engine == "mpv":
+            order = ["mpv", "vlc", "ffplay"]
+        else:
+            order = ["mpv", "vlc", "ffplay"]
+        for kind in order:
+            p = self._detect_player(kind)
+            if p:
+                return p, kind
+        return None, None
+
+    def _preview_launch_external(self, url: str, title: str, loading=None):
+        exe, kind = self._find_preview_player()
+        if not exe:
+            self.after(0, lambda: (self._preview_loading_close(loading),
+                self._log_add(
+                    "Preview: no player found. Install mpv (https://mpv.io) or VLC "
+                    "(https://videolan.org), or set a player path in Settings.",
+                    "error")))
+            return
+        wtitle = f"Preview — {title}"
+        if kind == "mpv":
+            cmd = [exe, "--profile=low-latency", "--force-window=yes",
+                   "--keep-open=no", f"--title={wtitle}", url]
+        elif kind == "vlc":
+            cmd = [exe, "--no-video-title-show", "--network-caching=1500",
+                   f"--meta-title={wtitle}", url]
+        else:  # ffplay
+            cmd = [exe, "-autoexit", "-window_title", wtitle, url]
+        try:
+            subprocess.Popen(cmd,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            self.after(0, lambda: (self._preview_loading_close(loading),
+                self._log_add(f"Preview launch failed: {e}", "error")))
+            return
+        # Bring the player window to the front (it otherwise opens behind).
+        threading.Thread(target=self._focus_external_window, args=(wtitle,),
+                         daemon=True).start()
+        self.after(0, lambda: (self._preview_loading_close(loading),
+            self._log_add(f"Preview: {kind} window opened for {title}.")))
+
+    def _preview_open_embedded(self, url: str, title: str, loading=None):
+        """In-app preview. Tries the preferred engine first (python-mpv or
+        python-vlc), then the other, then falls back to an external window."""
+        engine = (self.settings.preview_engine or "auto").lower()
+        order = ["vlc", "mpv"] if engine == "vlc" else ["mpv", "vlc"]
+        for kind in order:
+            if kind == "mpv":
+                m = self._import_mpv()
+                if m:
+                    self._open_embedded_mpv(m, url, title, loading)
+                    return
+            else:
+                v = self._import_vlc()
+                if v:
+                    self._open_embedded_vlc(v, url, title, loading)
+                    return
+        self._log_add("Embedded preview unavailable (need python-vlc+VLC or "
+                      "python-mpv+libmpv); opening an external window instead.", "warn")
+        self._preview_launch_external(url, title, loading)
+
+    def _new_preview_window(self, title: str):
+        """Create the embedded-preview Toplevel; returns (win, video_frame, bar)."""
+        self._preview_close_embedded()          # one embedded preview at a time
+        win = tk.Toplevel(self)
+        win.title(f"Preview — {title}")
+        win.configure(bg="black")
+        win.geometry("640x420")
+        video = tk.Frame(win, bg="black")
+        video.pack(fill="both", expand=True)
+        bar = tk.Frame(win, bg=BG2, height=34)
+        bar.pack(fill="x")
+        win.update_idletasks()
+        return win, video, bar
+
+    def _open_embedded_mpv(self, mpv, url, title, loading=None):
+        win, video, bar = self._new_preview_window(title)
+        try:
+            player = mpv.MPV(wid=str(video.winfo_id()),
+                             profile="low-latency", keep_open="no")
+            player.play(url)
+        except Exception as e:
+            win.destroy()
+            self._log_add(f"Embedded mpv failed ({e}); opening an external window.",
+                          "warn")
+            self._preview_launch_external(url, title, loading)
+            return
+        self._preview_loading_close(loading)
+        self._preview_win = win
+        self._preview_player = player
+        self._preview_player_stop = player.terminate
+        self._build_preview_controls(
+            bar,
+            lambda: setattr(player, "pause", not player.pause),
+            lambda: setattr(player, "mute", not player.mute),
+            lambda v: setattr(player, "volume", float(v)))
+        win.protocol("WM_DELETE_WINDOW", self._preview_close_embedded)
+        self._log_add(f"Embedded preview (mpv) opened for {title}.")
+
+    def _open_embedded_vlc(self, vlc, url, title, loading=None):
+        win, video, bar = self._new_preview_window(title)
+        try:
+            inst = vlc.Instance("--no-video-title-show", "--network-caching=1500")
+            player = inst.media_player_new()
+            player.set_hwnd(video.winfo_id())
+            player.set_media(inst.media_new(url))
+            player.play()
+        except Exception as e:
+            win.destroy()
+            self._log_add(f"Embedded VLC failed ({e}); opening an external window.",
+                          "warn")
+            self._preview_launch_external(url, title, loading)
+            return
+        self._preview_loading_close(loading)
+        self._preview_win = win
+        self._preview_player = player
+        self._preview_vlc_instance = inst       # keep a ref so it isn't GC'd
+        self._preview_player_stop = lambda: (player.stop(), player.release())
+        self._build_preview_controls(
+            bar,
+            player.pause,                        # VLC pause() toggles play/pause
+            player.audio_toggle_mute,
+            lambda v: player.audio_set_volume(int(float(v))))
+        win.protocol("WM_DELETE_WINDOW", self._preview_close_embedded)
+        self._log_add(f"Embedded preview (VLC) opened for {title}.")
+
+    def _build_preview_controls(self, bar, on_pause, on_mute, on_vol):
+        def _safe(fn):
+            def _w(*a):
+                try:
+                    fn(*a)
+                except Exception:
+                    pass
+            return _w
+        ttk.Button(bar, text="⏯", style="Flat.TButton", width=3,
+                   command=_safe(on_pause)).pack(side="left", padx=6, pady=4)
+        ttk.Button(bar, text="🔇", style="Flat.TButton", width=3,
+                   command=_safe(on_mute)).pack(side="left", padx=2, pady=4)
+        ttk.Scale(bar, from_=0, to=100, value=100,
+                  command=_safe(on_vol)).pack(side="left", padx=8, fill="x", expand=True)
+        ttk.Button(bar, text="✕ Close", style="Ghost.TButton",
+                   command=self._preview_close_embedded).pack(side="right", padx=6, pady=4)
+
+    def _preview_close_embedded(self):
+        stop = getattr(self, "_preview_player_stop", None)
+        if stop is not None:
+            try: stop()
+            except Exception: pass
+            self._preview_player_stop = None
+        self._preview_player = None
+        self._preview_vlc_instance = None
+        win = getattr(self, "_preview_win", None)
+        if win is not None:
+            try: win.destroy()
+            except Exception: pass
+            self._preview_win = None
 
     def _stop_async(self, name: str, site: str):
         """Stop a recording on a worker thread — graceful_stop blocks up to
@@ -3004,6 +3472,9 @@ class StreamRecorderApp(tk.Tk):
             _, site, name = targets[0].split(":", 2)
             m.add_command(label=f"＋  Add to Recorder  {name}",
                           command=lambda: self._add_to_recorder(name, site))
+            m.add_separator()
+            m.add_command(label="▶  Preview",
+                          command=lambda: self._preview_model(name, site))
             m.add_command(label="🔗  Copy Model URL",
                           command=lambda: self._copy_model_url(name, site))
             m.add_command(label="🌐  Open in Browser",
@@ -3733,6 +4204,11 @@ class StreamRecorderApp(tk.Tk):
             if d == disp:
                 self.settings.preferred_browser = v
                 break
+        self.settings.preview_mode = ("embedded"
+            if "Embedded" in self._v_preview_mode.get() else "external")
+        self.settings.preview_engine = {"Auto": "auto", "mpv": "mpv",
+            "VLC": "vlc"}.get(self._v_preview_engine.get(), "auto")
+        self.settings.preview_player_path = self._v_preview_path.get().strip()
         self.recorder.gap_warnings_enabled  = self.settings.gap_warnings_enabled
         self._persist_models()
         save_settings(self.settings)
@@ -3744,7 +4220,213 @@ class StreamRecorderApp(tk.Tk):
             self._log_add("⚠ Output folder is inside a cloud-synced directory "
                           "(OneDrive/Dropbox) — a local folder is strongly "
                           "recommended.", "warn")
-        self._log_add("Settings saved.", "success")
+        note = self._preview_engine_note()
+        self._flash_saved(note)
+        self._log_add("Settings saved." + (f" ({note})" if note else ""), "success")
+
+    def _preview_engine_note(self) -> str:
+        """If the chosen preview engine isn't actually available, explain that it
+        will fall back — so the user understands why the player doesn't change."""
+        eng = (self.settings.preview_engine or "auto").lower()
+        embedded = self.settings.preview_mode == "embedded"
+        if eng == "mpv":
+            ok = (self._import_mpv() is not None) if embedded else bool(self._detect_player("mpv"))
+            if not ok:
+                return ("mpv isn't installed — preview falls back to VLC"
+                        + ("" if embedded else "/ffplay") + ".")
+        elif eng == "vlc":
+            ok = (self._import_vlc() is not None) if embedded else bool(self._detect_player("vlc"))
+            if not ok:
+                return "VLC isn't installed — preview falls back to another engine."
+        return ""
+
+    def _flash_saved(self, note: str = ""):
+        """Briefly show a 'Settings saved' confirmation that auto-clears."""
+        if not hasattr(self, "_lbl_saved"):
+            return
+        txt = "✓ Settings saved" + (f"  —  {note}" if note else "")
+        self._lbl_saved.configure(text=txt, fg=(ORANGE if note else GREEN))
+        job = getattr(self, "_saved_flash_job", None)
+        if job:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+        self._saved_flash_job = self.after(
+            5000, lambda: self._lbl_saved.configure(text=""))
+
+    # ── System check (dependency / PATH validator) ────────────────────────────
+
+    def _run_system_check(self):
+        """(Re)build the dependency status rows in the Settings tab."""
+        f = getattr(self, "_syscheck_frame", None)
+        if f is None:
+            return
+        for w in f.winfo_children():
+            w.destroy()
+        for c in self._gather_dependency_status():
+            self._render_syscheck_row(f, c)
+
+    def _render_syscheck_row(self, parent, c):
+        row = tk.Frame(parent, bg=BG2)
+        row.pack(fill="x", pady=1)
+        icon = {"ok": "✓", "warn": "⚠", "err": "✕"}[c["state"]]
+        color = {"ok": GREEN, "warn": ORANGE, "err": RED}[c["state"]]
+        tk.Label(row, text=icon, bg=BG2, fg=color, width=2,
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        for lbl, cb in c.get("actions", []):
+            ttk.Button(row, text=lbl, style="Ghost.TButton",
+                       command=cb).pack(side="right", padx=(4, 0))
+        txt = c["label"] + (f"  —  {c['detail']}" if c.get("detail") else "")
+        tk.Label(row, text=txt, bg=BG2, fg=TEXT2, anchor="w", justify="left",
+                 font=("Segoe UI", 9), wraplength=320).pack(
+            side="left", fill="x", expand=True)
+
+    def _module_ok(self, name: str) -> bool:
+        try:
+            import importlib
+            importlib.import_module(name)
+            return True
+        except Exception:
+            return False
+
+    def _find_installed_dir(self, kind: str):
+        """Find the folder of an installed-but-maybe-unpathed binary."""
+        exe = {"mpv": "mpv.exe", "vlc": "vlc.exe"}.get(kind)
+        dirs = {
+            "mpv": [r"%ProgramFiles%\MPV Player", r"%ProgramFiles%\mpv",
+                    r"%ProgramFiles(x86)%\mpv", r"%LOCALAPPDATA%\Programs\mpv"],
+            "vlc": [r"%ProgramFiles%\VideoLAN\VLC", r"%ProgramFiles(x86)%\VideoLAN\VLC"],
+        }.get(kind, [])
+        for d in dirs:
+            d = os.path.expandvars(d)
+            if exe and os.path.isfile(os.path.join(d, exe)):
+                return d
+        return None
+
+    def _playwright_chromium_ok(self) -> bool:
+        base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright")
+        try:
+            return os.path.isdir(base) and any(
+                n.startswith("chromium-") for n in os.listdir(base))
+        except Exception:
+            return False
+
+    def _gather_dependency_status(self):
+        import shutil
+        out = []
+        # ffmpeg (required for recording)
+        ff = (getattr(self.recorder, "ffmpeg_path", "") or "") or (shutil.which("ffmpeg") or "")
+        out.append({"label": "ffmpeg (recording)", "state": "ok" if ff else "err",
+                    "detail": ff or "NOT FOUND — recording won't work", "actions": []})
+        # ffplay (external preview fallback)
+        fp = self._detect_player("ffplay")
+        out.append({"label": "ffplay (external preview)", "state": "ok" if fp else "warn",
+                    "detail": fp or "not found", "actions": []})
+        # mpv (optional preview) — the headline case: installed but not on PATH
+        wmpv = shutil.which("mpv")
+        if wmpv:
+            out.append({"label": "mpv (preview)", "state": "ok", "detail": wmpv,
+                        "actions": []})
+        else:
+            loc = self._find_installed_dir("mpv")
+            if loc:
+                out.append({"label": "mpv (preview)", "state": "warn",
+                            "detail": f"installed at {loc} but not on PATH",
+                            "actions": [("Add to PATH",
+                                         lambda d=loc: self._fix_add_to_path(d))]})
+            else:
+                out.append({"label": "mpv (preview)", "state": "warn",
+                            "detail": "not installed (optional — VLC/ffplay cover preview)",
+                            "actions": []})
+        # VLC (optional preview) — doesn't need PATH (app checks Program Files;
+        # python-vlc finds it via the registry)
+        vlc_exe = self._detect_player("vlc")
+        out.append({"label": "VLC (preview)", "state": "ok" if vlc_exe else "warn",
+                    "detail": vlc_exe or "not installed (optional)", "actions": []})
+        # python-vlc (embedded VLC)
+        pv = self._import_vlc() is not None
+        out.append({"label": "python-vlc (embedded VLC)", "state": "ok" if pv else "warn",
+                    "detail": "installed" if pv else "missing",
+                    "actions": [] if pv else [("Install", lambda: self._pip_install(
+                        "python-vlc", on_done=lambda ok: self._run_system_check()))]})
+        # python-mpv + libmpv (embedded mpv)
+        pm = self._import_mpv() is not None
+        out.append({"label": "python-mpv + libmpv (embedded mpv)",
+                    "state": "ok" if pm else "warn",
+                    "detail": "installed" if pm else "missing (needs python-mpv + libmpv-2.dll in src/)",
+                    "actions": [] if pm else [("Install python-mpv", lambda: self._pip_install(
+                        "python-mpv", on_done=lambda ok: self._run_system_check()))]})
+        # tdjson (Telegram pipeline)
+        td = self._module_ok("tdjson")
+        out.append({"label": "tdjson (Telegram pipeline)", "state": "ok" if td else "warn",
+                    "detail": "installed" if td else "missing",
+                    "actions": [] if td else [("Install", lambda: self._pip_install(
+                        "tdjson", on_done=lambda ok: self._run_system_check()))]})
+        # Playwright Chromium (Stripchat browser fallback)
+        pc = self._playwright_chromium_ok()
+        out.append({"label": "Playwright Chromium (Stripchat fallback)",
+                    "state": "ok" if pc else "warn",
+                    "detail": "installed" if pc else "missing",
+                    "actions": [] if pc else [("Install", self._install_chromium)]})
+        return out
+
+    def _fix_add_to_path(self, d: str):
+        """Append a folder to the USER PATH (no admin), make it effective for the
+        running app immediately, and broadcast the change to other apps."""
+        try:
+            import winreg, ctypes
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                                 winreg.KEY_READ | winreg.KEY_WRITE)
+            try:
+                cur, _ = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                cur = ""
+            parts = [p for p in (cur or "").split(";") if p]
+            if d not in parts:
+                parts.append(d)
+                winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, ";".join(parts))
+                ctypes.windll.user32.SendMessageTimeoutW(
+                    0xFFFF, 0x1A, 0, "Environment", 0x2, 5000, None)
+            winreg.CloseKey(key)
+            # Effective for THIS process right now (no restart needed to use it).
+            if d not in os.environ.get("PATH", "").split(os.pathsep):
+                os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + d
+            try:
+                if hasattr(os, "add_dll_directory") and os.path.isdir(d):
+                    os.add_dll_directory(d)
+            except Exception:
+                pass
+            self._log_add(f"Added to PATH: {d}", "success")
+            self._flash_saved(f"Added to PATH: {os.path.basename(d)}")
+        except Exception as e:
+            self._log_add(f"Could not modify PATH: {e}", "error")
+        self._run_system_check()
+
+    def _bg_command(self, cmd, desc, on_done=None):
+        """Run a setup command (e.g. playwright install) in the background."""
+        self._log_add(f"{desc}… (one-time, needs internet)")
+        def _do():
+            ok, detail = False, ""
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                ok = (r.returncode == 0)
+                if not ok:
+                    lines = (r.stderr or r.stdout or "").strip().splitlines()
+                    detail = lines[-1] if lines else "failed"
+            except Exception as e:
+                detail = str(e)
+            self.after(0, lambda: (
+                self._log_add(f"{desc}: {'done' if ok else 'failed — ' + detail}",
+                              "success" if ok else "error"),
+                on_done(ok) if on_done else None))
+        threading.Thread(target=_do, daemon=True, name="bg-cmd").start()
+
+    def _install_chromium(self):
+        self._bg_command([sys.executable, "-m", "playwright", "install", "chromium"],
+                         "Installing Playwright Chromium",
+                         on_done=lambda ok: self._run_system_check())
 
     def _persist_models(self):
         self.settings.models = [

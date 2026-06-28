@@ -44,6 +44,9 @@ class AppSettings:
     auto_downgrade_enabled: bool = False       # step struggling streams down a quality rung
     playwright_fallback_enabled: bool = True   # Stripchat: use browser fallback when native fails
     preferred_browser: str = ""                # "" = ask each time, "system" = OS default, else exe path
+    preview_mode: str = "external"             # "external" (player window) | "embedded" (in-app)
+    preview_engine: str = "auto"               # "auto" | "mpv" | "vlc"
+    preview_player_path: str = ""              # optional override path to mpv.exe/vlc.exe (empty = auto-detect)
     models: List[dict] = None                  # [{name, site, auto_rec, max_q}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list
     ranks: dict = None                         # "site:name" → 0-5 star rank
@@ -113,6 +116,9 @@ def load_settings() -> AppSettings:
     s.auto_downgrade_enabled = main.get("auto_downgrade_enabled", s.auto_downgrade_enabled)
     s.playwright_fallback_enabled = main.get("playwright_fallback_enabled", s.playwright_fallback_enabled)
     s.preferred_browser = main.get("preferred_browser", s.preferred_browser)
+    s.preview_mode = main.get("preview_mode", s.preview_mode)
+    s.preview_engine = main.get("preview_engine", s.preview_engine)
+    s.preview_player_path = main.get("preview_player_path", s.preview_player_path)
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
     s.ranks = main.get("ranks", {}) or {}
@@ -154,6 +160,9 @@ def save_settings(s: AppSettings):
         "auto_downgrade_enabled": s.auto_downgrade_enabled,
         "playwright_fallback_enabled": s.playwright_fallback_enabled,
         "preferred_browser": s.preferred_browser,
+        "preview_mode": s.preview_mode,
+        "preview_engine": s.preview_engine,
+        "preview_player_path": s.preview_player_path,
         "models": s.models,
         "saved_models": s.saved_models,
         "ranks": s.ranks,

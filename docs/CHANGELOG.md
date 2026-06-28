@@ -10,7 +10,28 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Added
+- **System Check panel (⚙ Settings).** A dependency validator that shows, at a
+  glance, whether each external tool / package is found: ffmpeg, ffplay, mpv, VLC,
+  python-vlc, python-mpv + libmpv, tdjson, and Playwright Chromium. It catches the
+  common "installed but not on PATH" case (e.g. mpv) and offers one-click fixes:
+  **Add to PATH** (appends to your user PATH — no admin — and applies immediately),
+  **Install** for the Python packages / the Stripchat browser, and a **Re-check**
+  button. System apps (mpv/VLC) are detected and guided rather than silently
+  installed.
+
 ### Fixed
+- **Stripchat preview now works.** Preview now resolves Stripchat through the
+  same browserless MOUFLON path the recorder uses (instead of the plain master
+  playlist), so the relay can decrypt it.
+- **"Settings saved" confirmation.** Saving settings now shows a brief on-screen
+  confirmation that auto-clears — and if the chosen Preview engine isn't actually
+  installed (e.g. mpv), it tells you it'll fall back (to VLC/ffplay), so the
+  player choice is no longer a silent mystery.
+- **Preview an offline model no longer crashes the app.** Previewing an offline
+  model resolved to a dead stream that could hard-crash the in-process player
+  (libVLC/libmpv). Preview now only runs for **online or recording** models and
+  shows a clear "isn't online right now" note otherwise.
 - **UI no longer freezes when opening many model pages at once.** "Open in
   Browser" now launches the tabs on a background thread (with a small stagger)
   instead of blocking the app while each tab opens.
@@ -23,6 +44,23 @@ grouped by date / milestone.
   check/launch/scan threads hold it during a recording storm.
 
 ### Added
+- **▶ Stream preview (mpv / VLC / ffplay).** Right-click a model → **Preview**
+  to watch its live stream (available on both the Recorder and Saved Models tabs). A brief "Opening preview…" indicator shows while the
+  stream resolves, then the player appears and is brought to the foreground.
+  Choose **Mode** (External window / Embedded in-app) and **Preview engine**
+  (Auto / mpv / VLC) in Settings:
+  - *External* launches a standalone **mpv**, **VLC**, or **ffplay** window in its
+    own process (minimal impact on recording) — ffplay (bundled with ffmpeg)
+    works with no extra install.
+  - *Embedded* plays inside a window with play/pause/mute/volume via **python-vlc**
+    (easiest — auto-finds an installed VLC, no DLL step) or **python-mpv**
+    (needs libmpv-2.dll in the `src/` folder). If neither is available you're told
+    and offered the external player instead.
+  Playback goes through the same local relay the recorder uses; an optional
+  player-path setting overrides auto-detection. The `python-vlc` bridge ships in
+  `requirements.txt`, and if it's ever missing while VLC is installed, the app
+  offers a **one-click install** the first time you open an embedded preview —
+  no manual pip or PATH steps needed.
 - **Telegram Setup Wizard.** A new **🧙 Setup Wizard** button on the Output /
   Upload tab walks first-time users through configuring the upload pipeline:
   API ID / Hash (with a link to my.telegram.org), the destination group/topic
@@ -55,6 +93,12 @@ grouped by date / milestone.
   **Open links with** dropdown in Settings changes or resets the saved default at
   any time, and an **Open in Browser (choose…)** menu entry re-opens the picker
   for a one-off browser without touching your saved default.
+
+### Changed
+- **Settings moved to their own ⚙ Settings tab.** The left panel was getting
+  crowded, so all settings now live in a dedicated, scrollable **⚙ Settings**
+  tab. The left panel keeps just **Add Model** and the live status panel, so
+  adding models stays one click away while settings get room to breathe.
 
 ---
 
