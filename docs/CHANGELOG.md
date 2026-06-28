@@ -11,6 +11,16 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **▶ Stream preview.** Right-click a model → **Preview** to watch its live
+  stream. A brief "Opening preview…" indicator shows while the stream resolves
+  (a few seconds), then the player appears and is brought to the foreground.
+  Two modes (set in Settings → *Stream preview*): **External window** (default)
+  launches a standalone mpv — or ffplay if mpv isn't installed — in its own
+  process for minimal impact on recording; **Embedded (in-app)** plays inside a
+  window with play/pause/mute/volume via python-mpv (optional — if it isn't
+  installed you're told and offered the external player instead). Playback goes
+  through the same local relay the recorder uses. An optional player-path setting
+  overrides auto-detection.
 - **Telegram Setup Wizard.** A new **🧙 Setup Wizard** button on the Output /
   Upload tab walks first-time users through configuring the upload pipeline:
   API ID / Hash (with a link to my.telegram.org), the destination group/topic

@@ -25,6 +25,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 - ✅ **Live bandwidth meter** in the header (`↓ X.X Mbps` download / `↑` Telegram upload) showing Scr33nX's total traffic — your indicator for when you're approaching your internet connection's limit
 - ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)
 - ✅ **Dropped-segment warnings** — get notified when a stream is losing segments because bandwidth can't keep up (toggle in Settings)
+- ✅ **▶ Stream preview** — right-click a model → **Preview** to watch its live stream. Opens in a standalone **mpv/ffplay** window by default (own process, minimal impact on recording), or an optional **embedded in-app** player with play/pause/mute/volume. Plays through the same local relay the recorder uses
 - ✅ **Saved Models** tab — view-only watchlist with online/offline status
 - ✅ **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab (click a star, click it again to clear; or right-click → **Set Rank** for one row or a whole selection at once). Sortable **RANK** column, shared per-model across both tabs, and saved between sessions
 - ✅ Windows desktop notifications (recording started/stopped/split/dropped segments)
@@ -49,8 +50,9 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 
 - **Windows 10/11**
 - **Python 3.10+** — https://python.org (check "Add Python to PATH" during install)
-- **ffmpeg** — https://ffmpeg.org/download.html
+- **ffmpeg** — https://ffmpeg.org/download.html (its **ffplay** is used for the default external preview if mpv isn't installed)
 - **Playwright Chromium** — only needed as the Stripchat fallback recorder
+- **mpv** (optional) — https://mpv.io for the nicest external preview; for the **embedded** in-app preview also `pip install python-mpv` (needs libmpv)
 
 ---
 
@@ -103,6 +105,7 @@ The extension adds models to Scr33nX with one click while you're on their page, 
 5. If you set a **Max File Size**, the recording splits into numbered parts (`_part001`, `_part002`, …) automatically; a recording that never reaches the limit keeps a single, unsuffixed file
 6. Watch the **↓ Mbps** meter in the header while recording several models — if your streams start dropping segments you'll also get a warning notification
 7. **Rate models** — give any model 1–5 stars on the Recorder or Saved Models tab (click a star in the **RANK** column, or right-click → **Set Rank** to rate a whole selection), then click the `RANK` header to sort by it. You can also rate from the browser-extension popup. Ranks stay with the model across both tabs and persist between sessions
+8. **Preview a stream** — right-click a model → **Preview** to watch it live (works best when she's online). It opens in an external mpv/ffplay window by default; switch to an embedded in-app player under **Settings → Stream preview**
 
 ### Settings (left panel)
 
@@ -119,6 +122,7 @@ The extension adds models to Scr33nX with one click while you're on their page, 
 | 🎭 Stripchat Browser Fallback | When Stripchat's browserless native path can't resolve a stream, fall back to the Playwright browser recorder. Enabled by default. Uncheck to record native-only — if native fails the stream is skipped and the browser never launches |
 | 🔒 Privacy Mode | Idle screen cover |
 | Open links with | Which browser **Open in Browser** uses: *Ask each time*, *System default*, or a specific installed browser. You're prompted the first time (with a *Remember my choice* option); change or reset it here anytime. Right-click → **Open in Browser (choose…)** picks a one-off browser without changing this default |
+| Stream preview | How right-click → **Preview** plays a stream: *External window (mpv)* — standalone player, lowest impact (default) — or *Embedded (in-app)*. Optional **Player path** points at a specific `mpv.exe`; left blank, the app auto-detects mpv, then ffplay |
 
 ---
 

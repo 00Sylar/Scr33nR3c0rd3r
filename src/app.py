@@ -25,6 +25,8 @@ from typing import Optional
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import recorder
+import cb_relay
 from recorder import StreamRecorder, ModelStatus
 from settings import AppSettings, load_settings, save_settings, save_pipeline_settings
 from notifier import send_notification
@@ -955,6 +957,20 @@ class StreamRecorderApp(tk.Tk):
         if not self._v_browser.get():
             self._v_browser.set("Ask each time")
 
+        tk.Label(p, text="Stream preview", fg=TEXT2, bg=BG2, font=UI).pack(
+            anchor="w", padx=16, pady=(8, 0))
+        self._v_preview_mode = tk.StringVar(
+            value=("Embedded (in-app)" if self.settings.preview_mode == "embedded"
+                   else "External window (mpv)"))
+        ttk.Combobox(p, textvariable=self._v_preview_mode, state="readonly",
+                     values=["External window (mpv)", "Embedded (in-app)"]).pack(
+            fill="x", padx=16, pady=(2, 4))
+        tk.Label(p, text="Player path (optional, mpv.exe)", fg=TEXT3, bg=BG2,
+                 font=UI).pack(anchor="w", padx=16)
+        self._v_preview_path = tk.StringVar(value=self.settings.preview_player_path)
+        ttk.Entry(p, textvariable=self._v_preview_path).pack(
+            fill="x", padx=16, pady=(2, 8))
+
         ttk.Button(p, text="💾  Save Settings", style="Flat.TButton",
                    command=self._save_settings).pack(fill="x", padx=16, pady=(0,0))
 
@@ -1340,6 +1356,8 @@ class StreamRecorderApp(tk.Tk):
                 m.add_command(label="⭐  Add to Saved Models",
                               command=lambda: self._add_to_saved(name, site))
             m.add_separator()
+            m.add_command(label="▶  Preview",
+                          command=lambda: self._preview_model(name, site))
             m.add_command(label="🔗  Copy Model URL",
                           command=lambda: self._copy_model_url(name, site))
             m.add_command(label="🌐  Open in Browser",
@@ -1910,6 +1928,225 @@ class StreamRecorderApp(tk.Tk):
         self.clipboard_clear()
         self.clipboard_append(text)
         self._log_add(f"Copied {len(items)} model(s) as OneTab list")
+
+    # ── Stream preview ─────────────────────────────────────────────────────────
+
+    def _preview_model(self, name: str, site: str):
+        """Open a live preview of a model's stream. The upstream is resolved off
+        the UI thread, wrapped in the local relay, then played either in an
+        external mpv/ffplay window (default) or an embedded in-app player —
+        per the Preview setting."""
+        title = f"{name} ({site})"
+        mode = (self.settings.preview_mode or "external").lower()
+        # Embedded needs python-mpv (+ libmpv). Check up front so the user gets
+        # immediate feedback instead of waiting through the resolve first.
+        if mode == "embedded":
+            import importlib.util
+            if importlib.util.find_spec("mpv") is None:
+                if not messagebox.askyesno(
+                        "Embedded preview unavailable",
+                        "In-app (embedded) preview needs the 'python-mpv' package "
+                        "and mpv (libmpv) installed.\n\n"
+                        "Open in an external player window instead?"):
+                    return
+                mode = "external"
+        self._log_add(f"Preview: resolving {title}…")
+        loading = self._preview_loading_show(title)
+        threading.Thread(target=self._preview_resolve,
+                         args=(name, site, title, mode, loading), daemon=True).start()
+
+    def _preview_loading_show(self, title: str):
+        """Small non-modal 'opening preview' indicator, centered over the app.
+        Returns the Toplevel so it can be closed once the player appears."""
+        win = tk.Toplevel(self)
+        win.title("Preview")
+        win.configure(bg=BG2)
+        win.resizable(False, False)
+        win.transient(self)
+        tk.Label(win, text=f"●  Opening preview for {title}…", bg=BG2, fg=TEXT,
+                 font=("Segoe UI", 11)).pack(padx=28, pady=(20, 4))
+        tk.Label(win, text="Resolving the stream — this can take a few seconds.",
+                 bg=BG2, fg=TEXT3, font=UI).pack(padx=28, pady=(0, 18))
+        win.update_idletasks()
+        try:
+            x = self.winfo_rootx() + (self.winfo_width() - win.winfo_width()) // 2
+            y = self.winfo_rooty() + (self.winfo_height() - win.winfo_height()) // 3
+            win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        except Exception:
+            pass
+        return win
+
+    def _preview_loading_close(self, win):
+        if win is not None:
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+    def _focus_external_window(self, title: str, timeout: float = 6.0):
+        """Poll for the player window by title and bring it to the foreground,
+        so the preview doesn't open hidden behind other windows."""
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+        except Exception:
+            return
+        deadline = time.time() + timeout
+        hwnd = 0
+        while time.time() < deadline:
+            hwnd = user32.FindWindowW(None, title)
+            if hwnd:
+                break
+            time.sleep(0.25)
+        if hwnd:
+            try:
+                user32.ShowWindow(hwnd, 9)        # SW_RESTORE
+                user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+
+    def _preview_resolve(self, name, site, title, mode, loading):
+        """Worker thread: resolve the upstream stream + wrap it in the relay,
+        then hand the localhost URL to the chosen player."""
+        def _fail(msg, tag="error"):
+            self.after(0, lambda: (self._preview_loading_close(loading),
+                                   self._log_add(msg, tag)))
+        try:
+            upstream = recorder.get_stream_url(site, name)
+        except Exception as e:
+            _fail(f"Preview failed for {title}: {e}")
+            return
+        if not upstream:
+            _fail(f"Preview: couldn't resolve {title} (offline?).", "warn")
+            return
+        try:
+            url = cb_relay.wrap(upstream, recorder.USER_AGENT, mode=site,
+                                label=f"{site}:{name}")
+        except Exception as e:
+            _fail(f"Preview relay error: {e}")
+            return
+        if mode == "embedded":
+            self.after(0, lambda: self._preview_open_embedded(url, title, loading))
+        else:
+            self._preview_launch_external(url, title, loading)
+
+    def _find_preview_player(self):
+        """Return (exe_path, kind) for an external player ('mpv' or 'ffplay').
+        Prefers a configured path, then mpv on PATH, then ffplay next to the
+        bundled ffmpeg / on PATH. Returns (None, None) if none found."""
+        import shutil
+        override = (self.settings.preview_player_path or "").strip()
+        if override and os.path.isfile(override):
+            kind = "ffplay" if "ffplay" in os.path.basename(override).lower() else "mpv"
+            return override, kind
+        mpv = shutil.which("mpv")
+        if mpv:
+            return mpv, "mpv"
+        ff = getattr(self.recorder, "ffmpeg_path", "") or ""
+        if ff:
+            cand = os.path.join(os.path.dirname(ff), "ffplay.exe")
+            if os.path.isfile(cand):
+                return cand, "ffplay"
+        ffplay = shutil.which("ffplay")
+        if ffplay:
+            return ffplay, "ffplay"
+        return None, None
+
+    def _preview_launch_external(self, url: str, title: str, loading=None):
+        exe, kind = self._find_preview_player()
+        if not exe:
+            self.after(0, lambda: (self._preview_loading_close(loading),
+                self._log_add(
+                    "Preview: no player found. Install mpv (https://mpv.io) or set "
+                    "a player path in Settings.", "error")))
+            return
+        wtitle = f"Preview — {title}"
+        if kind == "mpv":
+            cmd = [exe, "--profile=low-latency", "--force-window=yes",
+                   "--keep-open=no", f"--title={wtitle}", url]
+        else:  # ffplay
+            cmd = [exe, "-autoexit", "-window_title", wtitle, url]
+        try:
+            subprocess.Popen(cmd,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            self.after(0, lambda: (self._preview_loading_close(loading),
+                self._log_add(f"Preview launch failed: {e}", "error")))
+            return
+        # Bring the player window to the front (it otherwise opens behind).
+        threading.Thread(target=self._focus_external_window, args=(wtitle,),
+                         daemon=True).start()
+        self.after(0, lambda: (self._preview_loading_close(loading),
+            self._log_add(f"Preview: {kind} window opened for {title}.")))
+
+    def _preview_open_embedded(self, url: str, title: str, loading=None):
+        """In-app preview via python-mpv (libmpv), loaded lazily so the dependency
+        is only needed when embedded mode is actually used."""
+        try:
+            import mpv  # type: ignore  (python-mpv; requires libmpv on PATH)
+        except Exception as e:
+            self._log_add(f"Embedded preview unavailable ({e}); opening an external "
+                          "window instead.", "warn")
+            self._preview_launch_external(url, title, loading)
+            return
+        self._preview_close_embedded()          # one embedded preview at a time
+        win = tk.Toplevel(self)
+        win.title(f"Preview — {title}")
+        win.configure(bg="black")
+        win.geometry("640x420")
+        video = tk.Frame(win, bg="black")
+        video.pack(fill="both", expand=True)
+        bar = tk.Frame(win, bg=BG2, height=34)
+        bar.pack(fill="x")
+        win.update_idletasks()
+        try:
+            player = mpv.MPV(wid=str(video.winfo_id()),
+                             profile="low-latency", keep_open="no")
+            player.play(url)
+        except Exception as e:
+            win.destroy()
+            self._log_add(f"Embedded preview failed ({e}); opening an external "
+                          "window instead.", "warn")
+            self._preview_launch_external(url, title, loading)
+            return
+        self._preview_loading_close(loading)
+        self._preview_win = win
+        self._preview_player = player
+
+        def _toggle_pause():
+            try: player.pause = not player.pause
+            except Exception: pass
+
+        def _toggle_mute():
+            try: player.mute = not player.mute
+            except Exception: pass
+
+        def _set_vol(v):
+            try: player.volume = float(v)
+            except Exception: pass
+
+        ttk.Button(bar, text="⏯", style="Flat.TButton", width=3,
+                   command=_toggle_pause).pack(side="left", padx=6, pady=4)
+        ttk.Button(bar, text="🔇", style="Flat.TButton", width=3,
+                   command=_toggle_mute).pack(side="left", padx=2, pady=4)
+        ttk.Scale(bar, from_=0, to=100, value=100, command=_set_vol).pack(
+            side="left", padx=8, fill="x", expand=True)
+        ttk.Button(bar, text="✕ Close", style="Ghost.TButton",
+                   command=self._preview_close_embedded).pack(side="right", padx=6, pady=4)
+        win.protocol("WM_DELETE_WINDOW", self._preview_close_embedded)
+        self._log_add(f"Embedded preview opened for {title}.")
+
+    def _preview_close_embedded(self):
+        player = getattr(self, "_preview_player", None)
+        if player is not None:
+            try: player.terminate()
+            except Exception: pass
+            self._preview_player = None
+        win = getattr(self, "_preview_win", None)
+        if win is not None:
+            try: win.destroy()
+            except Exception: pass
+            self._preview_win = None
 
     def _stop_async(self, name: str, site: str):
         """Stop a recording on a worker thread — graceful_stop blocks up to
@@ -3692,6 +3929,9 @@ class StreamRecorderApp(tk.Tk):
             if d == disp:
                 self.settings.preferred_browser = v
                 break
+        self.settings.preview_mode = ("embedded"
+            if "Embedded" in self._v_preview_mode.get() else "external")
+        self.settings.preview_player_path = self._v_preview_path.get().strip()
         self.recorder.gap_warnings_enabled  = self.settings.gap_warnings_enabled
         self._persist_models()
         save_settings(self.settings)

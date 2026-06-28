@@ -7,3 +7,8 @@ websocket-client>=1.7.0                     # MyFreeCams FCS protocol resolver (
 winotify>=1.1.0; sys_platform == "win32"    # Windows toast notifications (notifier.py)
 playwright>=1.50.0                          # Stripchat fallback recorder (stripchat_live.py)
 tdjson>=1.8.56                              # Telegram upload pipeline (pipeline_worker.py)
+
+# Optional — only for the in-app "Embedded" stream preview. The default
+# "External" preview opens a standalone mpv/ffplay window and needs no extra
+# Python package. Embedded mode also requires libmpv (install mpv) on the system.
+# python-mpv>=1.0.5
