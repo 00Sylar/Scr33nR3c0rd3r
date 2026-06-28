@@ -108,7 +108,7 @@ The extension adds models to Scr33nX with one click while you're on their page, 
 5. If you set a **Max File Size**, the recording splits into numbered parts (`_part001`, `_part002`, …) automatically; a recording that never reaches the limit keeps a single, unsuffixed file
 6. Watch the **↓ Mbps** meter in the header while recording several models — if your streams start dropping segments you'll also get a warning notification
 7. **Rate models** — give any model 1–5 stars on the Recorder or Saved Models tab (click a star in the **RANK** column, or right-click → **Set Rank** to rate a whole selection), then click the `RANK` header to sort by it. You can also rate from the browser-extension popup. Ranks stay with the model across both tabs and persist between sessions
-8. **Preview a stream** — right-click a model → **Preview** to watch it live (works best when she's online). It opens in an external mpv/VLC/ffplay window by default; choose the engine (Auto/mpv/VLC) and switch to an embedded in-app player under **⚙ Settings → Stream preview**
+8. **Preview a stream** — right-click an **online (or recording)** model on the **Recorder or Saved Models** tab → **Preview** to watch it live. (Offline models are skipped with a note — a dead stream can crash an embedded player.) It opens in an external mpv/VLC/ffplay window by default; choose the engine (Auto/mpv/VLC) and switch to an embedded in-app player under **⚙ Settings → Stream preview**
 
 ### Settings (⚙ Settings tab)
 

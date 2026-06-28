@@ -11,6 +11,17 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Fixed
+- **Stripchat preview now works.** Preview now resolves Stripchat through the
+  same browserless MOUFLON path the recorder uses (instead of the plain master
+  playlist), so the relay can decrypt it.
+- **"Settings saved" confirmation.** Saving settings now shows a brief on-screen
+  confirmation that auto-clears — and if the chosen Preview engine isn't actually
+  installed (e.g. mpv), it tells you it'll fall back (to VLC/ffplay), so the
+  player choice is no longer a silent mystery.
+- **Preview an offline model no longer crashes the app.** Previewing an offline
+  model resolved to a dead stream that could hard-crash the in-process player
+  (libVLC/libmpv). Preview now only runs for **online or recording** models and
+  shows a clear "isn't online right now" note otherwise.
 - **UI no longer freezes when opening many model pages at once.** "Open in
   Browser" now launches the tabs on a background thread (with a small stagger)
   instead of blocking the app while each tab opens.
@@ -24,7 +35,7 @@ grouped by date / milestone.
 
 ### Added
 - **▶ Stream preview (mpv / VLC / ffplay).** Right-click a model → **Preview**
-  to watch its live stream. A brief "Opening preview…" indicator shows while the
+  to watch its live stream (available on both the Recorder and Saved Models tabs). A brief "Opening preview…" indicator shows while the
   stream resolves, then the player appears and is brought to the foreground.
   Choose **Mode** (External window / Embedded in-app) and **Preview engine**
   (Auto / mpv / VLC) in Settings:

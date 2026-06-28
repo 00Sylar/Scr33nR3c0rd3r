@@ -1013,7 +1013,11 @@ class StreamRecorderApp(tk.Tk):
             fill="x", padx=16, pady=(2, 8))
 
         ttk.Button(p, text="💾  Save Settings", style="Flat.TButton",
-                   command=self._save_settings).pack(fill="x", padx=16, pady=(12,16))
+                   command=self._save_settings).pack(fill="x", padx=16, pady=(12,4))
+        self._lbl_saved = tk.Label(p, text="", bg=BG2, fg=GREEN, font=UI,
+                                   anchor="center", justify="center",
+                                   wraplength=240)
+        self._lbl_saved.pack(fill="x", padx=16, pady=(0, 12))
 
     def _build_right(self, p):
         nb = ttk.Notebook(p)
@@ -2067,6 +2071,17 @@ class StreamRecorderApp(tk.Tk):
         the UI thread, wrapped in the local relay, then played either in an
         external mpv/ffplay window (default) or an embedded in-app player —
         per the Preview setting."""
+        # Only preview online/recording models. An offline model resolves to a
+        # dead stream, and handing that to an in-process player (libvlc/libmpv)
+        # can hard-crash the whole app — so block it up front with a clear note.
+        cfg = self.recorder.models.get(f"{site}:{name.lower()}")
+        status = cfg.status if cfg else None
+        if status not in (ModelStatus.ONLINE, ModelStatus.RECORDING):
+            messagebox.showinfo(
+                "Preview unavailable",
+                f"{name} ({site}) isn't online right now — preview only works for "
+                "online or recording models.")
+            return
         title = f"{name} ({site})"
         mode = (self.settings.preview_mode or "external").lower()
         # Embedded needs python-mpv AND a loadable libmpv DLL. Check up front
@@ -2156,12 +2171,20 @@ class StreamRecorderApp(tk.Tk):
             self.after(0, lambda: (self._preview_loading_close(loading),
                                    self._log_add(msg, tag)))
         try:
-            upstream = recorder.get_stream_url(site, name)
+            if site == "stripchat":
+                # Stripchat is MOUFLON-encrypted; resolve the keyed variant the
+                # same way recording does (the relay then decrypts the playlist).
+                import stripchat_native
+                upstream = stripchat_native.resolve(name)
+            else:
+                upstream = recorder.get_stream_url(site, name)
         except Exception as e:
             _fail(f"Preview failed for {title}: {e}")
             return
         if not upstream:
-            _fail(f"Preview: couldn't resolve {title} (offline?).", "warn")
+            _fail(f"Preview: couldn't resolve {title} "
+                  + ("(Stripchat private/needs browser path?)" if site == "stripchat"
+                     else "(offline?)"), "warn")
             return
         try:
             url = cb_relay.wrap(upstream, recorder.USER_AGENT, mode=site,
@@ -3438,6 +3461,9 @@ class StreamRecorderApp(tk.Tk):
             _, site, name = targets[0].split(":", 2)
             m.add_command(label=f"＋  Add to Recorder  {name}",
                           command=lambda: self._add_to_recorder(name, site))
+            m.add_separator()
+            m.add_command(label="▶  Preview",
+                          command=lambda: self._preview_model(name, site))
             m.add_command(label="🔗  Copy Model URL",
                           command=lambda: self._copy_model_url(name, site))
             m.add_command(label="🌐  Open in Browser",
@@ -4183,7 +4209,40 @@ class StreamRecorderApp(tk.Tk):
             self._log_add("⚠ Output folder is inside a cloud-synced directory "
                           "(OneDrive/Dropbox) — a local folder is strongly "
                           "recommended.", "warn")
-        self._log_add("Settings saved.", "success")
+        note = self._preview_engine_note()
+        self._flash_saved(note)
+        self._log_add("Settings saved." + (f" ({note})" if note else ""), "success")
+
+    def _preview_engine_note(self) -> str:
+        """If the chosen preview engine isn't actually available, explain that it
+        will fall back — so the user understands why the player doesn't change."""
+        eng = (self.settings.preview_engine or "auto").lower()
+        embedded = self.settings.preview_mode == "embedded"
+        if eng == "mpv":
+            ok = (self._import_mpv() is not None) if embedded else bool(self._detect_player("mpv"))
+            if not ok:
+                return ("mpv isn't installed — preview falls back to VLC"
+                        + ("" if embedded else "/ffplay") + ".")
+        elif eng == "vlc":
+            ok = (self._import_vlc() is not None) if embedded else bool(self._detect_player("vlc"))
+            if not ok:
+                return "VLC isn't installed — preview falls back to another engine."
+        return ""
+
+    def _flash_saved(self, note: str = ""):
+        """Briefly show a 'Settings saved' confirmation that auto-clears."""
+        if not hasattr(self, "_lbl_saved"):
+            return
+        txt = "✓ Settings saved" + (f"  —  {note}" if note else "")
+        self._lbl_saved.configure(text=txt, fg=(ORANGE if note else GREEN))
+        job = getattr(self, "_saved_flash_job", None)
+        if job:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+        self._saved_flash_job = self.after(
+            5000, lambda: self._lbl_saved.configure(text=""))
 
     def _persist_models(self):
         self.settings.models = [
