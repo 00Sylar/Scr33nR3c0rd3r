@@ -578,6 +578,11 @@ class StreamRecorderApp(tk.Tk):
         # MUST exist before any add_model/_restore_models call: the recorder's
         # on_log callback appends here.
         self._log_queue: deque = deque()
+        # Status callbacks are queued and applied in batches by _drain_status
+        # (one Tk pass per ~150 ms, coalesced per model). A flood of per-model
+        # after() calls during a scan or a recording storm used to saturate the
+        # event loop and freeze the UI.
+        self._status_queue: deque = deque()
         # Status callbacks mark stats dirty; one 500 ms tick recomputes them
         # instead of a full row scan per status event.
         self._stats_dirty = False
@@ -625,6 +630,7 @@ class StreamRecorderApp(tk.Tk):
         self._ul_mbps = 0.0
         threading.Thread(target=self._size_sweep_loop, daemon=True,
                          name="size-sweep").start()
+        self.after(150, self._drain_status)
         self.after(250, self._drain_logs)
         self.after(500, self._stats_tick)
         self.after(1000, self._bw_tick)
@@ -1832,22 +1838,38 @@ class StreamRecorderApp(tk.Tk):
                 self.settings.preferred_browser = target
                 save_settings(self.settings)
                 self._sync_browser_combo()
-        self._launch_urls(items, target)
-        self._log_add(f"Opened {len(items)} model page(s) in browser")
+        # Launch off the UI thread — opening many tabs synchronously (one
+        # Popen/webbrowser.open per model) blocked the event loop and froze the
+        # app for large selections.
+        threading.Thread(target=self._launch_urls, args=(items, target),
+                         daemon=True, name="open-in-browser").start()
 
     def _launch_urls(self, items: list, target: str):
         """Open each model URL using `target` ("" / "system" = OS default,
-        otherwise a browser exe path)."""
+        otherwise a browser exe path). Safe to call from a worker thread — all
+        logging is marshalled back to the UI thread via after()."""
         import webbrowser
+        opened = 0
         for _, _, url in items:
+            ok = False
             try:
                 if not target or target == "system":
                     webbrowser.open(url)
                 else:
                     subprocess.Popen([target, url])
-            except Exception as e:
-                self._log_add(f"Browser launch failed ({e}); using default.", "warn")
-                webbrowser.open(url)
+                ok = True
+            except Exception:
+                try:                       # fall back to the system default
+                    webbrowser.open(url)
+                    ok = True
+                except Exception as e:
+                    self.after(0, lambda e=e: self._log_add(
+                        f"Browser open failed ({e}).", "warn"))
+            if ok:
+                opened += 1
+            time.sleep(0.12)               # small stagger; don't hammer the browser
+        self.after(0, lambda n=opened: self._log_add(
+            f"Opened {n} model page(s) in browser"))
 
     def _choose_browser_dialog(self):
         """Modal picker (UI-triggered only). Returns (target, remember) or None
@@ -2334,7 +2356,23 @@ class StreamRecorderApp(tk.Tk):
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
     def _cb_status(self, key: str, status: ModelStatus, detail: str):
-        self.after(0, lambda: self._apply_status(key, status, detail))
+        # Called from worker threads — just queue (deque.append is thread-safe).
+        # _drain_status applies them in coalesced batches on the UI thread.
+        self._status_queue.append((key, status, detail))
+
+    def _drain_status(self):
+        try:
+            if self._status_queue:
+                # Coalesce: keep only the latest status per model in this window
+                # so a burst (scan pass, recording storm) is one cheap UI pass.
+                latest = {}
+                while self._status_queue:
+                    key, status, detail = self._status_queue.popleft()
+                    latest[key] = (status, detail)
+                for key, (status, detail) in latest.items():
+                    self._apply_status(key, status, detail)
+        finally:
+            self.after(150, self._drain_status)
 
     def _apply_status(self, key: str, status: ModelStatus, detail: str):
         # Mirror status into the Saved Models tab as well
@@ -2357,10 +2395,13 @@ class StreamRecorderApp(tk.Tk):
         if key not in self._rows or not self._tree.exists(key):
             return
 
-        # Guard: don't let a stale ONLINE callback overwrite an active recording
+        # Guard: don't let a stale ONLINE callback overwrite an active recording.
+        # Lock-free read (dict.get + attribute read are atomic under the GIL) —
+        # taking recorder._lock on the UI thread caused stalls during storms when
+        # the check/launch/scan threads hold it constantly. A slightly stale read
+        # is harmless for this guard.
         if status == ModelStatus.ONLINE:
-            with self.recorder._lock:
-                cfg = self.recorder.models.get(key)
+            cfg = self.recorder.models.get(key)
             if cfg and cfg.session:
                 # Model is actually recording — ignore this late ONLINE callback
                 return

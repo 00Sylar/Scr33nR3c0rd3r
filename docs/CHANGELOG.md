@@ -10,6 +10,18 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Fixed
+- **UI no longer freezes when opening many model pages at once.** "Open in
+  Browser" now launches the tabs on a background thread (with a small stagger)
+  instead of blocking the app while each tab opens.
+- **Smoother UI under heavy load (monitor + scanner, recording storms).** Status
+  updates from the engine are now applied in small coalesced batches (~150 ms)
+  instead of one event per model — a scan pass or a burst of recordings starting
+  at once no longer floods and stalls the event loop.
+- **Removed a UI-thread lock contention.** The status handler no longer grabs the
+  recorder lock on the UI thread, so it doesn't stall while many background
+  check/launch/scan threads hold it during a recording storm.
+
 ### Added
 - **Telegram Setup Wizard.** A new **🧙 Setup Wizard** button on the Output /
   Upload tab walks first-time users through configuring the upload pipeline:
