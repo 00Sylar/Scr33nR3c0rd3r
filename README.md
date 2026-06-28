@@ -20,7 +20,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 
 ### Monitoring & UI
 - ✅ Clean black & red dark GUI — no terminal needed
-- ✅ **Version number** shown in the header next to the logo (`v1.4`) so you always know which build you're running
+- ✅ **Version number** shown in the header next to the logo (`v1.5`) so you always know which build you're running
 - ✅ **Update check** — on startup Scr33nX quietly asks GitHub for the latest release; if a newer one exists, a clickable `● Update available` indicator appears in the header and opens the releases page. Runs in the background and fails silently when offline
 - ✅ **Live bandwidth meter** in the header (`↓ X.X Mbps` download / `↑` Telegram upload) showing Scr33nX's total traffic — your indicator for when you're approaching your internet connection's limit
 - ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)

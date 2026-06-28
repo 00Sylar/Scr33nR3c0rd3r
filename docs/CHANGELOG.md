@@ -10,45 +10,21 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
-### Added
-- **System Check panel (⚙ Settings).** A dependency validator that shows, at a
-  glance, whether each external tool / package is found: ffmpeg, ffplay, mpv, VLC,
-  python-vlc, python-mpv + libmpv, tdjson, and Playwright Chromium. It catches the
-  common "installed but not on PATH" case (e.g. mpv) and offers one-click fixes:
-  **Add to PATH** (appends to your user PATH — no admin — and applies immediately),
-  **Install** for the Python packages / the Stripchat browser, and a **Re-check**
-  button. System apps (mpv/VLC) are detected and guided rather than silently
-  installed.
+---
 
-### Fixed
-- **Stripchat preview now works.** Preview now resolves Stripchat through the
-  same browserless MOUFLON path the recorder uses (instead of the plain master
-  playlist), so the relay can decrypt it.
-- **"Settings saved" confirmation.** Saving settings now shows a brief on-screen
-  confirmation that auto-clears — and if the chosen Preview engine isn't actually
-  installed (e.g. mpv), it tells you it'll fall back (to VLC/ffplay), so the
-  player choice is no longer a silent mystery.
-- **Preview an offline model no longer crashes the app.** Previewing an offline
-  model resolved to a dead stream that could hard-crash the in-process player
-  (libVLC/libmpv). Preview now only runs for **online or recording** models and
-  shows a clear "isn't online right now" note otherwise.
-- **UI no longer freezes when opening many model pages at once.** "Open in
-  Browser" now launches the tabs on a background thread (with a small stagger)
-  instead of blocking the app while each tab opens.
-- **Smoother UI under heavy load (monitor + scanner, recording storms).** Status
-  updates from the engine are now applied in small coalesced batches (~150 ms)
-  instead of one event per model — a scan pass or a burst of recordings starting
-  at once no longer floods and stalls the event loop.
-- **Removed a UI-thread lock contention.** The status handler no longer grabs the
-  recorder lock on the UI thread, so it doesn't stall while many background
-  check/launch/scan threads hold it during a recording storm.
+## V1.5 — 2026-06-28
+
+In-app stream preview, a dedicated Settings tab with a dependency **System
+Check**, a guided Telegram setup, a split stand-by pipeline, a browser picker,
+and a round of UI-freeze fixes.
 
 ### Added
 - **▶ Stream preview (mpv / VLC / ffplay).** Right-click a model → **Preview**
-  to watch its live stream (available on both the Recorder and Saved Models tabs). A brief "Opening preview…" indicator shows while the
-  stream resolves, then the player appears and is brought to the foreground.
-  Choose **Mode** (External window / Embedded in-app) and **Preview engine**
-  (Auto / mpv / VLC) in Settings:
+  to watch its live stream (available on both the Recorder and Saved Models
+  tabs). A brief "Opening preview…" indicator shows while the stream resolves,
+  then the player appears and is brought to the foreground. Choose **Mode**
+  (External window / Embedded in-app) and **Preview engine** (Auto / mpv / VLC)
+  in Settings:
   - *External* launches a standalone **mpv**, **VLC**, or **ffplay** window in its
     own process (minimal impact on recording) — ffplay (bundled with ffmpeg)
     works with no extra install.
@@ -59,33 +35,7 @@ grouped by date / milestone.
   Playback goes through the same local relay the recorder uses; an optional
   player-path setting overrides auto-detection. The `python-vlc` bridge ships in
   `requirements.txt`, and if it's ever missing while VLC is installed, the app
-  offers a **one-click install** the first time you open an embedded preview —
-  no manual pip or PATH steps needed.
-- **Telegram Setup Wizard.** A new **🧙 Setup Wizard** button on the Output /
-  Upload tab walks first-time users through configuring the upload pipeline:
-  API ID / Hash (with a link to my.telegram.org), the destination group/topic
-  ID, and optional folders. It saves everything to the normal settings and can
-  start the pipeline straight away — the phone-number/login-code prompts then run
-  through the usual login flow. Removes the guesswork of filling the raw fields
-  by hand.
-- **Split the pipeline into independent Convert and Upload stages, with a
-  live stand-by model.** The Output / Upload tab now has two **Stages**
-  checkboxes — *① Convert .ts → .mp4* and *② Upload .mp4 to Telegram*. The
-  pipeline starts even with nothing checked and sits in **● STAND BY**; tick
-  stages at any time and they apply immediately (the header shows *CONVERTING*,
-  *UPLOADING*, or *CONVERTING & UPLOADING*). Unchecking a stage stops it after
-  its current task finishes — an in-progress conversion or upload is never
-  interrupted. Run Convert alone to get `.mp4` files without uploading (kept in
-  the converted folder, no Telegram setup needed), Upload alone to send `.mp4`s
-  you already have, or both for the full flow. Enabling Upload connects to
-  Telegram on demand (reusing your saved session — no restart, no re-login);
-  credentials are only needed when Upload is on. Stage choices persist across
-  restarts.
-- **Control the pipeline stages from the OpenClaw bot.** New
-  `scr33nx_ctl.py pipeline convert on|off` and `pipeline upload on|off` commands
-  tick/untick the stages from your phone — working whether the pipeline is
-  running or stopped (applied live if running, otherwise on next start). Backed
-  by a new `POST /pipeline/stage` local-API endpoint.
+  offers a **one-click install** the first time you open an embedded preview.
 - **Choose which browser "Open in Browser" uses.** Right-click a model →
   **Open in Browser** now lets you pick the browser (System default, or any of
   Chrome / Edge / Firefox / Brave / Opera / Vivaldi detected on your PC) the
@@ -93,12 +43,59 @@ grouped by date / milestone.
   **Open links with** dropdown in Settings changes or resets the saved default at
   any time, and an **Open in Browser (choose…)** menu entry re-opens the picker
   for a one-off browser without touching your saved default.
+- **Telegram Setup Wizard.** A new **🧙 Setup Wizard** button on the Output /
+  Upload tab walks first-time users through configuring the upload pipeline:
+  API ID / Hash (with a link to my.telegram.org), the destination group/topic
+  ID, and optional folders. It saves everything to the normal settings and can
+  start the pipeline straight away — the phone-number/login-code prompts then run
+  through the usual login flow.
+- **Split the pipeline into independent Convert and Upload stages, with a
+  live stand-by model.** The Output / Upload tab now has two **Stages**
+  checkboxes — *① Convert .ts → .mp4* and *② Upload .mp4 to Telegram*. The
+  pipeline starts even with nothing checked and sits in **● STAND BY**; tick
+  stages at any time and they apply immediately (the header shows *CONVERTING*,
+  *UPLOADING*, or *CONVERTING & UPLOADING*). Unchecking a stage stops it after
+  its current task finishes — an in-progress conversion or upload is never
+  interrupted. Run Convert alone to get `.mp4` files without uploading, Upload
+  alone to send `.mp4`s you already have, or both for the full flow. Enabling
+  Upload connects to Telegram on demand (reusing your saved session — no restart,
+  no re-login); credentials are only needed when Upload is on. Stage choices
+  persist across restarts.
+- **Control the pipeline stages from the OpenClaw bot.** New
+  `scr33nx_ctl.py pipeline convert on|off` and `pipeline upload on|off` commands
+  tick/untick the stages from your phone — working whether the pipeline is
+  running or stopped. Backed by a new `POST /pipeline/stage` local-API endpoint.
+- **System Check panel (⚙ Settings).** A dependency validator showing whether
+  each external tool / package is found: ffmpeg, ffplay, mpv, VLC, python-vlc,
+  python-mpv + libmpv, tdjson, and Playwright Chromium. It catches the common
+  "installed but not on PATH" case (e.g. mpv) and offers one-click fixes — **Add
+  to PATH** (appends to your user PATH, no admin, applied immediately),
+  **Install** for the Python packages / the Stripchat browser, and **Re-check**.
+  System apps (mpv/VLC) are detected and guided rather than silently installed.
 
 ### Changed
-- **Settings moved to their own ⚙ Settings tab.** The left panel was getting
-  crowded, so all settings now live in a dedicated, scrollable **⚙ Settings**
-  tab. The left panel keeps just **Add Model** and the live status panel, so
-  adding models stays one click away while settings get room to breathe.
+- **Settings moved to their own ⚙ Settings tab.** All settings now live in a
+  dedicated, scrollable **⚙ Settings** tab; the left panel keeps just **Add
+  Model** and the live status panel, so adding models stays one click away.
+
+### Fixed
+- **Preview an offline model no longer crashes the app.** An offline model
+  resolved to a dead stream that could hard-crash the in-process player
+  (libVLC/libmpv). Preview now runs only for **online or recording** models and
+  shows a clear note otherwise.
+- **Stripchat preview now works.** Preview resolves Stripchat through the same
+  browserless MOUFLON path the recorder uses, so the relay can decrypt it.
+- **"Settings saved" confirmation.** Saving settings shows a brief on-screen
+  confirmation that auto-clears, and warns when the chosen Preview engine isn't
+  installed (so the fallback is no longer a silent mystery).
+- **UI no longer freezes when opening many model pages at once.** "Open in
+  Browser" launches the tabs on a background thread instead of blocking the app.
+- **Smoother UI under heavy load (monitor + scanner, recording storms).** Engine
+  status updates are applied in small coalesced batches (~150 ms) instead of one
+  event per model, so a scan pass or a burst of recordings no longer stalls the
+  event loop.
+- **Removed a UI-thread lock contention.** The status handler no longer grabs the
+  recorder lock on the UI thread during a recording storm.
 
 ---
 
