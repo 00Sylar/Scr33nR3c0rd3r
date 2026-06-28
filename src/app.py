@@ -1019,6 +1019,17 @@ class StreamRecorderApp(tk.Tk):
                                    wraplength=240)
         self._lbl_saved.pack(fill="x", padx=16, pady=(0, 12))
 
+        # ── System check: shows whether external tools / packages are found,
+        # with one-click fixes (add-to-PATH for installed-but-unpathed tools,
+        # pip installs). Prevents the silent "can't find it" class of problems.
+        tk.Frame(p, bg=BORDER, height=1).pack(fill="x", padx=12, pady=(4, 0))
+        label("SYSTEM CHECK")
+        ttk.Button(p, text="🔍  Re-check", style="Flat.TButton",
+                   command=self._run_system_check).pack(fill="x", padx=16, pady=(0, 6))
+        self._syscheck_frame = tk.Frame(p, bg=BG2)
+        self._syscheck_frame.pack(fill="x", padx=16, pady=(0, 12))
+        self._run_system_check()
+
     def _build_right(self, p):
         nb = ttk.Notebook(p)
         nb.pack(fill="both", expand=True)
@@ -4243,6 +4254,179 @@ class StreamRecorderApp(tk.Tk):
                 pass
         self._saved_flash_job = self.after(
             5000, lambda: self._lbl_saved.configure(text=""))
+
+    # ── System check (dependency / PATH validator) ────────────────────────────
+
+    def _run_system_check(self):
+        """(Re)build the dependency status rows in the Settings tab."""
+        f = getattr(self, "_syscheck_frame", None)
+        if f is None:
+            return
+        for w in f.winfo_children():
+            w.destroy()
+        for c in self._gather_dependency_status():
+            self._render_syscheck_row(f, c)
+
+    def _render_syscheck_row(self, parent, c):
+        row = tk.Frame(parent, bg=BG2)
+        row.pack(fill="x", pady=1)
+        icon = {"ok": "✓", "warn": "⚠", "err": "✕"}[c["state"]]
+        color = {"ok": GREEN, "warn": ORANGE, "err": RED}[c["state"]]
+        tk.Label(row, text=icon, bg=BG2, fg=color, width=2,
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        for lbl, cb in c.get("actions", []):
+            ttk.Button(row, text=lbl, style="Ghost.TButton",
+                       command=cb).pack(side="right", padx=(4, 0))
+        txt = c["label"] + (f"  —  {c['detail']}" if c.get("detail") else "")
+        tk.Label(row, text=txt, bg=BG2, fg=TEXT2, anchor="w", justify="left",
+                 font=("Segoe UI", 9), wraplength=320).pack(
+            side="left", fill="x", expand=True)
+
+    def _module_ok(self, name: str) -> bool:
+        try:
+            import importlib
+            importlib.import_module(name)
+            return True
+        except Exception:
+            return False
+
+    def _find_installed_dir(self, kind: str):
+        """Find the folder of an installed-but-maybe-unpathed binary."""
+        exe = {"mpv": "mpv.exe", "vlc": "vlc.exe"}.get(kind)
+        dirs = {
+            "mpv": [r"%ProgramFiles%\MPV Player", r"%ProgramFiles%\mpv",
+                    r"%ProgramFiles(x86)%\mpv", r"%LOCALAPPDATA%\Programs\mpv"],
+            "vlc": [r"%ProgramFiles%\VideoLAN\VLC", r"%ProgramFiles(x86)%\VideoLAN\VLC"],
+        }.get(kind, [])
+        for d in dirs:
+            d = os.path.expandvars(d)
+            if exe and os.path.isfile(os.path.join(d, exe)):
+                return d
+        return None
+
+    def _playwright_chromium_ok(self) -> bool:
+        base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright")
+        try:
+            return os.path.isdir(base) and any(
+                n.startswith("chromium-") for n in os.listdir(base))
+        except Exception:
+            return False
+
+    def _gather_dependency_status(self):
+        import shutil
+        out = []
+        # ffmpeg (required for recording)
+        ff = (getattr(self.recorder, "ffmpeg_path", "") or "") or (shutil.which("ffmpeg") or "")
+        out.append({"label": "ffmpeg (recording)", "state": "ok" if ff else "err",
+                    "detail": ff or "NOT FOUND — recording won't work", "actions": []})
+        # ffplay (external preview fallback)
+        fp = self._detect_player("ffplay")
+        out.append({"label": "ffplay (external preview)", "state": "ok" if fp else "warn",
+                    "detail": fp or "not found", "actions": []})
+        # mpv (optional preview) — the headline case: installed but not on PATH
+        wmpv = shutil.which("mpv")
+        if wmpv:
+            out.append({"label": "mpv (preview)", "state": "ok", "detail": wmpv,
+                        "actions": []})
+        else:
+            loc = self._find_installed_dir("mpv")
+            if loc:
+                out.append({"label": "mpv (preview)", "state": "warn",
+                            "detail": f"installed at {loc} but not on PATH",
+                            "actions": [("Add to PATH",
+                                         lambda d=loc: self._fix_add_to_path(d))]})
+            else:
+                out.append({"label": "mpv (preview)", "state": "warn",
+                            "detail": "not installed (optional — VLC/ffplay cover preview)",
+                            "actions": []})
+        # VLC (optional preview) — doesn't need PATH (app checks Program Files;
+        # python-vlc finds it via the registry)
+        vlc_exe = self._detect_player("vlc")
+        out.append({"label": "VLC (preview)", "state": "ok" if vlc_exe else "warn",
+                    "detail": vlc_exe or "not installed (optional)", "actions": []})
+        # python-vlc (embedded VLC)
+        pv = self._import_vlc() is not None
+        out.append({"label": "python-vlc (embedded VLC)", "state": "ok" if pv else "warn",
+                    "detail": "installed" if pv else "missing",
+                    "actions": [] if pv else [("Install", lambda: self._pip_install(
+                        "python-vlc", on_done=lambda ok: self._run_system_check()))]})
+        # python-mpv + libmpv (embedded mpv)
+        pm = self._import_mpv() is not None
+        out.append({"label": "python-mpv + libmpv (embedded mpv)",
+                    "state": "ok" if pm else "warn",
+                    "detail": "installed" if pm else "missing (needs python-mpv + libmpv-2.dll in src/)",
+                    "actions": [] if pm else [("Install python-mpv", lambda: self._pip_install(
+                        "python-mpv", on_done=lambda ok: self._run_system_check()))]})
+        # tdjson (Telegram pipeline)
+        td = self._module_ok("tdjson")
+        out.append({"label": "tdjson (Telegram pipeline)", "state": "ok" if td else "warn",
+                    "detail": "installed" if td else "missing",
+                    "actions": [] if td else [("Install", lambda: self._pip_install(
+                        "tdjson", on_done=lambda ok: self._run_system_check()))]})
+        # Playwright Chromium (Stripchat browser fallback)
+        pc = self._playwright_chromium_ok()
+        out.append({"label": "Playwright Chromium (Stripchat fallback)",
+                    "state": "ok" if pc else "warn",
+                    "detail": "installed" if pc else "missing",
+                    "actions": [] if pc else [("Install", self._install_chromium)]})
+        return out
+
+    def _fix_add_to_path(self, d: str):
+        """Append a folder to the USER PATH (no admin), make it effective for the
+        running app immediately, and broadcast the change to other apps."""
+        try:
+            import winreg, ctypes
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                                 winreg.KEY_READ | winreg.KEY_WRITE)
+            try:
+                cur, _ = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                cur = ""
+            parts = [p for p in (cur or "").split(";") if p]
+            if d not in parts:
+                parts.append(d)
+                winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, ";".join(parts))
+                ctypes.windll.user32.SendMessageTimeoutW(
+                    0xFFFF, 0x1A, 0, "Environment", 0x2, 5000, None)
+            winreg.CloseKey(key)
+            # Effective for THIS process right now (no restart needed to use it).
+            if d not in os.environ.get("PATH", "").split(os.pathsep):
+                os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + d
+            try:
+                if hasattr(os, "add_dll_directory") and os.path.isdir(d):
+                    os.add_dll_directory(d)
+            except Exception:
+                pass
+            self._log_add(f"Added to PATH: {d}", "success")
+            self._flash_saved(f"Added to PATH: {os.path.basename(d)}")
+        except Exception as e:
+            self._log_add(f"Could not modify PATH: {e}", "error")
+        self._run_system_check()
+
+    def _bg_command(self, cmd, desc, on_done=None):
+        """Run a setup command (e.g. playwright install) in the background."""
+        self._log_add(f"{desc}… (one-time, needs internet)")
+        def _do():
+            ok, detail = False, ""
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                ok = (r.returncode == 0)
+                if not ok:
+                    lines = (r.stderr or r.stdout or "").strip().splitlines()
+                    detail = lines[-1] if lines else "failed"
+            except Exception as e:
+                detail = str(e)
+            self.after(0, lambda: (
+                self._log_add(f"{desc}: {'done' if ok else 'failed — ' + detail}",
+                              "success" if ok else "error"),
+                on_done(ok) if on_done else None))
+        threading.Thread(target=_do, daemon=True, name="bg-cmd").start()
+
+    def _install_chromium(self):
+        self._bg_command([sys.executable, "-m", "playwright", "install", "chromium"],
+                         "Installing Playwright Chromium",
+                         on_done=lambda ok: self._run_system_check())
 
     def _persist_models(self):
         self.settings.models = [

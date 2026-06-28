@@ -114,6 +114,8 @@ The extension adds models to Scr33nX with one click while you're on their page, 
 
 All settings live in the **⚙ Settings** tab (the left panel now holds just **Add Model** and the live status panel). Change anything there and click **Save Settings**.
 
+The Settings tab also has a **🔍 System Check** panel that shows whether each external tool/package is found (ffmpeg, ffplay, mpv, VLC, python-vlc, python-mpv, tdjson, Playwright Chromium), and offers one-click fixes — **Add to PATH** for tools that are installed but not on your PATH, and **Install** for the optional Python packages / the Stripchat browser.
+
 | Setting | What it does |
 |---|---|
 | Output Folder | Where recordings are saved |

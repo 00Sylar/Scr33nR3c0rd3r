@@ -17,3 +17,8 @@ streamrecorder_crash.log
 *.ts
 *.mp4
 *.part
+
+# Embedded-preview mpv library (large local binary; user-supplied, not shipped)
+libmpv-2.dll
+mpv-2.dll
+mpv-1.dll

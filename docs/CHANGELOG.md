@@ -10,6 +10,16 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Added
+- **System Check panel (⚙ Settings).** A dependency validator that shows, at a
+  glance, whether each external tool / package is found: ffmpeg, ffplay, mpv, VLC,
+  python-vlc, python-mpv + libmpv, tdjson, and Playwright Chromium. It catches the
+  common "installed but not on PATH" case (e.g. mpv) and offers one-click fixes:
+  **Add to PATH** (appends to your user PATH — no admin — and applies immediately),
+  **Install** for the Python packages / the Stripchat browser, and a **Re-check**
+  button. System apps (mpv/VLC) are detected and guided rather than silently
+  installed.
+
 ### Fixed
 - **Stripchat preview now works.** Preview now resolves Stripchat through the
   same browserless MOUFLON path the recorder uses (instead of the plain master
