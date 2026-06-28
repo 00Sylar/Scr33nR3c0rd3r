@@ -23,16 +23,23 @@ grouped by date / milestone.
   check/launch/scan threads hold it during a recording storm.
 
 ### Added
-- **▶ Stream preview.** Right-click a model → **Preview** to watch its live
-  stream. A brief "Opening preview…" indicator shows while the stream resolves
-  (a few seconds), then the player appears and is brought to the foreground.
-  Two modes (set in Settings → *Stream preview*): **External window** (default)
-  launches a standalone mpv — or ffplay if mpv isn't installed — in its own
-  process for minimal impact on recording; **Embedded (in-app)** plays inside a
-  window with play/pause/mute/volume via python-mpv (optional — if it isn't
-  installed you're told and offered the external player instead). Playback goes
-  through the same local relay the recorder uses. An optional player-path setting
-  overrides auto-detection.
+- **▶ Stream preview (mpv / VLC / ffplay).** Right-click a model → **Preview**
+  to watch its live stream. A brief "Opening preview…" indicator shows while the
+  stream resolves, then the player appears and is brought to the foreground.
+  Choose **Mode** (External window / Embedded in-app) and **Preview engine**
+  (Auto / mpv / VLC) in Settings:
+  - *External* launches a standalone **mpv**, **VLC**, or **ffplay** window in its
+    own process (minimal impact on recording) — ffplay (bundled with ffmpeg)
+    works with no extra install.
+  - *Embedded* plays inside a window with play/pause/mute/volume via **python-vlc**
+    (easiest — auto-finds an installed VLC, no DLL step) or **python-mpv**
+    (needs libmpv-2.dll in the `src/` folder). If neither is available you're told
+    and offered the external player instead.
+  Playback goes through the same local relay the recorder uses; an optional
+  player-path setting overrides auto-detection. The `python-vlc` bridge ships in
+  `requirements.txt`, and if it's ever missing while VLC is installed, the app
+  offers a **one-click install** the first time you open an embedded preview —
+  no manual pip or PATH steps needed.
 - **Telegram Setup Wizard.** A new **🧙 Setup Wizard** button on the Output /
   Upload tab walks first-time users through configuring the upload pipeline:
   API ID / Hash (with a link to my.telegram.org), the destination group/topic
@@ -65,6 +72,12 @@ grouped by date / milestone.
   **Open links with** dropdown in Settings changes or resets the saved default at
   any time, and an **Open in Browser (choose…)** menu entry re-opens the picker
   for a one-off browser without touching your saved default.
+
+### Changed
+- **Settings moved to their own ⚙ Settings tab.** The left panel was getting
+  crowded, so all settings now live in a dedicated, scrollable **⚙ Settings**
+  tab. The left panel keeps just **Add Model** and the live status panel, so
+  adding models stays one click away while settings get room to breathe.
 
 ---
 
