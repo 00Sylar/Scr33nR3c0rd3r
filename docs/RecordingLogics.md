@@ -211,6 +211,13 @@ ffmpeg -hide_banner -loglevel error
   number, start a new file.
 - **Stall detection** (`_check_stall`) — if the output file hasn't grown for
   60 s, ffmpeg is gracefully killed; the exit handler then restarts it.
+- **Offline probe on stall** (`_probe_offline_while_stalled`) — because ffmpeg
+  often keeps *reconnecting* (rather than exiting) when a model goes offline,
+  waiting out the full 60 s left the status stuck on `RECORDING`. So after ~20 s
+  of no growth the recorder fires a one-shot resolver check **off the monitor
+  thread**: if the model is offline it stops ffmpeg immediately (→ `OFFLINE` in
+  ≈25 s); if she's still online (buffering) the recording is left alone and the
+  60 s hard-stop remains the backstop. Re-armed whenever the file grows again.
 - **Restart logic** (`_handle_ffmpeg_exit`) — on ffmpeg exit code 0/1 the
   recording auto-restarts up to **3 times** (3 s delay, URL re-resolved). For
   Stripchat, exit codes 4 (idle/no segments) and 5 (ticket/private/group show)

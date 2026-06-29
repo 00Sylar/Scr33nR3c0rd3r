@@ -10,6 +10,15 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Fixed
+- **Faster RECORDING → offline detection.** When a model went offline,
+  ffmpeg often kept reconnecting instead of exiting, so the status stayed
+  **RECORDING** for up to ~75 s until the 60 s stall timeout fired. Now, when a
+  recording's file stalls for ~20 s, the app quietly asks the resolver whether
+  she's still online (off the monitor thread, so no slowdown) — if she's
+  offline it stops the recording right away (≈25 s instead of ~75 s); if she's
+  just buffering it's left alone. The 60 s stall hard-stop remains as a backstop.
+
 ---
 
 ## V1.5 — 2026-06-28

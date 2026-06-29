@@ -63,6 +63,7 @@ class RecordingSession:
     stopped: bool = False
     last_size: int = 0              # last known file size (bytes)
     last_size_change: float = 0.0   # timestamp when size last grew
+    stall_probed: bool = False      # an offline-probe is in flight / done for this stall
 
 
 @dataclass
@@ -1288,15 +1289,53 @@ class StreamRecorder:
         if size > session.last_size:
             session.last_size = size
             session.last_size_change = now
+            session.stall_probed = False     # growing again — re-arm the probe
             return
         # Allow 60s grace period (stream buffering, brief interruptions)
         stall_secs = now - session.last_size_change
+        # Active offline probe: after a short stall, confirm via the resolver
+        # ONCE (off the monitor thread so housekeeping stays fast). If she's
+        # actually offline, stop now instead of waiting out the full 60s — this
+        # is what makes RECORDING→OFFLINE fast. If she's still online (just
+        # buffering), we leave the recording alone and the 60s hard-kill below
+        # remains as the backstop.
+        if 20 <= stall_secs < 60 and not session.stall_probed:
+            session.stall_probed = True
+            threading.Thread(
+                target=self._probe_offline_while_stalled, args=(cfg, session),
+                daemon=True, name=f"stall-probe-{cfg.site}-{cfg.name}").start()
         if stall_secs < 60:
             return
         self._log(f"Stall detected for {cfg.name} — no data for {stall_secs:.0f}s, flushing ffmpeg")
         graceful_stop(session.process, timeout=5)
         # _handle_ffmpeg_exit will run on the next loop iteration
         # and handle restart logic
+
+    def _probe_offline_while_stalled(self, cfg: "ModelConfig", session):
+        """Worker thread: a recording has stalled — ask the resolver whether the
+        model is still online. If she's offline, stop the (reconnect-hanging)
+        ffmpeg now so _handle_ffmpeg_exit flips it to OFFLINE quickly. If she's
+        still online it's just buffering; re-arm so we can probe again later."""
+        # Bail if the session changed/ended while we were queued.
+        if cfg.stop_requested or cfg.session is not session:
+            return
+        try:
+            url = get_stream_url(cfg.site, cfg.name)
+        except Exception:
+            session.stall_probed = False     # probe failed — allow a retry
+            return
+        if cfg.stop_requested or cfg.session is not session:
+            return
+        if not url:
+            self._log(f"{cfg.name} ({cfg.site}) confirmed offline while stalled — "
+                      f"stopping recording.")
+            if session.process:
+                graceful_stop(session.process, timeout=5)
+            # _session_housekeeping → _handle_ffmpeg_exit sets OFFLINE next tick.
+        else:
+            # Still online — genuine buffering. Let it keep going; allow another
+            # probe if it stays stalled.
+            session.stall_probed = False
 
     def _handle_ffmpeg_exit(self, cfg: ModelConfig):
         if not cfg.session:
