@@ -10,6 +10,21 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Added
+- **Rank misclick guard (app only).** Clicking the RANK stars on a model that
+  already has a rank now asks for confirmation ("★★★★☆ → ★★☆☆☆?") before
+  changing or clearing it. Rating an unranked model stays one-click, and the
+  browser extension / bot API are never prompted.
+- **Second-instance warning on startup.** Launching Scr33nX while another
+  instance is already running (control port 5200 taken) now shows a clear
+  warning and offers to close the new window. Two live instances share one
+  settings file and silently overwrite each other's models and star ranks —
+  the most likely cause of "my ranks disappeared after a restart".
+- **✕ Remove Offline button** (Recorder toolbar, next to ✕ Remove) — removes
+  every model whose status is currently **OFFLINE** in one click, after a
+  confirmation. Goes by the visible status, so RECORDING / PRIVATE / CHECKING
+  / ERROR rows are kept, and Saved Models are never touched.
+
 ### Fixed
 - **Faster RECORDING → offline detection.** When a model went offline,
   ffmpeg often kept reconnecting instead of exiting, so the status stayed
@@ -18,6 +33,22 @@ grouped by date / milestone.
   she's still online (off the monitor thread, so no slowdown) — if she's
   offline it stops the recording right away (≈25 s instead of ~75 s); if she's
   just buffering it's left alone. The 60 s stall hard-stop remains as a backstop.
+- **Stripchat recordings no longer get stuck on RECORDING after a model goes
+  offline.** When a Stripchat model goes offline, the CDN often swaps her live
+  playlist for a looping advert placeholder — the recorder kept downloading
+  those filler segments, the file kept growing, and stall detection never
+  triggered, so the row showed **RECORDING** indefinitely (recording adverts).
+  The relay now spots the advert markers on every playlist refresh (no extra
+  network traffic or CPU) and stops the recording immediately → **OFFLINE**.
+- **Stall detection now also covers recordings that never create their output
+  file.** A recorder process that hung before writing anything was invisible
+  to the stall check and stayed **RECORDING** forever; a missing file now
+  counts as 0 bytes, so the normal 20 s probe / 60 s stop applies.
+- **Column sorting no longer resets while a status filter is active.** With
+  e.g. *Online* filtered and the list sorted by rank, every status update
+  re-applied the filter and shuffled rows back to their original order, so
+  the sort had to be redone over and over. The last-clicked sort is now
+  remembered and re-applied after every filter pass (Recorder and Saved tabs).
 
 ---
 

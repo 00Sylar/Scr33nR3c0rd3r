@@ -26,6 +26,7 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 - ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)
 - ✅ **Dropped-segment warnings** — get notified when a stream is losing segments because bandwidth can't keep up (toggle in Settings)
 - ✅ **▶ Stream preview** — right-click a model → **Preview** to watch its live stream. Opens in a standalone **mpv / VLC / ffplay** window by default (own process, minimal impact on recording), or an optional **embedded in-app** player (mpv or VLC) with play/pause/mute/volume. Pick the engine in Settings; plays through the same local relay the recorder uses
+- ✅ **✕ Remove Offline** — one-click toolbar button that removes every model currently showing **OFFLINE** from the Recorder (asks first; recording/private/checking rows and Saved Models are untouched)
 - ✅ **Saved Models** tab — view-only watchlist with online/offline status
 - ✅ **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab (click a star, click it again to clear; or right-click → **Set Rank** for one row or a whole selection at once). Sortable **RANK** column, shared per-model across both tabs, and saved between sessions
 - ✅ Windows desktop notifications (recording started/stopped/split/dropped segments)
@@ -234,6 +235,8 @@ A command-line helper, **`src/scr33nx_ctl.py`**, wraps all of these (plus `open`
 
 - The app polls each model every N seconds (configurable, default 30s)
 - If a model is in a private show or temporarily offline, the app keeps checking and resumes when they go public/online
-- All settings are saved automatically when you click "💾 Save Settings"
+- All settings are saved automatically when you click "💾 Save Settings". Models, AUTO flags, Saved Models and **star ranks** are also saved to disk **immediately on every change** (including changes made from the browser extension), so an abrupt close doesn't lose them
+- **Run only one Scr33nX at a time.** Two instances share the same settings file and overwrite each other's models/ranks. If you launch a second one it now warns you at startup (the control port is taken) and offers to close itself — accept unless you really know what you're doing
+- Changing or clearing an **existing** star rank by clicking the RANK column asks for confirmation first (misclick guard, app only); rating an unranked model stays one-click, and the browser extension is never prompted
 - If many simultaneous recordings drop segments (watch for ⚠ warnings), your total internet bandwidth is the limit. Each 1080p stream needs roughly 5–6 Mbps sustained. In order of preference: set a global **Max Quality** cap (720p roughly halves usage vs. unlimited), enable **⬇ Auto-Downgrade** so only struggling streams lose quality, or record fewer models at once.
 - For bug reports during beta, attach `streamrecorder.log` (in `%LOCALAPPDATA%\Scr33nX`) — it contains everything the Activity Log shows plus ffmpeg/relay internals.

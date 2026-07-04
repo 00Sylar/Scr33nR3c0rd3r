@@ -116,6 +116,19 @@ def set_quality_callback(fn):
     _quality_cb = fn
 
 
+# Called as fn(stream_label) when a Stripchat playlist that was live turns
+# into the MOUFLON advert placeholder loop — i.e. the model went offline but
+# the CDN keeps serving filler segments. Lets the recorder stop immediately
+# instead of recording adverts forever (the file keeps growing, so the
+# stall detector never triggers).
+_advert_cb = None
+
+
+def set_advert_callback(fn):
+    global _advert_cb
+    _advert_cb = fn
+
+
 class _Entry:
     __slots__ = ("event", "data", "ctype", "status", "ts", "error")
 
@@ -431,9 +444,19 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(502)
             return
         _count(len(r.content))
-        body = _rewrite_playlist(
-            r.content.decode("utf-8", "replace"), target, mode, label
-        ).encode("utf-8")
+        text = r.content.decode("utf-8", "replace")
+        # Same advert markers stripchat_native.resolve() rejects at start;
+        # mid-recording the CDN swaps a live playlist for this loop when the
+        # model goes offline. 404 so ffmpeg stops instead of recording ads.
+        if mode == "stripchat" and ("MOUFLON-ADVERT" in text or "/cpa/" in text):
+            if _advert_cb:
+                try:
+                    _advert_cb(label)
+                except Exception:
+                    pass
+            self.send_error(404)
+            return
+        body = _rewrite_playlist(text, target, mode, label).encode("utf-8")
         self._send(r.status_code, "application/vnd.apple.mpegurl", body)
 
     def _send(self, status: int, ctype: str, body: bytes):

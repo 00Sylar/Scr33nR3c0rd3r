@@ -64,6 +64,7 @@ class RecordingSession:
     last_size: int = 0              # last known file size (bytes)
     last_size_change: float = 0.0   # timestamp when size last grew
     stall_probed: bool = False      # an offline-probe is in flight / done for this stall
+    advert_stop: bool = False       # relay saw the SC advert loop → model offline
 
 
 @dataclass
@@ -598,6 +599,7 @@ class StreamRecorder:
         import cb_relay
         cb_relay.set_gap_callback(self._on_relay_gap)
         cb_relay.set_quality_callback(self.effective_quality)
+        cb_relay.set_advert_callback(self._on_relay_advert)
 
         self._lock    = threading.Lock()
         # Per-group monitor flags — one thread per group ("recorder", "saved")
@@ -621,6 +623,25 @@ class StreamRecorder:
             "Dropped segments",
             f"{label}: ~{seconds:.0f}s of video lost — your internet "
             f"bandwidth can't keep up with all active recordings.")
+
+    def _on_relay_advert(self, label: str):
+        """Relay callback (server thread): a Stripchat playlist that was live
+        switched to the advert placeholder loop — the model went offline but
+        the CDN keeps serving looping filler segments, so the file keeps
+        growing and the stall detector never fires. Stop the session; the
+        exit handler flips it to OFFLINE (no restart)."""
+        cfg = self.models.get(label)
+        session = cfg.session if cfg else None
+        if not cfg or not session or session.advert_stop or cfg.stop_requested:
+            return
+        session.advert_stop = True
+        self._log(f"{cfg.name} ({cfg.site}): advert loop detected — model went "
+                  f"offline, stopping recording.")
+        # Off-thread: graceful_stop blocks up to 10 s and this runs on the
+        # relay's HTTP-server thread.
+        threading.Thread(target=graceful_stop, args=(session.process,),
+                         kwargs={"timeout": 5}, daemon=True,
+                         name=f"advert-stop-{cfg.name}").start()
 
     # ── Quality caps & auto-downgrade ─────────────────────────────────────────
 
@@ -1284,7 +1305,10 @@ class StreamRecorder:
         try:
             size = os.path.getsize(session.current_file)
         except OSError:
-            return
+            # File not created (yet). Treat as 0 bytes so the stall clock keeps
+            # running — an early return here made a recorder that never writes
+            # its output file (hung connect) undetectable: RECORDING forever.
+            size = 0
         now = time.time()
         if size > session.last_size:
             session.last_size = size
@@ -1342,6 +1366,20 @@ class StreamRecorder:
             return
         rc  = cfg.session.process.returncode if cfg.session.process else -1
         self._log(f"ffmpeg exited for {cfg.name} (rc={rc})")
+
+        # Advert-loop stop: the relay confirmed the model went offline (the
+        # playlist turned into the SC advert placeholder). Straight to OFFLINE —
+        # restarting would just re-record the advert loop.
+        if cfg.session.advert_stop:
+            cfg.restart_count = 0
+            cfg.session       = None
+            cfg.stream_url    = ""
+            self._reset_session_quality(cfg)
+            self._set_status(cfg, ModelStatus.OFFLINE, "")
+            if self.on_notification:
+                self.on_notification("Recording Stopped",
+                                     f"{cfg.name} ({cfg.site}) went offline.")
+            return
 
         # Stripchat: rc 4 = idle (no segments), rc 5 = ticket/private/group show
         # Model is online but not publicly broadcasting — show PRIVATE, no restart.

@@ -210,7 +210,9 @@ ffmpeg -hide_banner -loglevel error
   Size: graceful-stop ffmpeg (flush trailer), re-resolve the URL, bump the part
   number, start a new file.
 - **Stall detection** (`_check_stall`) — if the output file hasn't grown for
-  60 s, ffmpeg is gracefully killed; the exit handler then restarts it.
+  60 s, ffmpeg is gracefully killed; the exit handler then restarts it. A
+  missing output file counts as 0 bytes (a recorder that hangs before ever
+  creating its file used to be undetectable and stayed `RECORDING` forever).
 - **Offline probe on stall** (`_probe_offline_while_stalled`) — because ffmpeg
   often keeps *reconnecting* (rather than exiting) when a model goes offline,
   waiting out the full 60 s left the status stuck on `RECORDING`. So after ~20 s
@@ -222,6 +224,15 @@ ffmpeg -hide_banner -loglevel error
   recording auto-restarts up to **3 times** (3 s delay, URL re-resolved). For
   Stripchat, exit codes 4 (idle/no segments) and 5 (ticket/private/group show)
   mean "online but not public" → status `PRIVATE`, no restart, 5-minute cooldown.
+- **Advert-loop detection (Stripchat)** — when a model goes offline mid-stream,
+  doppiocdn often swaps the *same* variant playlist for the `MOUFLON-ADVERT` /
+  `/cpa/` placeholder loop. ffmpeg keeps downloading those filler segments, the
+  file keeps growing, and stall detection never fires → stuck on `RECORDING`
+  (recording adverts). The relay checks every playlist refresh for the advert
+  markers (zero extra network — it fetches the playlist anyway): on detection
+  it 404s the playlist to ffmpeg and fires `set_advert_callback(label)`; the
+  recorder stops the session and `_handle_ffmpeg_exit` flips it straight to
+  `OFFLINE` (no restart — a restart would just re-record the advert loop).
 - **Session watcher** — an always-on background loop handles split/stall/exit
   even when the monitor is off (e.g. user clicked REC manually). It idles while
   any monitor is running to avoid double-handling.

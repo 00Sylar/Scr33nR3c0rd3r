@@ -607,6 +607,9 @@ class StreamRecorderApp(tk.Tk):
         }
         self._saved_built = False
         self._filter_jobs: dict[str, Optional[str]] = {"rec": None, "saved": None}
+        # Last applied column sort per tree ("_site_"/"_ssite_" → (col, reverse)),
+        # re-applied after every filter pass so the sort survives status updates.
+        self._last_sort: dict[str, tuple[str, bool]] = {}
         # Row checkboxes (☐/☑ glyph in the name column): an explicit working
         # set per tab. When any row is checked, bulk actions operate on the
         # checked set instead of the click-selection.
@@ -1088,6 +1091,8 @@ class StreamRecorderApp(tk.Tk):
                    ).pack(side="left", padx=(0,4), pady=5)
         ttk.Button(bar, text="✕ Remove", style="Red.TButton",
                    command=self._remove_selected).pack(side="left", padx=(0,4), pady=5)
+        ttk.Button(bar, text="✕ Remove Offline", style="Ghost.TButton",
+                   command=self._remove_offline).pack(side="left", padx=(0,4), pady=5)
         self._btn_saved = ttk.Button(bar, text="★ Add to Saved", style="Flat.TButton",
                                      command=self._toggle_saved_selected, state="disabled")
         self._btn_saved.pack(side="left", padx=(0,4), pady=5)
@@ -1368,7 +1373,9 @@ class StreamRecorderApp(tk.Tk):
                 bx, _, bw, _ = bbox
                 star = max(1, min(5, int((event.x - bx) / (bw / 5)) + 1))
                 cur = self._get_rank(name, site)
-                self._set_rank_many([(name, site)], 0 if cur == star else star)
+                new = 0 if cur == star else star
+                if self._confirm_rank_change(name, site, new):
+                    self._set_rank_many([(name, site)], new)
             return "break"
         if not modified:
             self._drag_anchor["rec"] = iid  # start of a possible drag-select
@@ -1669,6 +1676,21 @@ class StreamRecorderApp(tk.Tk):
         reverse = sort_state.get(col, False)
         sort_state[col] = not reverse
 
+        # Remember the applied sort so filter passes can restore it —
+        # _filter_tree re-attaches rows in insertion order, which used to
+        # wipe the sort every time a status changed under an active filter.
+        self._last_sort[site_prefix] = (col, reverse)
+        self._apply_sort(tree, col, reverse, site_prefix)
+
+        arrow = " ▼" if reverse else " ▲"
+        for c, label in col_labels.items():
+            tree.heading(c, text=f"{label}  {arrow}" if c == col
+                         else f"{label}  ↕")
+
+    def _apply_sort(self, tree: ttk.Treeview, col: str, reverse: bool,
+                    site_prefix: str):
+        """Order the visible rows under every site header by *col* (no
+        direction toggle, no heading update — just the reordering)."""
         for site_id in list(tree.get_children("")):
             if not site_id.startswith(site_prefix):
                 continue
@@ -1694,11 +1716,6 @@ class StreamRecorderApp(tk.Tk):
                     reverse=reverse)
             for idx, iid in enumerate(children):
                 tree.move(iid, site_id, idx)
-
-        arrow = " ▼" if reverse else " ▲"
-        for c, label in col_labels.items():
-            tree.heading(c, text=f"{label}  {arrow}" if c == col
-                         else f"{label}  ↕")
 
     def _sort_tree(self, col: str):
         self._sort_generic(
@@ -1860,6 +1877,28 @@ class StreamRecorderApp(tk.Tk):
         self._persist_models()
         self._update_stats()
         self._update_selection_label()
+
+    def _remove_offline(self):
+        """Remove every Recorder model whose row currently shows OFFLINE.
+        Goes by the visible status cell (WYSIWYG — matches the status filter),
+        so CHECKING/PRIVATE/ERROR rows are kept. Saved Models are untouched."""
+        offline = [k for k in list(self._rows)
+                   if self._tree.exists(k)
+                   and STATUS_BY_LABEL.get(self._tree.set(k, "status"))
+                       == ModelStatus.OFFLINE]
+        if not offline:
+            self._log_add("Remove Offline: no OFFLINE models in the Recorder.")
+            return
+        if not messagebox.askyesno(
+                "Remove offline models",
+                f"Remove {len(offline)} OFFLINE model(s) from the Recorder?\n\n"
+                "Saved Models are kept."):
+            return
+        for key in offline:
+            site, name = key.split(":", 1)
+            self._do_remove_from_recorder(name, site)
+        self._log_add(f"Removed {len(offline)} offline model(s) from the "
+                      f"Recorder.", "warn")
 
     _SITE_URLS = {
         "chaturbate": "https://chaturbate.com/{}/",
@@ -3228,6 +3267,10 @@ class StreamRecorderApp(tk.Tk):
                 tree.move(hdr, "", idx)
             else:
                 tree.detach(hdr)
+        # Rows were re-attached in insertion order — restore the user's sort.
+        last = self._last_sort.get(hdr_prefix)
+        if last:
+            self._apply_sort(tree, last[0], last[1], hdr_prefix)
         return shown
 
     def _saved_ensure_site(self, site: str):
@@ -3261,6 +3304,22 @@ class StreamRecorderApp(tk.Tk):
 
     def _get_rank(self, name: str, site: str) -> int:
         return int(self._ranks.get(self._rank_key(name, site), 0) or 0)
+
+    def _confirm_rank_change(self, name: str, site: str, new: int) -> bool:
+        """Star-click misclick guard: changing or clearing an EXISTING rank
+        asks first; first-time ranking (no rank yet) stays one-click. Only
+        used by the in-app star-click handlers (main thread) — never call
+        from the API path (modal would freeze the Tk loop)."""
+        cur = self._get_rank(name, site)
+        if cur == 0:
+            return True
+        if new == 0:
+            msg = (f"Clear the rank of {name} ({site})?\n\n"
+                   f"{self._rank_stars(cur)}  →  {self._rank_stars(0)}")
+        else:
+            msg = (f"Change the rank of {name} ({site})?\n\n"
+                   f"{self._rank_stars(cur)}  →  {self._rank_stars(new)}")
+        return messagebox.askyesno("Change rank", msg, parent=self)
 
     def _set_rank_many(self, items, rank: int) -> int:
         """Set the 0-5 star rank on a list of (name, site) models — the single
@@ -3452,8 +3511,10 @@ class StreamRecorderApp(tk.Tk):
                 bx, _, bw, _ = bbox
                 star = int((event.x - bx) / (bw / 5)) + 1
                 star = max(1, min(5, star))
-                self._set_saved_rank(sid, 0 if self._saved_rank(sid) == star
-                                     else star)
+                new = 0 if self._saved_rank(sid) == star else star
+                _, s_site, s_name = sid.split(":", 2)
+                if self._confirm_rank_change(s_name, s_site, new):
+                    self._set_saved_rank(sid, new)
             return "break"
         if not modified:
             self._drag_anchor["saved"] = sid
@@ -4615,10 +4676,29 @@ class StreamRecorderApp(tk.Tk):
                 "API server could not bind 127.0.0.1:%s (%s) — is another "
                 "Scr33nX already running? The browser extension will talk to "
                 "that instance, not this one.", _API_PORT, e)
+            # Two live instances share one config file: whichever saves last
+            # overwrites the other's models AND RANKS with its own stale
+            # snapshot — the classic "my ranks vanished after a restart".
+            # Offer to close this (second) instance before it can clobber
+            # anything. Startup path, main thread — modal is safe here.
+            if messagebox.askyesno(
+                    "Scr33nX is already running",
+                    "Another Scr33nX appears to be running already (the "
+                    f"control port {_API_PORT} is in use — check the system "
+                    "tray).\n\n"
+                    "Two instances overwrite each other's settings: models "
+                    "and star ranks saved by one are silently lost when the "
+                    "other saves.\n\n"
+                    "Close this new window? (Recommended — keep using the "
+                    "one that's already running.)",
+                    icon="warning", default=messagebox.YES, parent=self):
+                os._exit(0)  # nothing recording yet; exit before any save
             self._log_add(
                 f"⚠  Local API port {_API_PORT} is already in use — another "
                 f"Scr33nX is likely running. The browser extension is "
-                f"controlling that instance, not this window.", "warn")
+                f"controlling that instance, not this window. Anything you "
+                f"change here may be overwritten by the other instance!",
+                "warn")
 
     def _stop_api_server(self):
         if getattr(self, "_api_server", None):
