@@ -10,6 +10,15 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## V1.6 — 2026-07-04
+
+Minor bug fixes plus a few safety features: a low-disk guard, a hard
+single-instance lock, and faster offline detection.
+
 ### Added
 - **⛔ Low-disk guard** (Settings checkbox, off by default). When enabled and
   the drive holding the output folder falls below **20 GB free**, all active

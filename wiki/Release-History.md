@@ -6,6 +6,33 @@ in the repository, and each version is also a
 
 ---
 
+## V1.6 — 2026‑07‑04
+
+Minor bug fixes plus a few safety features.
+
+**Added**
+- **⛔ Low-disk guard** (Settings, off by default) — under 20 GB free on the
+  output drive, all downloads stop and new ones are blocked until space is
+  freed; recovery is automatic. The Telegram pipeline keeps running.
+- **Single-instance lock** — a second Scr33nX now shows "You can only open one
+  instance of this app" and closes itself.
+- **Rank misclick guard** and a **✕ Remove Offline** toolbar button.
+
+**Changed**
+- Launcher renamed `StreamRecorder.bat` → **`Scr33nX.bat`** (update your shortcuts).
+
+**Fixed**
+- Faster RECORDING → offline detection (≈25 s instead of ~75 s), including
+  Stripchat advert-loop and never-created-file cases.
+- Column sorting no longer resets while a status filter is active.
+
+## V1.5 — 2026‑06‑28
+
+In-app stream preview (mpv/VLC/ffplay, external or embedded), a dedicated
+Settings tab with a dependency **System Check** and one-click fixes, a guided
+Telegram setup, split stand-by pipeline stages, a browser picker for
+**Open in Browser**, and a round of UI-freeze fixes.
+
 ## V1.4 — 2026‑06‑26
 
 First version published as an official GitHub Release; the in‑app update check
