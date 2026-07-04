@@ -563,6 +563,7 @@ class StreamRecorderApp(tk.Tk):
         self.recorder.quality_overrides = self._model_q
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
+        self.recorder.low_disk_guard_enabled = self.settings.low_disk_guard_enabled
         self._monitoring_recorder = False
         self._monitoring_saved    = False
         self._tray: Optional[WinTray] = None
@@ -961,6 +962,13 @@ class StreamRecorderApp(tk.Tk):
         self._v_autodown = tk.BooleanVar(value=self.settings.auto_downgrade_enabled)
         tk.Checkbutton(p, text="⬇ Auto-Downgrade Quality",
                        variable=self._v_autodown,
+                       bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
+                       activeforeground=TEXT, font=UI, relief="flat").pack(
+            anchor="w", padx=16, pady=(0,0))
+
+        self._v_lowdisk = tk.BooleanVar(value=self.settings.low_disk_guard_enabled)
+        tk.Checkbutton(p, text="⛔ Stop All if Disk < 20 GB Free",
+                       variable=self._v_lowdisk,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,0))
@@ -4256,9 +4264,11 @@ class StreamRecorderApp(tk.Tk):
         self.settings.max_quality = QUALITY_OPTIONS.get(self._v_quality.get(), 0)
         self.settings.auto_downgrade_enabled = self._v_autodown.get()
         self.settings.playwright_fallback_enabled = self._v_pwfallback.get()
+        self.settings.low_disk_guard_enabled = self._v_lowdisk.get()
         self.recorder.quality_global = self.settings.max_quality
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
+        self.recorder.low_disk_guard_enabled = self.settings.low_disk_guard_enabled
         self.settings.privacy_mode_enabled  = self._v_privacy.get()
         disp = self._v_browser.get()
         for d, v in self._browser_choices:
@@ -4673,32 +4683,20 @@ class StreamRecorderApp(tk.Tk):
             # and browser extension talk to the OTHER process.
             self._api_server = None
             logging.getLogger().warning(
-                "API server could not bind 127.0.0.1:%s (%s) — is another "
-                "Scr33nX already running? The browser extension will talk to "
-                "that instance, not this one.", _API_PORT, e)
+                "API server could not bind 127.0.0.1:%s (%s) — another "
+                "Scr33nX is already running; exiting.", _API_PORT, e)
             # Two live instances share one config file: whichever saves last
             # overwrites the other's models AND RANKS with its own stale
             # snapshot — the classic "my ranks vanished after a restart".
-            # Offer to close this (second) instance before it can clobber
-            # anything. Startup path, main thread — modal is safe here.
-            if messagebox.askyesno(
-                    "Scr33nX is already running",
-                    "Another Scr33nX appears to be running already (the "
-                    f"control port {_API_PORT} is in use — check the system "
-                    "tray).\n\n"
-                    "Two instances overwrite each other's settings: models "
-                    "and star ranks saved by one are silently lost when the "
-                    "other saves.\n\n"
-                    "Close this new window? (Recommended — keep using the "
-                    "one that's already running.)",
-                    icon="warning", default=messagebox.YES, parent=self):
-                os._exit(0)  # nothing recording yet; exit before any save
-            self._log_add(
-                f"⚠  Local API port {_API_PORT} is already in use — another "
-                f"Scr33nX is likely running. The browser extension is "
-                f"controlling that instance, not this window. Anything you "
-                f"change here may be overwritten by the other instance!",
-                "warn")
+            # So a second instance is refused outright. Startup path, main
+            # thread — modal is safe here.
+            messagebox.showerror(
+                "Scr33nX is already running",
+                "You can only open one instance of this app.\n\n"
+                f"Another Scr33nX is already running (the control port "
+                f"{_API_PORT} is in use — check the system tray or taskbar).",
+                parent=self)
+            os._exit(0)  # nothing recording yet; exit before any save
 
     def _stop_api_server(self):
         if getattr(self, "_api_server", None):

@@ -8,7 +8,7 @@
 
 | Symptom | Cause / fix |
 |---|---|
-| Tray icon controls the "wrong" app, extension does nothing | A **second instance** is running. Only one Scr33nX can bind port 5200; the rest run half‑working. Close the extras. The failed bind is logged with an "another Scr33nX is likely running" warning. |
+| Tray icon controls the "wrong" app, extension does nothing | A **second instance** was running. Current builds refuse to start a second instance ("You can only open one instance of this app"); on older builds, close the extras — only one Scr33nX can bind port 5200. |
 | Window looks frozen | If it happened around Privacy Mode, update — older builds could pop a modal hidden behind the cover. Otherwise check the log for a stalled subprocess. |
 | Update indicator never appears | The check needs a **published GitHub Release**, not just a tag. If no releases are published, nothing triggers. It also fails silently when offline. |
 

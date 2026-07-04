@@ -4,7 +4,7 @@ Windows desktop app (Tkinter) that auto-records live streams from Chaturbate,
 Stripchat, Camsoda, and MyFreeCams through a local HLS relay.
 
 > **Repo layout:** Python source lives in `src/` and docs live in `docs/`.
-> `README.md`, `CLAUDE.md`, `requirements.txt`, and `StreamRecorder.bat` stay in
+> `README.md`, `CLAUDE.md`, `requirements.txt`, and `Scr33nX.bat` stay in
 > the root.
 
 Key files:
@@ -43,8 +43,8 @@ move/delete an already-pushed tag.
   `extension/Firefox/popup.js` differ **only** in `chrome.` vs `browser.` lines.
 - Validate before finishing: `python -m py_compile` changed Python; `node --check`
   both `popup.js` files.
-- Single instance only: the API binds port 5200; a second instance can't and runs
-  half-working.
+- Single instance only: the API binds port 5200; a second instance shows an
+  error and exits at startup.
 
 ## Workflow
 

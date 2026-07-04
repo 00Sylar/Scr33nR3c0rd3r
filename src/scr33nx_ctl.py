@@ -280,7 +280,7 @@ def cmd_open(a):
         return {"ok": True, "note": "Scr33nX is already running"}
     # Launcher lives in the project root, one level up from src/.
     bat = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "StreamRecorder.bat")
+                       "Scr33nX.bat")
     if not os.path.exists(bat):
         return {"ok": False, "error": f"launcher not found: {bat}"}
     try:

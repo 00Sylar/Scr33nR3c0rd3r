@@ -11,19 +11,30 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **⛔ Low-disk guard** (Settings checkbox, off by default). When enabled and
+  the drive holding the output folder falls below **20 GB free**, all active
+  recordings are stopped immediately and every new start — manual REC,
+  auto-rec, auto-restart, and max-size file splits — is blocked until you
+  free up space or disable the option. You get one toast when the guard
+  trips and a log line when space recovers.
 - **Rank misclick guard (app only).** Clicking the RANK stars on a model that
   already has a rank now asks for confirmation ("★★★★☆ → ★★☆☆☆?") before
   changing or clearing it. Rating an unranked model stays one-click, and the
   browser extension / bot API are never prompted.
-- **Second-instance warning on startup.** Launching Scr33nX while another
-  instance is already running (control port 5200 taken) now shows a clear
-  warning and offers to close the new window. Two live instances share one
-  settings file and silently overwrite each other's models and star ranks —
-  the most likely cause of "my ranks disappeared after a restart".
+- **Single-instance lock.** Launching Scr33nX while another instance is
+  already running (control port 5200 taken) now shows "You can only open one
+  instance of this app" and the new window closes itself. Two live instances
+  share one settings file and silently overwrite each other's models and star
+  ranks — the most likely cause of "my ranks disappeared after a restart".
 - **✕ Remove Offline button** (Recorder toolbar, next to ✕ Remove) — removes
   every model whose status is currently **OFFLINE** in one click, after a
   confirmation. Goes by the visible status, so RECORDING / PRIVATE / CHECKING
   / ERROR rows are kept, and Saved Models are never touched.
+
+### Changed
+- **Launcher renamed** `StreamRecorder.bat` → **`Scr33nX.bat`** to match the
+  app name. Update any shortcuts pointing at the old name; the bot's `open`
+  command uses the new name automatically.
 
 ### Fixed
 - **Faster RECORDING → offline detection.** When a model went offline,

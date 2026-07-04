@@ -33,9 +33,9 @@ fallback — skip it if you don't record Stripchat.
 
 ## 4. Run the app
 
-Double‑click **`StreamRecorder.bat`** — it launches the GUI with no console
+Double‑click **`Scr33nX.bat`** — it launches the GUI with no console
 window. Only one instance can run at a time (it binds the API on port 5200); a
-second instance can't bind the port and runs half‑working.
+second instance shows an error and closes itself.
 
 ## 5. Install the browser extension (optional)
 

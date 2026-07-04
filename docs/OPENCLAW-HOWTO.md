@@ -105,7 +105,7 @@ Behind the scenes it talks to the **Local Control API** (documented in the READM
 `/status`, `/dashboard`, `/add`, `/record`, `/auto`, `/rank`, `/remove`,
 `/stop_all`, `/clear`, `/monitor`, `/pipeline`, `/pipeline/stage`, `/quit`. `add-saved --rank` (and
 `add-recorder`/`record --rank`) call `/add` then `/rank`; a bare `rank` calls just
-`/rank`. `open` launches `StreamRecorder.bat`
+`/rank`. `open` launches `Scr33nX.bat`
 and waits for the API to come up; `close` calls `/quit` and waits for the app to
 go down.
 
@@ -214,7 +214,7 @@ Then restart Scr33nX and send `/new`. That's the whole loop.
 | `src/app.py` | Scr33nX + its local API (`_ApiHandler`, the `_api_*` methods) |
 | `src/scr33nx_ctl.py` | The control script the bot runs |
 | `src/openclaw_record.py` | Older record-only script (superseded by `src/scr33nx_ctl.py record`) |
-| `StreamRecorder.bat` | GUI launcher (used by `open`) |
+| `Scr33nX.bat` | GUI launcher (used by `open`) |
 | `C:\Users\luiis\.openclaw\workspace\AGENTS.md` | The bot's instructions / command map |
 | `C:\Users\luiis\.openclaw\openclaw.json` | OpenClaw config (model, auth, channel) |
 

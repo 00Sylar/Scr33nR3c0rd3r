@@ -233,6 +233,15 @@ ffmpeg -hide_banner -loglevel error
   it 404s the playlist to ffmpeg and fires `set_advert_callback(label)`; the
   recorder stops the session and `_handle_ffmpeg_exit` flips it straight to
   `OFFLINE` (no restart — a restart would just re-record the advert loop).
+- **Low-disk guard** (`_enforce_low_disk_guard`, opt-in Settings checkbox) —
+  every monitor tick (and each session-watcher pass when monitors are off)
+  checks free space on the output drive via `shutil.disk_usage`. Below
+  `LOW_DISK_MIN_FREE_GB` (20 GB) it stops all active downloads and
+  `_begin_recording` refuses every start (manual REC, auto-rec, restart) with
+  status `ERROR: Low disk`; `_check_split` also refuses to open the next part.
+  A probe failure never blocks (`_disk_free_gb` returns `None` → not blocked).
+  One toast on trip, one log line on recovery; refused-start log lines are
+  throttled to one per minute.
 - **Session watcher** — an always-on background loop handles split/stall/exit
   even when the monitor is off (e.g. user clicked REC manually). It idles while
   any monitor is running to avoid double-handling.

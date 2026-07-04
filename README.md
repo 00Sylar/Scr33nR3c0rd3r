@@ -80,7 +80,7 @@ playwright install chromium
 (`playwright install chromium` is only required for the Stripchat browser fallback — skip it if you don't record Stripchat.)
 
 ### 4. Run the app
-Double-click **`StreamRecorder.bat`** (launches the GUI with no console window).
+Double-click **`Scr33nX.bat`** (launches the GUI with no console window).
 
 ### 5. Install the browser extension (optional)
 
@@ -126,6 +126,7 @@ The Settings tab also has a **🔍 System Check** panel that shows whether each 
 | Minimize to SysTray | Hide to the tray instead of the taskbar |
 | Notifications | Master toggle for Windows toast notifications |
 | ⚠ Dropped-Segment Warnings | Toast when a recording is losing segments due to saturated bandwidth (always logged to the Activity Log regardless) |
+| ⛔ Stop All if Disk < 20 GB Free | Low-disk guard (off by default). When the drive holding the output folder drops below **20 GB free**, every active recording is stopped and no new recording can start (manual REC, auto-rec, restarts and file splits are all blocked) until you free up space or uncheck this option. Blocked models show `Low disk` as their error; recovery is automatic once space is freed |
 | ⬇ Auto-Downgrade Quality | Restart a stream one quality step lower when it keeps losing segments (≥10 s lost within 60 s). Only that stream is touched; manual per-model quality choices are respected. Not available for Stripchat |
 | 🎭 Stripchat Browser Fallback | When Stripchat's browserless native path can't resolve a stream, fall back to the Playwright browser recorder. Enabled by default. Uncheck to record native-only — if native fails the stream is skipped and the browser never launches |
 | 🔒 Privacy Mode | Idle screen cover |

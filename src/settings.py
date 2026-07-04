@@ -43,6 +43,7 @@ class AppSettings:
     max_quality: int = 0                       # global cap: variant height px (0 = unlimited)
     auto_downgrade_enabled: bool = False       # step struggling streams down a quality rung
     playwright_fallback_enabled: bool = True   # Stripchat: use browser fallback when native fails
+    low_disk_guard_enabled: bool = False       # stop/block all recording when output drive < 20 GB free
     preferred_browser: str = ""                # "" = ask each time, "system" = OS default, else exe path
     preview_mode: str = "external"             # "external" (player window) | "embedded" (in-app)
     preview_engine: str = "auto"               # "auto" | "mpv" | "vlc"
@@ -115,6 +116,7 @@ def load_settings() -> AppSettings:
     s.max_quality = main.get("max_quality", s.max_quality)
     s.auto_downgrade_enabled = main.get("auto_downgrade_enabled", s.auto_downgrade_enabled)
     s.playwright_fallback_enabled = main.get("playwright_fallback_enabled", s.playwright_fallback_enabled)
+    s.low_disk_guard_enabled = main.get("low_disk_guard_enabled", s.low_disk_guard_enabled)
     s.preferred_browser = main.get("preferred_browser", s.preferred_browser)
     s.preview_mode = main.get("preview_mode", s.preview_mode)
     s.preview_engine = main.get("preview_engine", s.preview_engine)
@@ -159,6 +161,7 @@ def save_settings(s: AppSettings):
         "max_quality": s.max_quality,
         "auto_downgrade_enabled": s.auto_downgrade_enabled,
         "playwright_fallback_enabled": s.playwright_fallback_enabled,
+        "low_disk_guard_enabled": s.low_disk_guard_enabled,
         "preferred_browser": s.preferred_browser,
         "preview_mode": s.preview_mode,
         "preview_engine": s.preview_engine,

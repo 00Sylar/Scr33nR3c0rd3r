@@ -561,6 +561,11 @@ def launch_stripchat_native(model_name: str, output_path: str,
 
 # ── StreamRecorder ────────────────────────────────────────────────────────────
 
+# Low-disk guard threshold: with the guard enabled, all recordings stop and no
+# new ones may start while the output drive has less free space than this.
+LOW_DISK_MIN_FREE_GB = 20
+
+
 class StreamRecorder:
     def __init__(self):
         self.models: dict[str, ModelConfig] = {}
@@ -578,6 +583,12 @@ class StreamRecorder:
         # (bandwidth saturated). Always logged; notification is opt-out.
         self.gap_warnings_enabled: bool = True
         self._gap_warn_ts: dict[str, float] = {}
+
+        # Low-disk guard: when enabled, every recording is stopped and new ones
+        # are refused while the output drive has < LOW_DISK_MIN_FREE_GB free.
+        self.low_disk_guard_enabled: bool = False
+        self._low_disk_tripped: bool = False   # guard is currently blocking
+        self._low_disk_log_ts: float = 0.0     # throttle refused-start log lines
 
         # Stripchat only: when the browserless native path can't be used, fall
         # back to the Playwright browser recorder. When disabled, the stream is
@@ -876,6 +887,61 @@ class StreamRecorder:
         self._log(f"Stopped all downloads ({len(victims)} active).")
         return len(victims)
 
+    # ── Low-disk guard ────────────────────────────────────────────────────────
+
+    def _disk_free_gb(self) -> Optional[float]:
+        """Free space (GB) on the drive holding output_dir, or None if it
+        can't be determined (never block recordings on a probe failure)."""
+        path = self.output_dir
+        try:
+            # output_dir may not exist yet — walk up to the nearest existing dir
+            while path and not os.path.exists(path):
+                parent = os.path.dirname(path)
+                if parent == path:
+                    break
+                path = parent
+            return shutil.disk_usage(path).free / (1024 ** 3)
+        except Exception:
+            return None
+
+    def low_disk_blocked(self) -> Optional[float]:
+        """If the guard is enabled and the output drive is below the threshold,
+        return the current free GB; otherwise None (not blocked)."""
+        if not self.low_disk_guard_enabled:
+            return None
+        free = self._disk_free_gb()
+        if free is not None and free < LOW_DISK_MIN_FREE_GB:
+            return free
+        return None
+
+    def _enforce_low_disk_guard(self):
+        """Called once per monitor/watcher tick: when the guard trips, stop
+        every active download; log/notify the trip and the recovery once."""
+        free = self.low_disk_blocked()
+        if free is None:
+            if self._low_disk_tripped:
+                self._low_disk_tripped = False
+                if self.low_disk_guard_enabled:
+                    self._log("✓ Disk space recovered — recordings are "
+                              "allowed again.")
+            return
+        first = not self._low_disk_tripped
+        self._low_disk_tripped = True
+        with self._lock:
+            has_active = any(c.session for c in self.models.values())
+        if first:
+            self._log(f"⛔ LOW DISK: {free:.1f} GB free on the output drive "
+                      f"(< {LOW_DISK_MIN_FREE_GB} GB) — stopping all downloads; "
+                      f"new recordings blocked until space is freed or the "
+                      f"guard is disabled in Settings.")
+            if self.on_notification:
+                self.on_notification(
+                    "Low disk space",
+                    f"Only {free:.1f} GB free — all recordings stopped. "
+                    f"Free up space (or disable the disk guard) to continue.")
+        if has_active:
+            self.stop_all_recordings()
+
     # Online checks for due models run in a small shared pool: the old serial
     # pass meant one slow site response delayed every other model's check AND
     # the split/stall housekeeping of active sessions. CB calls stay globally
@@ -898,6 +964,7 @@ class StreamRecorder:
             pool = ThreadPoolExecutor(max_workers=self._CHECK_POOL_SIZE,
                                       thread_name_prefix=f"chk-{group}")
             while self._running.get(group):
+                self._enforce_low_disk_guard()
                 with self._lock:
                     configs = [c for c in self.models.values() if group in c.groups]
                 now = time.time()
@@ -1019,6 +1086,7 @@ class StreamRecorder:
             last_scan = 0.0
             scan_thread: Optional[threading.Thread] = None
             while self._running.get("saved"):
+                self._enforce_low_disk_guard()
                 with self._lock:
                     configs = [c for c in self.models.values() if "saved" in c.groups]
                 for cfg in configs:
@@ -1190,6 +1258,20 @@ class StreamRecorder:
                 self._set_status(cfg, new, "")
 
     def _begin_recording(self, cfg: ModelConfig, stream_url: str):
+        # Low-disk guard: refuse every start (manual REC, auto-rec, restart)
+        # while the output drive is below the threshold.
+        free = self.low_disk_blocked()
+        if free is not None:
+            self._low_disk_tripped = True
+            now = time.time()
+            if now - self._low_disk_log_ts >= 60:   # don't spam per model/tick
+                self._low_disk_log_ts = now
+                self._log(f"⛔ Not recording {cfg.name} ({cfg.site}): only "
+                          f"{free:.1f} GB free (< {LOW_DISK_MIN_FREE_GB} GB). "
+                          f"Free up space or disable the disk guard.")
+            self._set_status(cfg, ModelStatus.ERROR,
+                             f"Low disk: {free:.1f} GB free")
+            return
         cfg.stop_requested = False
         session = RecordingSession(
             model_name=cfg.name, site=cfg.site,
@@ -1239,6 +1321,7 @@ class StreamRecorder:
             # Skip entirely while any monitor is running — it handles sessions
             if any(self._running.values()):
                 continue
+            self._enforce_low_disk_guard()
             with self._lock:
                 active = [c for c in self.models.values() if c.session]
             for cfg in active:
@@ -1278,6 +1361,11 @@ class StreamRecorder:
             except OSError as e:
                 self._log(f"{cfg.name}: couldn't rename first part to _part001: {e}")
         session.part += 1
+        if self.low_disk_blocked() is not None:
+            # Low-disk guard tripped between ticks — don't open the next part.
+            cfg.session = None
+            self._set_status(cfg, ModelStatus.OFFLINE, "")
+            return
         url = get_stream_url(cfg.site, cfg.name) or session.stream_url
         if url:
             output_path          = build_output_path(session)
