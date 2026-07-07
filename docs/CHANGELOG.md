@@ -10,7 +10,17 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **New web-based UI (preview, in development).** A full visual redesign of
+  Scr33nX — modern dark red/black interface with smooth animations — rendered
+  in a native window (Windows WebView2, no browser involved). Launch it with
+  `python src/app_web.py`; the classic app is unchanged and remains the
+  default. The preview shell already runs the real engine: your models,
+  ranks, AUTO flags and settings load, the Recorder tab shows live statuses,
+  Add Model / AUTO toggles / Start Monitor / auto-record / Terminate work,
+  and the port-5200 control API (extensions + bot) is identical. Requires
+  `pip install pywebview`. Remaining tabs arrive phase by phase (see
+  `docs/PARITY.md`).
 
 ---
 

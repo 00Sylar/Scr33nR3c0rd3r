@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scr33nX</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div class="brand">
+      <span class="mark">Scr33n<em>X</em></span>
+      <span class="ver" id="ver">v—</span>
+    </div>
+    <button class="update-pill" id="update-pill" hidden>● Update available</button>
+    <div class="spacer"></div>
+    <div class="meter">↓ <b id="m-down">0.0</b> Mbps</div>
+    <div class="meter">↑ <b id="m-up">0.0</b> Mbps</div>
+    <div class="status-pill"><span class="dot" id="hdr-dot"></span><span id="hdr-status">STARTING…</span></div>
+    <button class="btn-terminate" id="btn-term">⛔ Terminate</button>
+  </header>
+
+  <div class="body">
+
+    <aside class="sidebar">
+      <div class="card">
+        <h3>Add Model</h3>
+        <div class="field"><label>Username or Link</label>
+          <input id="add-name" placeholder="name or full URL" spellcheck="false"></div>
+        <div class="field"><label>Site</label>
+          <select id="add-site">
+            <option>chaturbate</option><option>stripchat</option>
+            <option>camsoda</option><option>myfreecams</option>
+          </select></div>
+        <button class="btn-primary" id="btn-add">＋ Add Model</button>
+      </div>
+
+      <div class="card dash">
+        <div class="live-head">
+          <span class="n"><span class="dot"></span><span id="dash-live">0 LIVE</span></span>
+          <small id="dash-total">0 models</small>
+        </div>
+        <div class="dash-legend"><span class="rec">▶ REC</span><span class="on">● ONLINE</span><span class="off">○ IDLE</span></div>
+        <div id="dash-rows"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="recorder">Recorder</button>
+        <button class="tab" data-tab="saved">Saved Models</button>
+        <button class="tab" data-tab="output">Output / Upload</button>
+        <button class="tab" data-tab="log">Activity Log</button>
+        <button class="tab" data-tab="settings">⚙ Settings</button>
+      </nav>
+
+      <section class="panel active" data-panel="recorder">
+        <div class="toolbar">
+          <span class="sel" id="rec-note">engine live · full toolbar arrives in Phase 3</span>
+          <div class="spacer"></div>
+          <button class="btn go" id="btn-monitor">▶ Start Monitor</button>
+        </div>
+        <div class="grid-wrap">
+          <div class="grid">
+            <div class="gr gr-head">
+              <span></span><span>Model</span><span>Rank</span><span>Status</span>
+              <span>Current file</span><span style="text-align:right">Size</span>
+              <span style="text-align:center">Auto</span><span style="text-align:center">Saved</span>
+            </div>
+            <div id="rows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="saved">
+        <div class="empty-state">
+          <h2>Saved Models</h2>
+          <p><b id="saved-count">0</b> model(s) loaded and persisted — the engine already
+             knows them. The watchlist table, scanner controls, and import/export
+             land here in <b>Phase 4</b>. Until then, use the classic app for
+             saved-list management.</p>
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="output">
+        <div class="empty-state">
+          <h2>Output / Upload</h2>
+          <p>The Telegram pipeline UI (stages, wizard, credentials, live log)
+             arrives in <b>Phase 5</b>. The pipeline itself keeps running in the
+             classic app; stage flags set via the bot API are persisted.</p>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="log">
+        <div class="toolbar">
+          <span class="sel">Activity Log</span>
+          <div class="spacer"></div>
+          <button class="btn" id="btn-clearlog">Clear</button>
+        </div>
+        <div class="grid-wrap">
+          <div class="logpane" id="logpane"></div>
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="settings">
+        <div class="empty-state">
+          <h2>⚙ Settings</h2>
+          <p>Your saved settings are loaded and active (output folder, quality caps,
+             intervals, toggles all drive the engine right now). The editing UI +
+             System Check arrive in <b>Phase 5</b> — change settings in the classic
+             app meanwhile.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal" hidden>
+  <div class="modal">
+    <h3 id="modal-title"></h3>
+    <p id="modal-text"></p>
+    <div class="modal-btns">
+      <button class="btn" id="modal-cancel">Cancel</button>
+      <button class="btn-primary danger" id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
