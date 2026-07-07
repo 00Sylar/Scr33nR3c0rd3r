@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scr33nX — redesign mockup (static, fake data)</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ══ base ══════════════════════════════════════════════════════════ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg-0);
+    color: var(--text-1);
+    font: var(--fs-2)/1.45 var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    user-select: none;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: var(--r-full); border: 2px solid var(--bg-0); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  input, select {
+    font: inherit; color: var(--text-1);
+    background: var(--bg-0); border: 1px solid var(--line);
+    border-radius: var(--r-sm); padding: 7px 10px; outline: none;
+    transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+  input:focus, select:focus { border-color: var(--red-line); box-shadow: 0 0 0 3px var(--red-subtle); }
+  input::placeholder { color: var(--text-3); }
+
+  .app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; }
+
+  /* ══ header ════════════════════════════════════════════════════════ */
+  .header {
+    display: flex; align-items: center; gap: var(--sp-4);
+    padding: 0 var(--sp-4);
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand .mark {
+    font: 600 var(--fs-4)/1 var(--font-display);
+    letter-spacing: 0.4px;
+  }
+  .brand .mark em { font-style: normal; color: var(--red); }
+  .brand .ver {
+    font-size: var(--fs-0); color: var(--text-3);
+    border: 1px solid var(--line); border-radius: var(--r-full);
+    padding: 1px 8px;
+  }
+  .update-pill {
+    font-size: var(--fs-0); color: var(--warn);
+    background: rgba(255, 178, 36, 0.08);
+    border: 1px solid rgba(255, 178, 36, 0.25);
+    border-radius: var(--r-full); padding: 3px 10px;
+    transition: background var(--t-fast) var(--ease);
+  }
+  .update-pill:hover { background: rgba(255, 178, 36, 0.16); }
+  .header .spacer { flex: 1; }
+  .meter {
+    font-family: var(--font-mono); font-size: var(--fs-0);
+    color: var(--text-2); display: flex; align-items: center; gap: 6px;
+  }
+  .meter b { color: var(--text-1); font-weight: 500; }
+  .status-pill {
+    display: flex; align-items: center; gap: 7px;
+    font-size: var(--fs-0); letter-spacing: 0.8px; color: var(--text-2);
+    border: 1px solid var(--line); border-radius: var(--r-full);
+    padding: 4px 12px; background: var(--bg-2);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
+  .btn-terminate {
+    display: flex; align-items: center; gap: 7px;
+    font-size: var(--fs-1); font-weight: 600; color: #fff;
+    background: var(--red); border-radius: var(--r-sm);
+    padding: 7px 14px; box-shadow: var(--shadow-sm);
+    transition: background var(--t-fast) var(--ease), box-shadow var(--t-med) var(--ease);
+  }
+  .btn-terminate:hover { background: var(--red-bright); box-shadow: var(--shadow-sm), var(--glow-red); }
+
+  /* ══ layout ════════════════════════════════════════════════════════ */
+  .body { display: grid; grid-template-columns: 232px 1fr; min-height: 0; }
+
+  /* ── sidebar ── */
+  .sidebar {
+    background: var(--bg-1); border-right: 1px solid var(--line);
+    padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4);
+    overflow-y: auto;
+  }
+  .card {
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: var(--r-md); padding: var(--sp-4);
+    box-shadow: var(--shadow-sm);
+  }
+  .card h3 {
+    font-size: var(--fs-0); font-weight: 600; letter-spacing: 1.2px;
+    color: var(--text-3); text-transform: uppercase; margin-bottom: var(--sp-3);
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--sp-3); }
+  .field label { font-size: var(--fs-0); color: var(--text-2); }
+  .field input, .field select { width: 100%; }
+  .btn-primary {
+    width: 100%; padding: 8px 0; border-radius: var(--r-sm);
+    background: var(--red); color: #fff; font-weight: 600; font-size: var(--fs-1);
+    box-shadow: var(--shadow-sm);
+    transition: background var(--t-fast) var(--ease), box-shadow var(--t-med) var(--ease), transform var(--t-fast) var(--ease);
+  }
+  .btn-primary:hover { background: var(--red-bright); box-shadow: var(--shadow-sm), var(--glow-red); }
+  .btn-primary:active { transform: translateY(1px); }
+
+  .live-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--sp-3); }
+  .live-head .n {
+    display: flex; align-items: center; gap: 8px;
+    font: 600 var(--fs-3)/1 var(--font-mono); color: var(--red);
+  }
+  .live-head .n .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .live-head small { color: var(--text-3); font-size: var(--fs-0); }
+  /* dashboard card: soft red glow from the top edge for depth */
+  .card.dash {
+    background: radial-gradient(130% 90% at 50% -25%, rgba(229, 72, 77, 0.12), transparent 62%), var(--bg-2);
+    border-color: rgba(229, 72, 77, 0.18);
+  }
+  .dash-legend { display: flex; gap: 12px; font-size: 10px; letter-spacing: 0.6px;
+                 margin-bottom: var(--sp-2); }
+  .dash-legend .rec { color: var(--red-bright); }
+  .dash-legend .on  { color: var(--ok); }
+  .dash-legend .off { color: var(--text-3); }
+  .dash-row { display: grid; grid-template-columns: 1fr 30px 30px 36px; align-items: center;
+              font-family: var(--font-mono); font-size: var(--fs-1); padding: 3px 0; }
+  .dash-row .chip { justify-self: start; font-size: 10px; letter-spacing: 1px; color: var(--text-2);
+                    border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px;
+                    background: var(--bg-1); box-shadow: var(--shadow-sm); }
+  .dash-row .c { text-align: right; }
+  .dash-row .c.rec { color: var(--red-bright); }
+  .dash-row .c.on  { color: var(--ok); }
+  .dash-row .c.off { color: var(--text-3); }
+  .bar { height: 4px; border-radius: var(--r-full); background: var(--bg-0); overflow: hidden;
+         display: flex; margin: 3px 0 9px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5); }
+  .bar i { display: block; }
+  .bar i.rec { background: linear-gradient(90deg, var(--red), var(--red-bright)); box-shadow: 0 0 6px var(--red); }
+  .bar i.on  { background: var(--ok); }
+  .dash-row.all { border-top: 1px solid var(--line); margin-top: var(--sp-1); padding-top: var(--sp-2); }
+  .dash-row.all .chip { color: var(--text-1); border-color: var(--line-strong); }
+
+  /* ── main ── */
+  .main { display: grid; grid-template-rows: auto 1fr; min-height: 0; min-width: 0; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 2px; padding: var(--sp-3) var(--sp-4) 0; border-bottom: 1px solid var(--line); }
+  .tab {
+    position: relative; padding: 9px 16px 11px;
+    font-size: var(--fs-2); color: var(--text-2);
+    border-radius: var(--r-sm) var(--r-sm) 0 0;
+    transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+  }
+  .tab:hover { color: var(--text-1); background: var(--bg-hover); }
+  .tab.active { color: var(--text-1); }
+  .tab::after {
+    content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
+    background: var(--red); border-radius: var(--r-full);
+    transform: scaleX(0); transition: transform var(--t-med) var(--ease);
+  }
+  .tab.active::after { transform: scaleX(1); }
+
+  /* toolbar */
+  .toolbar {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .toolbar .sel { font-size: var(--fs-0); color: var(--text-3); min-width: 68px; }
+  .btn {
+    display: flex; align-items: center; gap: 6px;
+    font-size: var(--fs-1); color: var(--text-2);
+    border: 1px solid var(--line); border-radius: var(--r-sm);
+    padding: 6px 12px; background: var(--bg-2);
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+                background var(--t-fast) var(--ease), box-shadow var(--t-med) var(--ease);
+  }
+  .btn:hover { color: var(--text-1); border-color: var(--line-strong); background: var(--bg-3); box-shadow: var(--shadow-sm); }
+  .btn.rec { color: var(--red-bright); border-color: var(--red-line); }
+  .btn.rec:hover { background: var(--red-subtle); box-shadow: var(--shadow-sm), var(--glow-red); }
+  .btn.danger:hover { color: var(--red-bright); border-color: var(--red-line); background: var(--red-subtle); }
+  .btn.go { color: var(--go-bright); border-color: rgba(47, 158, 99, 0.35); }
+  .btn.go:hover { background: var(--go-subtle); }
+  .vsep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--sp-1); }
+  .toolbar .spacer { flex: 1; }
+  .search { position: relative; }
+  .search input { width: 170px; padding-left: 30px; background: var(--bg-2); }
+  .search::before {
+    content: "⌕"; position: absolute; left: 10px; top: 50%; translate: 0 -52%;
+    color: var(--text-3); font-size: 15px; pointer-events: none;
+  }
+
+  /* ── tab panels ── */
+  .panel { display: none; min-height: 0; }
+  .panel.active { display: grid; grid-template-rows: auto 1fr; animation: fadein var(--t-slow) var(--ease); }
+  .panel.scroll.active { display: block; overflow-y: auto; padding: var(--sp-4); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(5px); } }
+
+  .count-pill { font-size: var(--fs-0); color: var(--text-2); border: 1px solid var(--line);
+                border-radius: var(--r-full); padding: 2px 10px; }
+  .pipe-top { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+  .panel-title { font: 600 var(--fs-3) var(--font-display); color: var(--text-1); }
+
+  .gr-s { grid-template-columns: 40px minmax(160px, 1.4fr) 118px 130px minmax(220px, 2fr) 92px; }
+
+  .stages { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4);
+            color: var(--text-3); font-size: var(--fs-1); }
+  label.check { display: flex; align-items: center; gap: 8px; color: var(--text-2); cursor: pointer;
+                transition: color var(--t-fast) var(--ease); }
+  label.check:hover { color: var(--text-1); }
+
+  .form-2col { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--sp-4); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: var(--sp-4); }
+
+  .toggle-row { display: flex; align-items: center; gap: 10px; padding: 6px 0;
+                font-size: var(--fs-1); color: var(--text-2); cursor: pointer;
+                transition: color var(--t-fast) var(--ease); }
+  .toggle-row:hover { color: var(--text-1); }
+
+  .sys-row { display: flex; align-items: center; gap: 10px; padding: 5px 0;
+             font-size: var(--fs-1); color: var(--text-2); }
+  .sys-row .mark-ok { color: var(--go-bright); }
+  .sys-row .mark-bad { color: var(--red-bright); }
+  .sys-row .path { color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-0);
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .btn.mini { padding: 2px 10px; font-size: var(--fs-0); }
+
+  .logpane { font-family: var(--font-mono); font-size: var(--fs-0); line-height: 1.9;
+             color: var(--text-2); background: var(--bg-0); border: 1px solid var(--line);
+             border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); overflow-y: auto; }
+  .logpane .t { color: var(--text-3); }
+  .logpane .rec { color: var(--red-bright); }
+  .logpane .ok { color: var(--go-bright); }
+  .logpane .warn { color: var(--warn); }
+
+  /* ── table ── */
+  .grid-wrap { overflow-y: auto; min-height: 0; padding: 0 var(--sp-4) var(--sp-4); }
+  .grid {
+    background: var(--bg-1); border: 1px solid var(--line);
+    border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-md);
+  }
+  .gr {
+    display: grid;
+    grid-template-columns: 40px minmax(160px, 1.4fr) 118px 130px minmax(220px, 2fr) 92px 64px 64px;
+    align-items: center; column-gap: var(--sp-2);
+    padding: 0 var(--sp-3);
+  }
+  .gr-head {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+    height: 36px;
+    font-size: var(--fs-0); letter-spacing: 1px; color: var(--text-3); text-transform: uppercase;
+  }
+  .gr-head span { cursor: pointer; transition: color var(--t-fast) var(--ease); }
+  .gr-head span:hover { color: var(--text-1); }
+  .gr-head .sorted { color: var(--red-bright); }
+  .g-site {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px 6px;
+    font-size: var(--fs-0); font-weight: 600; letter-spacing: 1.6px; color: var(--red);
+  }
+  .g-site::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .g-site .tog {
+    width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 4px;
+    color: var(--text-2); display: grid; place-items: center; font-size: 12px; line-height: 1;
+    background: var(--bg-2); cursor: pointer;
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  }
+  .g-site .tog::after { content: "−"; }
+  .g-site.closed .tog::after { content: "+"; }
+  .g-site .tog:hover { color: var(--red-bright); border-color: var(--red-line); }
+  .g-site small { color: var(--text-3); font-weight: 400; letter-spacing: 0; }
+  .site-rows.collapsed { display: none; }
+  .site-rows:not(.collapsed) { animation: fadein var(--t-med) var(--ease); }
+
+  /* desktop-style drag-rectangle selection */
+  .marquee { position: fixed; z-index: 99; pointer-events: none;
+             background: var(--red-subtle); border: 1px solid var(--red-line); border-radius: 3px; }
+
+  /* ── context menu ── */
+  .ctx {
+    position: fixed; z-index: 100; min-width: 250px;
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+    padding: 6px; animation: fadein var(--t-fast) var(--ease);
+  }
+  .ctx .mi {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; border-radius: var(--r-sm);
+    font-size: var(--fs-1); color: var(--text-2); cursor: pointer;
+    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .ctx .mi:hover { background: var(--bg-hover); color: var(--text-1); }
+  .ctx .mi.danger:hover { background: var(--red-subtle); color: var(--red-bright); }
+  .ctx .mi .sub { margin-left: auto; color: var(--text-3); }
+  .ctx hr { border: none; border-top: 1px solid var(--line); margin: 6px 4px; }
+  .row {
+    height: 40px; font-size: var(--fs-1); color: var(--text-2);
+    border-radius: var(--r-sm);
+    transition: background var(--t-fast) var(--ease);
+    cursor: default;
+  }
+  .row:hover { background: var(--bg-hover); }
+  .row.selected { background: var(--red-subtle); box-shadow: inset 2px 0 0 var(--red); }
+  .row .name { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.recording .name { color: var(--red-bright); font-weight: 600; }
+
+  .cb {
+    width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 4px;
+    display: grid; place-items: center; color: transparent; font-size: 11px;
+    transition: all var(--t-fast) var(--ease); cursor: pointer;
+  }
+  .cb::after { content: "✓"; }
+  .cb:hover { border-color: var(--text-2); }
+  .cb.on { background: var(--red); border-color: var(--red); color: #fff; }
+
+  .stars { display: flex; gap: 1px; font-size: 13px; color: var(--text-3); cursor: pointer; }
+  .stars b { font-weight: 400; color: var(--gold); }
+  .stars span:hover { color: var(--gold); text-shadow: 0 0 6px rgba(217, 184, 120, 0.5); }
+
+  .st { display: flex; align-items: center; gap: 8px; font-size: var(--fs-0); letter-spacing: 0.6px; }
+  .st .dot { transition: background var(--t-med) var(--ease); }
+  .st.rec       { color: var(--red-bright); } .st.rec .dot { background: var(--red); animation: pulse 1.4s var(--ease) infinite; }
+  .st.online    { color: var(--ok); }         .st.online .dot { background: var(--ok); }
+  .st.offline   { color: var(--text-3); }     .st.offline .dot { background: var(--text-3); }
+  .st.private   { color: var(--warn); }       .st.private .dot { background: var(--warn); }
+  .st.checking  { color: var(--info); }       .st.checking .dot { background: var(--info); animation: pulse 1.4s var(--ease) infinite; }
+  @keyframes pulse { 50% { opacity: 0.35; box-shadow: 0 0 0 4px var(--red-subtle); } }
+
+  .file { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-3);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.recording .file { color: var(--text-2); }
+  .size { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-2); text-align: right; }
+
+  .switch {
+    width: 30px; height: 17px; border-radius: var(--r-full);
+    background: var(--bg-3); border: 1px solid var(--line-strong);
+    position: relative; cursor: pointer; transition: background var(--t-med) var(--ease);
+    justify-self: center;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
+    border-radius: 50%; background: var(--text-2); transition: all var(--t-med) var(--ease);
+  }
+  .switch.on { background: var(--red); border-color: var(--red); }
+  .switch.on::after { left: 15px; background: #fff; }
+
+  .saved-check { justify-self: center; color: var(--go-bright); font-size: 13px; }
+  .saved-check.no { color: var(--text-3); opacity: 0.35; }
+
+  /* mockup banner */
+  .mock-note {
+    position: fixed; bottom: 14px; right: 16px; z-index: 9;
+    font-size: var(--fs-0); color: var(--text-3);
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: var(--r-full); padding: 5px 14px; box-shadow: var(--shadow-md);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div class="brand">
+      <span class="mark">Scr33n<em>X</em></span>
+      <span class="ver">v2.0</span>
+    </div>
+    <button class="update-pill">● Update available (v2.1)</button>
+    <div class="spacer"></div>
+    <div class="meter">↓ <b>23.4</b> Mbps</div>
+    <div class="meter">↑ <b>0.0</b> Mbps</div>
+    <div class="status-pill"><span class="dot" style="background:var(--go-bright)"></span>RECORDER ACTIVE</div>
+    <button class="btn-terminate">⛔ Terminate</button>
+  </header>
+
+  <div class="body">
+
+    <aside class="sidebar">
+      <div class="card">
+        <h3>Add Model</h3>
+        <div class="field"><label>Username or Link</label><input placeholder="name or full URL"></div>
+        <div class="field"><label>Site</label>
+          <select><option>chaturbate</option><option>stripchat</option><option>camsoda</option><option>myfreecams</option></select>
+        </div>
+        <button class="btn-primary">＋ Add Model</button>
+      </div>
+
+      <div class="card dash">
+        <div class="live-head">
+          <span class="n"><span class="dot"></span>2 LIVE</span>
+          <small>31 models</small>
+        </div>
+        <div class="dash-legend"><span class="rec">▶ REC</span><span class="on">● ONLINE</span><span class="off">○ IDLE</span></div>
+        <div class="dash-row"><span class="chip">CB</span><span class="c rec">1</span><span class="c on">1</span><span class="c off">20</span></div>
+        <div class="bar"><i class="rec" style="width:6%"></i><i class="on" style="width:6%"></i></div>
+        <div class="dash-row"><span class="chip">SC</span><span class="c rec">1</span><span class="c on">0</span><span class="c off">11</span></div>
+        <div class="bar"><i class="rec" style="width:8%"></i></div>
+        <div class="dash-row all"><span class="chip">ALL</span><span class="c rec">2</span><span class="c on">1</span><span class="c off">31</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="recorder">Recorder</button>
+        <button class="tab" data-tab="saved">Saved Models</button>
+        <button class="tab" data-tab="output">Output / Upload</button>
+        <button class="tab" data-tab="log">Activity Log</button>
+        <button class="tab" data-tab="settings">⚙ Settings</button>
+      </nav>
+
+      <section class="panel active" data-panel="recorder">
+      <div class="toolbar">
+        <span class="sel" id="selcount">0 selected</span>
+        <button class="btn rec">▶ REC</button>
+        <button class="btn">⏹ Stop</button>
+        <button class="btn">☑ Toggle AUTO</button>
+        <span class="vsep"></span>
+        <button class="btn danger">✕ Remove</button>
+        <button class="btn danger">✕ Remove Offline</button>
+        <button class="btn">★ Add to Saved</button>
+        <span class="vsep"></span>
+        <div class="search"><input placeholder="Filter models…"></div>
+        <select><option>Status: All</option><option>Recording</option><option>Online</option><option>Offline</option></select>
+        <div class="spacer"></div>
+        <button class="btn">🧹 Clear Recorder</button>
+        <button class="btn danger">⏹ Stop All Downloads</button>
+        <button class="btn go">▶ Start Monitor</button>
+      </div>
+
+      <div class="grid-wrap">
+        <div class="grid">
+          <div class="gr gr-head">
+            <span></span><span class="sorted">Model ↑</span><span>Rank ↕</span><span>Status ↕</span>
+            <span>Current file</span><span style="text-align:right">Size ↕</span>
+            <span style="text-align:center">Auto</span><span style="text-align:center">Saved</span>
+          </div>
+          <div id="rows"></div>
+        </div>
+      </div>
+      </section>
+
+      <section class="panel" data-panel="saved">
+        <div class="toolbar">
+          <span class="sel" style="min-width:auto">Saved Models · view-only status watchlist</span>
+          <span class="count-pill">3,825 model(s)</span>
+          <span class="vsep"></span>
+          <div class="search"><input placeholder="Filter models…"></div>
+          <select><option>Status: All</option><option>Online</option><option>Offline</option></select>
+          <div class="spacer"></div>
+          <button class="btn">📤 Export</button>
+          <button class="btn">📥 Import</button>
+          <button class="btn">＋ Add Current Recorder Model</button>
+          <button class="btn go">▶ Start Scanner</button>
+        </div>
+        <div class="grid-wrap">
+          <div class="grid">
+            <div class="gr gr-s gr-head">
+              <span></span><span class="sorted">Model ↑</span><span>Rank ↕</span><span>Status ↕</span>
+              <span>Current file</span><span style="text-align:right">Size ↕</span>
+            </div>
+            <div id="savedrows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="output">
+        <div class="pipe-top">
+          <button class="btn go">▶ Start Pipeline</button>
+          <span class="st offline"><span class="dot"></span>STOPPED</span>
+          <div class="spacer"></div>
+          <button class="btn">🧙 Setup Wizard</button>
+          <button class="btn">🔑 Re-auth / Switch Account</button>
+        </div>
+        <div class="stages">
+          <span>Stages:</span>
+          <label class="check"><span class="cb on"></span>① Convert .ts → .mp4</label>
+          <label class="check"><span class="cb on"></span>② Upload .mp4 to Telegram</label>
+        </div>
+        <div class="card" style="margin-bottom: var(--sp-4)">
+          <h3>Telegram / Pipeline settings</h3>
+          <div class="form-2col">
+            <div class="field"><label>API ID</label><input value="1234567"></div>
+            <div class="field"><label>API Hash</label><input value="0123456789abcdef0123456789abcdef"></div>
+            <div class="field"><label>Chat / Group ID</label><input value="-1001234567890"></div>
+            <div class="field"><label>Topic ID (0 if none)</label><input value="1"></div>
+            <div class="field"><label>Converted .mp4 folder</label><input value="C:\Users\luiis\Downloads\VIDS\1"></div>
+            <div class="field"><label>TDLib session folder</label><input value="C:\Users\luiis\Downloads\VIDS"></div>
+          </div>
+          <button class="btn">💾 Save Pipeline Settings</button>
+        </div>
+        <div class="logpane">
+          <span class="warn">Convert:</span>  idle<br>
+          <span class="ok">Upload 1:</span> idle<br>
+          <span class="ok">Upload 2:</span> idle
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="log">
+        <div class="pipe-top">
+          <span class="panel-title">Activity Log</span>
+          <div class="spacer"></div>
+          <button class="btn">Clear</button>
+        </div>
+        <div class="logpane" style="height: calc(100vh - 210px)">
+          <span class="t">[13:55:44]</span> <span class="ok">MONITOR</span>  started — polling 31 models every 30 s<br>
+          <span class="t">[13:55:47]</span> <span class="rec">REC</span>      sensualcherry_ (CB) went live — recording started, 1080p pinned<br>
+          <span class="t">[13:58:03]</span> <span class="t">INFO</span>     relay: 64 prefetch workers active<br>
+          <span class="t">[14:10:02]</span> <span class="rec">REC</span>      veronica_isaza_ (SC) went live — native MOUFLON path, recording started<br>
+          <span class="t">[14:22:41]</span> <span class="warn">WARN</span>     sensualcherry_: 3 segments expired before download (bandwidth?)<br>
+          <span class="t">[14:23:10]</span> <span class="t">INFO</span>     sensualcherry_: split at 3070 MB → _part002.ts<br>
+          <span class="t">[14:31:07]</span> <span class="t">INFO</span>     hanna_gomeez_: status check → private show<br>
+          <span class="t">[14:40:55]</span> <span class="ok">SAVED</span>    ranks + models flushed to disk
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="settings">
+        <div class="cards">
+          <div class="card">
+            <h3>Recording</h3>
+            <div class="field"><label>Output Folder</label>
+              <div style="display:flex;gap:8px"><input value="C:\Users\luiis\Videos\StreamRecorder" style="flex:1"><button class="btn">📁</button></div>
+            </div>
+            <div class="form-2col">
+              <div class="field"><label>Max File Size (MB)</label><input value="3070"></div>
+              <div class="field"><label>Check Interval (sec)</label><input value="30"></div>
+            </div>
+            <div class="field"><label>Max Quality (all models)</label>
+              <select><option>Unlimited</option><option>1080p</option><option>720p</option><option>480p</option></select>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Behavior</h3>
+            <label class="toggle-row"><span class="switch on"></span>⤵️ Minimize to SysTray</label>
+            <label class="toggle-row"><span class="switch on"></span>🔔 Notifications</label>
+            <label class="toggle-row"><span class="switch on"></span>⚠️ Dropped-Segment Warnings</label>
+            <label class="toggle-row"><span class="switch"></span>⬇️ Auto-Downgrade Quality</label>
+            <label class="toggle-row"><span class="switch"></span>⛔ Stop All if Disk &lt; 20 GB Free</label>
+            <label class="toggle-row"><span class="switch on"></span>🎭 Stripchat Browser Fallback</label>
+            <label class="toggle-row"><span class="switch"></span>🔒 Privacy Mode</label>
+          </div>
+          <div class="card">
+            <h3>Links &amp; Preview</h3>
+            <div class="field"><label>Open links with</label>
+              <select><option>Ask each time</option><option>System default</option><option>Brave</option></select>
+            </div>
+            <div class="form-2col">
+              <div class="field"><label>Preview mode</label>
+                <select><option>External window</option><option>Embedded (in-app)</option></select>
+              </div>
+              <div class="field"><label>Preview engine</label>
+                <select><option>Auto</option><option>mpv</option><option>VLC</option></select>
+              </div>
+            </div>
+            <div class="field"><label>Player path (optional)</label><input placeholder="mpv.exe / vlc.exe"></div>
+            <button class="btn-primary" style="margin-top:4px">💾 Save Settings</button>
+          </div>
+          <div class="card">
+            <h3>🔍 System Check</h3>
+            <div class="sys-row"><span class="mark-ok">✓</span>ffmpeg<span class="path">C:\Users\luiis\AppData\Local\Microsoft\WinGet\...\ffmpeg.exe</span></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>ffplay<span class="path">bundled with ffmpeg</span></div>
+            <div class="sys-row"><span class="mark-bad">✗</span>mpv<span class="path">not found</span><button class="btn mini">Add to PATH</button></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>VLC<span class="path">C:\Program Files\VideoLAN\VLC</span></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>python-vlc<span class="path">3.0.20</span></div>
+            <div class="sys-row"><span class="mark-bad">✗</span>python-mpv<span class="path">optional</span><button class="btn mini">Install</button></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>tdjson<span class="path">1.8.56</span></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>Playwright Chromium<span class="path">v1.50</span></div>
+            <button class="btn" style="margin-top:10px">🔍 Re-check</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div class="mock-note">static design mockup · fake data · nothing is wired</div>
+
+<script>
+/* Fake data — enough variety to show every visual state. */
+const DATA = [
+  ["STRIPCHAT", [
+    ["veronica_isaza_", 5, "rec",      "veronica_isaza__ST_20260706_141002.ts", "1.24 GB", true,  true],
+    ["arieliciousxxx",  4, "online",   "", "", true,  true],
+    ["assh_lee_",       4, "offline",  "", "", false, true],
+    ["annieblluee",     4, "private",  "", "", true,  true],
+    ["stefany_gonzales_",4,"offline",  "", "", false, true],
+    ["julia_roberths",  4, "offline",  "", "", false, true],
+    ["hanna_gomeez_",   5, "checking", "", "", true,  true],
+    ["hailey_hadid",    4, "offline",  "", "", false, true],
+    ["danna_peters",    4, "offline",  "", "", false, false],
+  ]],
+  ["CHATURBATE", [
+    ["sensualcherry_",  5, "rec",      "sensualcherry__CB_20260706_135544_part002.ts", "2.87 GB", true, true],
+    ["naomisainz",      5, "offline",  "", "", false, true],
+    ["missbunnygirl",   5, "offline",  "", "", false, true],
+    ["miablueye",       4, "offline",  "", "", false, true],
+    ["brazilians_doitbetter", 4, "offline", "", "", false, true],
+    ["lil_eva",         4, "offline",  "", "", false, false],
+    ["shiny_lily",      4, "offline",  "", "", false, true],
+    ["cyanide_candys",  3, "offline",  "", "", false, true],
+    ["hayleex",         5, "offline",  "", "", false, true],
+  ]],
+];
+const ST = { rec: "RECORDING", online: "ONLINE", offline: "OFFLINE", private: "PRIVATE", checking: "CHECKING" };
+
+function siteHeader(site, count) {
+  return `<div class="g-site"><button class="tog"></button>${site}<small>${count} models</small></div>`;
+}
+const rows = document.getElementById("rows");
+for (const [site, models] of DATA) {
+  const body = models.map(([name, rank, st, file, size, auto, saved]) => `
+      <div class="row gr ${st === "rec" ? "recording" : ""}">
+        <span class="cb"></span>
+        <span class="name">${name}</span>
+        <span class="stars"><b>${"★".repeat(rank)}</b>${"☆".repeat(5 - rank)}</span>
+        <span class="st ${st}"><span class="dot"></span>${ST[st]}</span>
+        <span class="file">${file || "—"}</span>
+        <span class="size">${size || "—"}</span>
+        <span class="switch ${auto ? "on" : ""}"></span>
+        <span class="saved-check ${saved ? "" : "no"}">${saved ? "✓" : "—"}</span>
+      </div>`).join("");
+  rows.insertAdjacentHTML("beforeend", siteHeader(site, models.length) + `<div class="site-rows">${body}</div>`);
+}
+
+/* Saved Models fake data (view-only watchlist — no AUTO/SAVED columns). */
+const SAVED = [
+  ["kalisa_pearl", 5, "offline"], ["miya_shake", 0, "offline"], ["nuryforerogh", 3, "offline"],
+  ["_healing_hottie_", 5, "online"], ["toomuch_wet_", 4, "offline"], ["yumeko_midari", 4, "offline"],
+  ["bianca_lawwson_", 0, "offline"], ["ellinrose_", 0, "offline"], ["effsweet", 0, "offline"],
+  ["ohanna_", 1, "offline"], ["emilyfinne", 0, "online"], ["emyii", 0, "offline"],
+  ["ayla_mark", 0, "offline"], ["baby_sammyy", 5, "offline"], ["hade_rosse", 0, "offline"],
+  ["lilithhfosterr", 3, "offline"], ["cameron69_", 0, "offline"], ["ss_samantha", 4, "offline"],
+  ["karlenegries", 2, "offline"], ["veronicamartin_", 5, "offline"], ["nina_ponse", 4, "offline"],
+  ["_tammarra_", 0, "offline"], ["kristina_ferreira", 5, "offline"], ["ellediane", 5, "offline"],
+];
+const srows = document.getElementById("savedrows");
+const savedBody = SAVED.map(([name, rank, st]) => `
+    <div class="row gr gr-s">
+      <span class="cb"></span>
+      <span class="name">${name}</span>
+      <span class="stars"><b>${"★".repeat(rank)}</b>${"☆".repeat(5 - rank)}</span>
+      <span class="st ${st}"><span class="dot"></span>${ST[st]}</span>
+      <span class="file">—</span>
+      <span class="size">—</span>
+    </div>`).join("");
+srows.insertAdjacentHTML("beforeend", siteHeader("CHATURBATE", SAVED.length) + `<div class="site-rows">${savedBody}</div>`);
+
+/* Just enough interactivity to feel it: checkboxes, switches, row select, tab panels. */
+const sel = document.getElementById("selcount");
+function refreshSel() {
+  const n = document.querySelectorAll("#rows .cb.on").length;
+  sel.textContent = n ? `✓ ${n} checked` : "0 selected";
+}
+let suppressClick = false;   /* set after a marquee drag so the mouseup doesn't also toggle a row */
+document.addEventListener("click", (e) => {
+  if (suppressClick) { suppressClick = false; return; }
+  const tog = e.target.closest(".g-site .tog");
+  if (tog) {
+    const head = tog.closest(".g-site");
+    head.classList.toggle("closed");
+    head.nextElementSibling.classList.toggle("collapsed", head.classList.contains("closed"));
+    return;
+  }
+  const lbl = e.target.closest("label.check, label.toggle-row");
+  if (lbl && !e.target.closest(".cb, .switch")) {
+    lbl.querySelector(".cb, .switch")?.classList.toggle("on");
+    return;
+  }
+  const cb = e.target.closest(".cb");
+  if (cb) {
+    cb.classList.toggle("on");
+    const row = cb.closest(".row");
+    if (row) { row.classList.toggle("selected", cb.classList.contains("on")); refreshSel(); }
+    return;
+  }
+  const sw = e.target.closest(".switch");
+  if (sw) { sw.classList.toggle("on"); return; }
+  const row = e.target.closest(".row");
+  if (row) { row.classList.toggle("selected"); }
+});
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelector(".tab.active").classList.remove("active");
+  t.classList.add("active");
+  document.querySelector(".panel.active").classList.remove("active");
+  document.querySelector(`.panel[data-panel="${t.dataset.tab}"]`).classList.add("active");
+}));
+
+/* Desktop-style marquee selection: press and drag on the table to draw a
+   rectangle; every row it touches becomes selected. */
+let mq = null, mqStart = null;
+document.addEventListener("mousedown", (e) => {
+  const wrap = e.target.closest(".grid-wrap");
+  if (!wrap || e.button !== 0) return;
+  if (e.target.closest(".cb, .switch, .stars, .tog, button, input, select")) return;
+  mqStart = { x: e.clientX, y: e.clientY, wrap };
+});
+document.addEventListener("mousemove", (e) => {
+  if (!mqStart) return;
+  if (!mq) {
+    if (Math.abs(e.clientX - mqStart.x) < 5 && Math.abs(e.clientY - mqStart.y) < 5) return;
+    mq = document.createElement("div");
+    mq.className = "marquee";
+    document.body.appendChild(mq);
+  }
+  const x1 = Math.min(mqStart.x, e.clientX), y1 = Math.min(mqStart.y, e.clientY);
+  const x2 = Math.max(mqStart.x, e.clientX), y2 = Math.max(mqStart.y, e.clientY);
+  Object.assign(mq.style, { left: x1 + "px", top: y1 + "px", width: (x2 - x1) + "px", height: (y2 - y1) + "px" });
+  let n = 0;
+  mqStart.wrap.querySelectorAll(".row").forEach(r => {
+    const b = r.getBoundingClientRect();
+    const hit = !(b.right < x1 || b.left > x2 || b.bottom < y1 || b.top > y2);
+    r.classList.toggle("selected", hit);
+    if (hit) n++;
+  });
+  if (mqStart.wrap.closest('[data-panel="recorder"]')) {
+    sel.textContent = n ? `${n} selected` : "0 selected";
+  }
+  e.preventDefault();
+});
+document.addEventListener("mouseup", () => {
+  if (mq) { mq.remove(); suppressClick = true; }
+  mq = null; mqStart = null;
+});
+
+/* Right-click menu (mock: shows the real item set + design; items don't act yet). */
+let ctx = null;
+function closeCtx() { if (ctx) { ctx.remove(); ctx = null; } }
+document.addEventListener("contextmenu", (e) => {
+  const row = e.target.closest(".row");
+  if (!row) return;                              /* elsewhere: browser default */
+  e.preventDefault();
+  closeCtx();
+  const name = row.querySelector(".name").textContent;
+  const saved = !!row.closest('[data-panel="saved"]');
+  const items = saved ? [
+    [`＋  Add to Recorder  ${name}`],
+    ["▶  Preview"],
+    ["hr"],
+    ["🔗  Copy Model URL"],
+    ["🌐  Open in Browser"],
+    ["🌐  Open in Browser (choose…)"],
+    ["⭐  Set Rank", "▸"],
+    ["hr"],
+    ["✕  Remove from Saved Models", "", "danger"],
+  ] : [
+    [`▶  Start Recording  ${name}`],
+    ["⏹  Stop Recording"],
+    ["☑  Auto-Record"],
+    ["🎞  Max Quality  (Global)", "▸"],
+    ["hr"],
+    ["⭐  Add to Saved Models"],
+    ["▶  Preview"],
+    ["⭐  Set Rank", "▸"],
+    ["hr"],
+    ["🔗  Copy Model URL"],
+    ["🌐  Open in Browser"],
+    ["🌐  Open in Browser (choose…)"],
+    ["📁  Open Output Folder"],
+    ["hr"],
+    ["✕  Remove Model", "", "danger"],
+  ];
+  ctx = document.createElement("div");
+  ctx.className = "ctx";
+  ctx.innerHTML = items.map(([label, sub, cls]) =>
+    label === "hr" ? "<hr>" :
+    `<div class="mi ${cls || ""}">${label}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`
+  ).join("");
+  ctx.addEventListener("click", closeCtx);
+  document.body.appendChild(ctx);
+  const x = Math.min(e.clientX, innerWidth - ctx.offsetWidth - 8);
+  const y = Math.min(e.clientY, innerHeight - ctx.offsetHeight - 8);
+  Object.assign(ctx.style, { left: x + "px", top: y + "px" });
+});
+document.addEventListener("mousedown", (e) => { if (ctx && !e.target.closest(".ctx")) closeCtx(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCtx(); });
+window.addEventListener("blur", closeCtx);
+</script>
+</body>
+</html>

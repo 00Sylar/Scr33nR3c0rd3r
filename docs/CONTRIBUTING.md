@@ -20,12 +20,30 @@ reflected in the relevant docs and in the changelog, as part of the same commit
 
 ---
 
+## Two interfaces, one engine
+
+Since V2.0, Scr33nX has two UIs sharing the same recording engine, settings,
+and config files:
+
+- **Default** — `src/app_web.py` (pywebview shell + js_api bridge) and
+  `src/webui/` (HTML/CSS/JS). Launched by `Scr33nX.bat` / `Scr33nX-WebUI.bat`.
+- **Classic** — `src/app.py` (Tk). Launched by `Scr33nX-Classic.bat` /
+  `Scr33nX.bat --classic`.
+
+The local-API handler (`_ApiHandler` in `src/app.py`) is **shared** — both
+UIs import it, so an API change only needs to be made once. Engine files
+(`recorder.py`, `cb_relay.py`, resolvers, `pipeline_worker.py`, `settings.py`,
+`notifier.py`, `tray_win.py`) are shared too. **A UI-only feature (new
+button, menu item, tab) is expected to land in the default UI** — the
+classic UI now only needs engine-level and shared-API fixes, not new UI
+surface, unless you're told otherwise.
+
 ## Documentation map — "if you change X, update Y"
 
 | If you change… | Update… |
 |---|---|
-| A **local-API endpoint** (`src/app.py` `_ApiHandler`) | `../README.md` → *Local Control API* table · `OPENCLAW-HOWTO.md` (if the bot should use it: §2 command map, §3 script table, and add the `src/scr33nx_ctl.py` command) · `CHANGELOG.md` |
-| A **UI feature / tab / right-click action** | `../README.md` → *Features* and/or *Usage* · `CHANGELOG.md` |
+| A **local-API endpoint** (`src/app.py` `_ApiHandler` — shared by both UIs) | `../README.md` → *Local Control API* table · `OPENCLAW-HOWTO.md` (if the bot should use it: §2 command map, §3 script table, and add the `src/scr33nx_ctl.py` command) · `CHANGELOG.md` |
+| A **UI feature / tab / right-click action** (default UI: `src/app_web.py` + `src/webui/`; classic: `src/app.py`) | `../README.md` → *Features* and/or *Usage* · `CHANGELOG.md` |
 | A **Settings option** (checkbox/field) | `../README.md` → *Settings (left panel)* table · `CHANGELOG.md` |
 | The **browser extension** (popup/behavior) | `../README.md` → *Features* / extension-install section · `CHANGELOG.md` |
 | **Recording internals** (relay, resolvers, ffmpeg, exit codes) | `RecordingLogics.md` · `CHANGELOG.md` |
@@ -75,8 +93,10 @@ When a batch of `[Unreleased]` work is ready to be a version:
    (Equivalent CLI: `gh release create v1.4 --notes-from-tag`.)
 
 Versioning follows the existing cadence: bump the **minor** (`V1.3 → V1.4`) for a
-feature batch, the **patch** (`V1.3 → V1.3.1`) for a fix-only release. Never move
-or delete a tag that's already pushed — cut a new one instead.
+feature batch, the **patch** (`V1.3 → V1.3.1`) for a fix-only release, and the
+**major** (`V1.6 → V2.0`, as with the web-UI redesign) for a structural
+overhaul — a new interface, a breaking config/API change, or similar. Never
+move or delete a tag that's already pushed — cut a new one instead.
 
 ---
 

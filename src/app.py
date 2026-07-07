@@ -5,7 +5,7 @@ app.py — Scr33nX — GUI
 # Single source of truth for the running version. Shown in the header and
 # compared against the latest GitHub release by the update checker.
 # When cutting a release (see CONTRIBUTING.md), bump this to match the new tag.
-APP_VERSION = "1.6"
+APP_VERSION = "2.0"
 GITHUB_REPO = "00Sylar/Scr33nX"   # owner/repo, used for the update check
 
 import os
@@ -3030,7 +3030,9 @@ class StreamRecorderApp(tk.Tk):
             widget.see("end")
         widget.configure(state="disabled")
 
-    def _cb_notif(self, title: str, body: str):
+    def _cb_notif(self, title: str, body: str, key: str = None):
+        # key (model identity) is used by the web UI's VIP filter; the classic
+        # app just honors the master toggle.
         if self.settings.notifications_enabled and self._v_notif.get():
             send_notification(title, body)
 

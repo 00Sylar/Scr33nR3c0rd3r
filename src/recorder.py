@@ -576,7 +576,9 @@ class StreamRecorder:
         self.browser: str = "brave"
 
         self.on_status_change: Optional[Callable[[str, ModelStatus, str], None]] = None
-        self.on_notification:  Optional[Callable[[str, str], None]] = None
+        # (title, body, model_key=None). model_key is "site:name" for per-model
+        # events (started/stopped/dropped/downgraded) so the UI can VIP-filter.
+        self.on_notification:  Optional[Callable[..., None]] = None
         self.on_log:           Optional[Callable[[str], None]] = None
 
         # Relay reports segments that expired before they could be downloaded
@@ -630,10 +632,29 @@ class StreamRecorder:
         if now - self._gap_warn_ts.get(label, 0.0) < 60:
             return  # at most one toast per stream per minute
         self._gap_warn_ts[label] = now
-        self.on_notification(
-            "Dropped segments",
-            f"{label}: ~{seconds:.0f}s of video lost — your internet "
-            f"bandwidth can't keep up with all active recordings.")
+        # Defer the toast: when a model simply goes OFFLINE, the last live-edge
+        # segments expire unfetched and look exactly like bandwidth loss. Wait a
+        # few seconds and only notify if the model is STILL recording — that
+        # rules out the "stream just ended" false positive. (The gap is always
+        # logged above regardless.)
+        try:
+            site, name = label.split(":", 1)
+            pretty = f"{name} ({site})"
+        except ValueError:
+            pretty = label
+
+        def _deferred(lbl=label, secs=seconds, pretty=pretty):
+            time.sleep(5)
+            cfg = self.models.get(lbl)
+            if not cfg or not cfg.session:
+                return  # stream ended in the meantime → it was just going offline
+            if self.on_notification:
+                self.on_notification(
+                    "Dropped segments",
+                    f"{pretty}: ~{secs:.0f}s of video lost — your internet "
+                    f"bandwidth can't keep up with all active recordings.", lbl)
+        threading.Thread(target=_deferred, daemon=True,
+                         name=f"gap-notify-{label}").start()
 
     def _on_relay_advert(self, label: str):
         """Relay callback (server thread): a Stripchat playlist that was live
@@ -716,7 +737,7 @@ class StreamRecorder:
         if self.on_notification:
             self.on_notification(
                 "Quality downgraded",
-                f"{label} kept losing segments — restarting at {nxt}p.")
+                f"{label} kept losing segments — restarting at {nxt}p.", label)
         graceful_stop(cfg.session.process, timeout=5)
         # _handle_ffmpeg_exit auto-restarts; the relay then asks
         # effective_quality() again and picks the lower variant.
@@ -1297,7 +1318,8 @@ class StreamRecorder:
             self._log(f"Recording {cfg.site}/{cfg.name} → {output_path}")
             if self.on_notification:
                 self.on_notification("Recording Started",
-                                     f"{cfg.name} ({cfg.site}) is now recording.")
+                                     f"{cfg.name} ({cfg.site}) is now recording.",
+                                     f"{cfg.site}:{cfg.name}")
         except Exception as e:
             self._set_status(cfg, ModelStatus.ERROR, str(e))
             self._log(f"Recording failed for {cfg.name}: {e}")
@@ -1466,7 +1488,8 @@ class StreamRecorder:
             self._set_status(cfg, ModelStatus.OFFLINE, "")
             if self.on_notification:
                 self.on_notification("Recording Stopped",
-                                     f"{cfg.name} ({cfg.site}) went offline.")
+                                     f"{cfg.name} ({cfg.site}) went offline.",
+                                     f"{cfg.site}:{cfg.name}")
             return
 
         # Stripchat: rc 4 = idle (no segments), rc 5 = ticket/private/group show
@@ -1534,7 +1557,8 @@ class StreamRecorder:
         self._set_status(cfg, ModelStatus.OFFLINE, "")
         if self.on_notification:
             self.on_notification("Recording Stopped",
-                                 f"{cfg.name} ({cfg.site}) stream ended.")
+                                 f"{cfg.name} ({cfg.site}) stream ended.",
+                                 f"{cfg.site}:{cfg.name}")
 
     def _kill_session(self, session: RecordingSession):
         session.stopped = True

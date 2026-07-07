@@ -19,8 +19,8 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 - ✅ Stripchat records browserless (native MOUFLON path) when possible, with automatic Playwright/Chromium fallback
 
 ### Monitoring & UI
-- ✅ Clean black & red dark GUI — no terminal needed
-- ✅ **Version number** shown in the header next to the logo (`v1.5`) so you always know which build you're running
+- ✅ Modern black & red UI — a native window (Windows WebView2, no browser involved) with smooth animations, shadows, drag-rectangle multi-select, and collapsible per-site groups. The previous Tk interface is still available (see *Two interfaces* below)
+- ✅ **Version number** shown in the header next to the logo (`v2.0`) so you always know which build you're running
 - ✅ **Update check** — on startup Scr33nX quietly asks GitHub for the latest release; if a newer one exists, a clickable `● Update available` indicator appears in the header and opens the releases page. Runs in the background and fails silently when offline
 - ✅ **Live bandwidth meter** in the header (`↓ X.X Mbps` download / `↑` Telegram upload) showing Scr33nX's total traffic — your indicator for when you're approaching your internet connection's limit
 - ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)
@@ -50,13 +50,14 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 ## Requirements
 
 - **Windows 10/11**
+- **WebView2 Runtime** — required by the default UI, built into Windows 11; on Windows 10 it's normally installed already via Edge auto-update. If missing, the app tells you and links the installer (or use `Scr33nX-Classic.bat`, which doesn't need it — see *Two interfaces* below)
 - **Python 3.10+** — https://python.org (check "Add Python to PATH" during install)
 - **ffmpeg** — https://ffmpeg.org/download.html (its **ffplay** is used for the default external preview if mpv isn't installed)
 - **Playwright Chromium** — only needed as the Stripchat fallback recorder
 - **Preview player** — choose the engine in **⚙ Settings → Preview engine** (Auto / mpv / VLC):
   - *External preview* works out of the box with **ffplay** (bundled with ffmpeg). Install **mpv** (https://mpv.io) or **VLC** (https://videolan.org) for nicer windows.
-  - *Embedded (in-app) preview* uses **VLC** by default. Install **VLC** (https://videolan.org) — the `python-vlc` bridge is in `requirements.txt`, and it auto-finds your VLC (no DLL/PATH step). If the bridge is somehow missing, the app offers a **one-click install** the first time you open an embedded preview.
-  - *mpv as the embedded engine (alternative):* `pip install python-mpv` **and** drop the 64-bit **`libmpv-2.dll`** (from an *mpv-dev* build, e.g. https://sourceforge.net/projects/mpv-player-windows/files/libmpv/) into the Scr33nX **`src/`** folder — the app adds that folder to its DLL search path automatically.
+  - *Embedded (in-app) preview*: the default UI has a **built-in player** — no extra install needed. The classic UI (`--classic`) uses **VLC** by default — install **VLC** (https://videolan.org); the `python-vlc` bridge is in `requirements.txt` and auto-finds your VLC (no DLL/PATH step; if the bridge is somehow missing, the classic UI offers a one-click install).
+  - *mpv as the classic UI's embedded engine (alternative):* `pip install python-mpv` **and** drop the 64-bit **`libmpv-2.dll`** (from an *mpv-dev* build, e.g. https://sourceforge.net/projects/mpv-player-windows/files/libmpv/) into the Scr33nX **`src/`** folder — the app adds that folder to its DLL search path automatically.
 
 ---
 
@@ -82,6 +83,19 @@ playwright install chromium
 ### 4. Run the app
 Double-click **`Scr33nX.bat`** (launches the GUI with no console window).
 
+### Two interfaces
+
+Scr33nX ships with two interfaces on the same recording engine, same
+settings, and same config files — pick whichever you prefer:
+
+| | Launcher | Notes |
+|---|---|---|
+| **Default (recommended)** | `Scr33nX.bat` (or `Scr33nX-WebUI.bat`) | Modern native window (Windows WebView2) — smooth animations, drag-select, built-in preview player |
+| **Classic** | `Scr33nX-Classic.bat` (or `Scr33nX.bat --classic`) | The original Tk interface, unchanged |
+
+Only run **one instance at a time** — both share the same control port
+(5200), and starting a second one closes itself with a warning.
+
 ### 5. Install the browser extension (optional)
 
 The extension adds models to Scr33nX with one click while you're on their page, and lets you set a 1–5 star rank from the popup once the model is in Saved Models or the Recorder. The app must be running (it listens on `http://localhost:5200`).
@@ -101,6 +115,8 @@ The extension adds models to Scr33nX with one click while you're on their page, 
 ---
 
 ## Usage
+
+*The steps below apply to both interfaces — the new default UI and the classic one (`--classic`) behave the same way; only the look differs.*
 
 1. **Add models** using the left panel — enter the username (or paste a full model URL; the site is auto-detected) and select the site: `chaturbate`, `stripchat`, `camsoda`, or `myfreecams`
 2. Click **▶ START MONITOR** — the app polls each model at the configured interval
@@ -124,8 +140,8 @@ The Settings tab also has a **🔍 System Check** panel that shows whether each 
 | Check Interval (sec) | How often each model's status is polled (default 30) |
 | Max Quality (all models) | Global stream-quality cap: Unlimited / 1080p / 720p / 480p. Applied when a recording (re)starts. Right-click a model for a per-model override that beats this |
 | Minimize to SysTray | Hide to the tray instead of the taskbar |
-| Notifications | Master toggle for Windows toast notifications |
-| ⚠ Dropped-Segment Warnings | Toast when a recording is losing segments due to saturated bandwidth (always logged to the Activity Log regardless) |
+| Notifications | Master toggle for Windows toast notifications. *In the new web UI* this lives in its own **Notifications** box with per-type toggles (Recording started/stopped, Dropped segments, Quality downgraded, Low disk space), a toast-duration slider (1–5 s), and a **🌟 VIP List** — add models by right-clicking them, then enable **VIP only** to be notified for just those models |
+| ⚠ Dropped-Segment Warnings | Toast when a recording is losing segments due to saturated bandwidth (always logged to the Activity Log regardless). A model simply going offline no longer triggers a false warning |
 | ⛔ Stop All if Disk < 20 GB Free | Low-disk guard (off by default). When the drive holding the output folder drops below **20 GB free**, every active recording is stopped and no new recording can start (manual REC, auto-rec, restarts and file splits are all blocked) until you free up space or uncheck this option. Blocked models show `Low disk` as their error; recovery is automatic once space is freed |
 | ⬇ Auto-Downgrade Quality | Restart a stream one quality step lower when it keeps losing segments (≥10 s lost within 60 s). Only that stream is touched; manual per-model quality choices are respected. Not available for Stripchat |
 | 🎭 Stripchat Browser Fallback | When Stripchat's browserless native path can't resolve a stream, fall back to the Playwright browser recorder. Enabled by default. Uncheck to record native-only — if native fails the stream is skipped and the browser never launches |
@@ -240,4 +256,4 @@ A command-line helper, **`src/scr33nx_ctl.py`**, wraps all of these (plus `open`
 - **Run only one Scr33nX at a time.** Two instances share the same settings file and overwrite each other's models/ranks. If you launch a second one it now warns you at startup (the control port is taken) and offers to close itself — accept unless you really know what you're doing
 - Changing or clearing an **existing** star rank by clicking the RANK column asks for confirmation first (misclick guard, app only); rating an unranked model stays one-click, and the browser extension is never prompted
 - If many simultaneous recordings drop segments (watch for ⚠ warnings), your total internet bandwidth is the limit. Each 1080p stream needs roughly 5–6 Mbps sustained. In order of preference: set a global **Max Quality** cap (720p roughly halves usage vs. unlimited), enable **⬇ Auto-Downgrade** so only struggling streams lose quality, or record fewer models at once.
-- For bug reports during beta, attach `streamrecorder.log` (in `%LOCALAPPDATA%\Scr33nX`) — it contains everything the Activity Log shows plus ffmpeg/relay internals.
+- For bug reports, attach `streamrecorder.log` (in `%LOCALAPPDATA%\Scr33nX`) — it contains everything the Activity Log shows plus ffmpeg/relay internals, from either interface (they share the same log file).

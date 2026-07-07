@@ -1,0 +1,76 @@
+/* Scr33nX web UI — design tokens.
+   Single source of truth for the visual language (red/black, minimal, elegant).
+   Every color, radius, shadow and duration in the UI must come from here. */
+
+:root {
+  /* ── surfaces: darkest at the back, lighter as elevation rises ── */
+  --bg-0: #0b0b0d;              /* app background */
+  --bg-1: #111114;              /* sidebar / header */
+  --bg-2: #17171b;              /* cards, toolbar */
+  --bg-3: #1e1e24;              /* elevated / active */
+  --bg-hover: rgba(255, 255, 255, 0.045);
+
+  /* ── hairlines ── */
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.13);
+
+  /* ── text hierarchy ── */
+  --text-1: #ececf1;
+  --text-2: #9c9ca7;
+  --text-3: #5c5c68;
+
+  /* ── brand red (used sparingly: record, live, destructive, active accents) ── */
+  --red: #e5484d;
+  --red-bright: #f2555a;
+  --red-subtle: rgba(229, 72, 77, 0.12);
+  --red-line: rgba(229, 72, 77, 0.35);
+
+  /* ── status ── */
+  --rec: var(--red);            /* RECORDING */
+  --ok: #30a46c;                /* ONLINE */
+  --ok-subtle: rgba(48, 164, 108, 0.12);
+  --warn: #ffb224;              /* PRIVATE */
+  --info: #6aa5dc;              /* CHECKING */
+  --gold: #d9b878;              /* star ranks */
+
+  /* ── go / start actions (semantic green, as in the classic UI) ── */
+  --go: #2f9e63;
+  --go-bright: #3cb371;
+  --go-subtle: rgba(47, 158, 99, 0.12);
+
+  /* ── depth ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.55);
+  --glow-red: 0 0 16px rgba(229, 72, 77, 0.30);
+
+  /* ── shape ── */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+
+  /* ── type ── */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
+  --fs-0: 11px;                 /* micro labels, column headers */
+  --fs-1: 12.5px;               /* table rows, secondary */
+  --fs-2: 13.5px;               /* base UI */
+  --fs-3: 15px;                 /* emphasized */
+  --fs-4: 19px;                 /* wordmark */
+
+  /* ── spacing scale ── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* ── motion ── */
+  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --t-fast: 120ms;
+  --t-med: 200ms;
+  --t-slow: 320ms;
+}

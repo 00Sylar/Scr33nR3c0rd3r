@@ -143,8 +143,16 @@ class PipelineWorker:
                     "time; changes apply immediately.")
 
         loop = asyncio.get_running_loop()
-        tasks = [loop.create_task(
-            self._converter_worker(loop, upload_queue, processed, queued, uploaded))]
+        # Convert and upload run as fully independent coroutines: the converter
+        # only produces .mp4s, a separate feeder queues any un-uploaded .mp4 the
+        # instant it appears (converted now, converted earlier, or already on
+        # disk from a previous run), and the uploaders drain that queue
+        # concurrently. Uploads therefore never wait for the conversion batch to
+        # finish — they start as soon as a .mp4 is available.
+        tasks = [
+            loop.create_task(self._converter_worker(loop, processed)),
+            loop.create_task(self._feeder_worker(upload_queue, queued, uploaded)),
+        ]
         for i in range(cfg.upload_workers):
             tasks.append(loop.create_task(
                 self._uploader_worker(i + 1, upload_queue, uploaded)))
@@ -193,17 +201,15 @@ class PipelineWorker:
 
     # ── Workers ──────────────────────────────────────────────────────────────
 
-    async def _converter_worker(self, loop, upload_queue: asyncio.Queue,
-                                 processed: set, queued: set, uploaded: set):
-        """Coordinator: converts .ts → .mp4 when the Convert stage is on, and
-        feeds .mp4s to the upload queue when the Upload stage is on. Both halves
-        are gated on the live cfg flags, so toggling a stage takes effect on the
-        next cycle and the pipeline does nothing while both are off."""
+    async def _converter_worker(self, loop, processed: set):
+        """Stage ①: convert .ts → .mp4 while the Convert stage is on. Produces
+        files only — queuing for upload is the feeder's job — so a long
+        conversion batch never blocks uploads. Gated on the live cfg flag, so
+        toggling Convert takes effect on the next scanned file."""
         while True:
             if self._shutdown:
                 return
 
-            # ── Stage ①: convert .ts → .mp4 ──
             if self.cfg.do_convert:
                 try:
                     ts_files = [
@@ -236,16 +242,27 @@ class PipelineWorker:
                         if len(valid) != len(outputs):
                             self.on_log(f"[convert] ⚠ {f}: {len(outputs)-len(valid)} part(s) missing (ffmpeg error)")
                         self.on_log(f"[convert] ✓ {f} → {len(valid)} part(s)")
-                        # The .mp4s are now on disk; the feed step below queues
-                        # them when Upload is on (so convert-only just keeps them).
+                        # The .mp4s are on disk now; the feeder queues them for
+                        # upload independently (convert-only just keeps them).
                     except Exception as e:
                         self.on_log(f"[convert] ✗ {f}: {e}")
                         processed.discard(path)
 
-            # ── Feed stage ②: queue un-uploaded .mp4s for upload ──
-            # Runs whenever Upload is on and a client is connected — picks up
-            # freshly converted files, leftovers from before, and files made
-            # while Upload was off. Dedup via `queued`.
+            for _ in range(50):
+                if self._shutdown:
+                    break
+                await asyncio.sleep(0.1)
+
+    async def _feeder_worker(self, upload_queue: asyncio.Queue,
+                             queued: set, uploaded: set):
+        """Stage ② feed: independently of conversion, queue every un-uploaded
+        .mp4 for the uploaders as soon as it appears. Runs whenever Upload is on
+        and a client has connected; dedups via `queued`. Because it's its own
+        coroutine, files already converted (or left from a previous run) upload
+        immediately instead of waiting for the current convert batch."""
+        while True:
+            if self._shutdown:
+                return
             if self.cfg.do_upload and self._has_uploaders:
                 try:
                     for f in sorted(os.listdir(self.cfg.output_folder)):
@@ -256,8 +273,9 @@ class PipelineWorker:
                                 os.path.join(self.cfg.output_folder, f))
                 except Exception:
                     pass
-
-            for _ in range(50):
+            # Scan a bit faster than the converter's cycle so freshly produced
+            # .mp4s are picked up promptly.
+            for _ in range(10):
                 if self._shutdown:
                     break
                 await asyncio.sleep(0.1)

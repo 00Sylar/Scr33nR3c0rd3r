@@ -464,6 +464,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            # Loopback-only server; the header lets the app's own WebView-based
+            # UI (different origin) play previews through the relay via hls.js.
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
         except (ConnectionError, OSError):
@@ -487,6 +490,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", clen)
             else:
                 self.close_connection = True
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             for chunk in r.iter_content(65536):
                 _count(len(chunk))

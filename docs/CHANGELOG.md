@@ -14,6 +14,85 @@ _Nothing yet._
 
 ---
 
+## V2.0 — 2026-07-07
+
+**The web UI redesign.** A complete visual and structural rebuild of
+Scr33nX — a modern dark red/black interface with smooth animations,
+shadows, and transitions, rendered in a native window (Windows WebView2;
+no browser involved) — built and refined over many rounds of hands-on
+testing. Same recording engine, same config files, zero feature loss.
+
+### Added
+- **New web-based UI.** Recorder tab (full toolbar, right-click menus with
+  per-model quality and rank submenus, column sorting, search + status
+  filters, checkboxes, Shift/Ctrl/marquee selection), Saved Models (smooth
+  with thousands of rows via virtual scrolling, scanner, import/export, add
+  prompt), Output/Upload (pipeline with live stage toggles, setup wizard,
+  re-auth, in-app Telegram login prompts), Activity Log, full Settings (all
+  options + System Check with one-click fixes), stream preview (external
+  mpv/VLC/ffplay **and** a new built-in in-app player), privacy mode with a
+  starfield cover, tray, update check, single-instance lock, and the
+  identical port-5200 API. Feature-parity reference: `docs/PARITY.md`.
+- **Desktop-style drag-rectangle (marquee) selection** over the model
+  tables, and **collapsible per-site groups** with [+]/[−] controls — on
+  both the Recorder and Saved Models tabs.
+- **Embedded preview without VLC:** in-app previews use a built-in player
+  (hls.js through the local relay) — python-vlc/libmpv are no longer needed
+  for embedded preview in the new UI (still used by the classic UI).
+- **Multi-condition status filter:** the Recorder and Saved Models status
+  filters let you pick any combination (e.g. Online **and** Recording); the
+  button shows how many are active.
+- **Right-click ▶ Add to Recorder & Start Recording** on an online model in
+  Saved Models (adds it and starts recording in one step).
+- **Notifications settings box + VIP list.** Notifications now have their
+  own Settings card, separate from Behavior:
+  - **Per-type toggles** — turn each notification on/off independently:
+    Recording started, Recording stopped, Dropped segments, Quality
+    downgraded, Low disk space. (An "app is broken" ffmpeg-missing alert
+    always fires.)
+  - **Toast duration** slider (1–5 s). Note: Windows ultimately controls how
+    long a toast stays up, so the value is a hint it may round.
+  - **🌟 VIP List** — add models via right-click (Recorder **or** Saved
+    Models → *Add to VIP List*), then enable **VIP only** to receive
+    per-model notifications *just* for your VIP models. Global safety alerts
+    (low disk, ffmpeg) always come through. Manage/remove VIPs right in the box.
+
+### Changed
+- **`Scr33nX.bat` now launches the new web UI by default.** The previous
+  interface still works exactly as before (same engine, same settings, same
+  config files — nothing about it changed) — double-click the new
+  **`Scr33nX-Classic.bat`**, or run `Scr33nX.bat --classic`.
+  `Scr33nX-WebUI.bat` is kept as an alias for the new default.
+- **`pywebview` is now a required dependency** (previously only needed to try
+  the redesign preview) — `pip install -r requirements.txt` picks it up.
+- **App version bumped to `2.0`.**
+
+### Fixed
+- **No more false "dropped segments" toast when a model goes offline.** The
+  last live-edge segments of an ending stream looked identical to bandwidth
+  loss; the toast is now deferred a few seconds and only fires if the model is
+  still recording, so a normal offline no longer triggers a spurious warning.
+  (The gap is still always written to the Activity Log.)
+- **Telegram pipeline — uploads no longer wait for conversion.** The Convert
+  and Upload stages now run as fully independent workers: the uploaders start
+  sending any `.mp4` in the converted folder as soon as it appears (including
+  files already there before you started, or produced mid-batch), instead of
+  waiting for the entire `.ts → .mp4` conversion pass to finish first. Applies
+  to both the classic and the new UI.
+- **Web UI:** Copy Model URL now works (a 64-bit clipboard-handle truncation
+  silently dropped the copy); pipeline status lines no longer leave a large
+  blank gap before the log; clicking empty table space clears the selection;
+  Add-to-Saved now has its own site dropdown instead of assuming Chaturbate
+  for a bare username; toolbar button hovers are consistent (destructive
+  buttons are tinted at rest rather than only reddening on hover); the
+  browser-picker radio buttons no longer flicker; Ctrl/Cmd+A now selects all
+  visible rows in Recorder and Saved Models; Save Settings moved to a
+  centered bar below all Settings cards (it applies to all of them, not just
+  one); the "preview not available" message is now short and user-facing,
+  with the full reason kept in the Activity Log for troubleshooting.
+
+---
+
 ## V1.6 — 2026-07-04
 
 Minor bug fixes plus a few safety features: a low-disk guard, a hard
