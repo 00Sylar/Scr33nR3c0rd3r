@@ -71,15 +71,18 @@
           <button class="btn" id="b-addsaved">★ Add to Saved</button>
           <span class="vsep"></span>
           <div class="search"><input id="rec-filter" placeholder="Filter models…" spellcheck="false"></div>
-          <select id="rec-status">
-            <option value="">Status: All</option>
-            <option value="recording">Recording</option>
-            <option value="online">Online</option>
-            <option value="offline">Offline</option>
-            <option value="private">Private</option>
-            <option value="checking">Checking</option>
-            <option value="error">Error</option>
-          </select>
+          <div class="msf" id="rec-msf" data-tab="rec">
+            <button class="btn msf-btn">Status: All ▾</button>
+            <div class="msf-menu" hidden>
+              <label data-v="recording"><span class="cb"></span>Recording</label>
+              <label data-v="online"><span class="cb"></span>Online</label>
+              <label data-v="offline"><span class="cb"></span>Offline</label>
+              <label data-v="private"><span class="cb"></span>Private</label>
+              <label data-v="checking"><span class="cb"></span>Checking</label>
+              <label data-v="error"><span class="cb"></span>Error</label>
+              <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
+            </div>
+          </div>
           <div class="spacer"></div>
           <button class="btn" id="b-clear">🧹 Clear Recorder</button>
           <button class="btn danger" id="b-stopall">⏹ Stop All Downloads</button>
@@ -109,14 +112,17 @@
           <span class="count-pill" id="saved-count">0 model(s)</span>
           <span class="vsep"></span>
           <div class="search"><input id="saved-filter" placeholder="Filter models…" spellcheck="false"></div>
-          <select id="saved-status">
-            <option value="">Status: All</option>
-            <option value="recording">Recording</option>
-            <option value="online">Online</option>
-            <option value="offline">Offline</option>
-            <option value="private">Private</option>
-            <option value="checking">Checking</option>
-          </select>
+          <div class="msf" id="saved-msf" data-tab="saved">
+            <button class="btn msf-btn">Status: All ▾</button>
+            <div class="msf-menu" hidden>
+              <label data-v="recording"><span class="cb"></span>Recording</label>
+              <label data-v="online"><span class="cb"></span>Online</label>
+              <label data-v="offline"><span class="cb"></span>Offline</label>
+              <label data-v="private"><span class="cb"></span>Private</label>
+              <label data-v="checking"><span class="cb"></span>Checking</label>
+              <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
+            </div>
+          </div>
           <div class="spacer"></div>
           <button class="btn" id="b-export">📤 Export</button>
           <button class="btn" id="b-import">📥 Import</button>
@@ -268,6 +274,26 @@
     <div class="modal-btns" style="margin-top: var(--sp-4)">
       <button class="btn" id="prompt-cancel">Cancel</button>
       <button class="btn-primary" id="prompt-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- add model to saved (name/URL + site) -->
+<div class="modal-backdrop" id="addsaved" hidden>
+  <div class="modal">
+    <h3>Add Model to Saved</h3>
+    <p>Enter a username, or paste a full model URL (the site is detected from a URL).</p>
+    <input id="addsaved-input" style="width:100%" spellcheck="false" placeholder="name or full URL">
+    <div class="field" style="margin-top:12px">
+      <label>Site (used when you enter a username only)</label>
+      <select id="addsaved-site">
+        <option>chaturbate</option><option>stripchat</option>
+        <option>camsoda</option><option>myfreecams</option>
+      </select>
+    </div>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="btn" id="addsaved-cancel">Cancel</button>
+      <button class="btn-primary" id="addsaved-ok">Add</button>
     </div>
   </div>
 </div>

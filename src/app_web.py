@@ -99,20 +99,39 @@ def _fmt_size(n: int) -> str:
 
 
 def _set_clipboard(text: str) -> bool:
-    """Unicode clipboard write via Win32 (no Tk available here)."""
+    """Unicode clipboard write via Win32 (no Tk available here).
+
+    HANDLE/pointer return values MUST be declared as pointer-sized — the ctypes
+    default is c_int (32-bit), which truncates the 64-bit GlobalAlloc/GlobalLock
+    handles and corrupts the write (the bug that made Copy URL silently fail)."""
     try:
+        from ctypes import wintypes
         CF_UNICODETEXT, GMEM_MOVEABLE = 13, 0x0002
         u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        k32.GlobalAlloc.restype = wintypes.HGLOBAL
+        k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        k32.GlobalLock.restype = wintypes.LPVOID
+        k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        k32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        u32.SetClipboardData.restype = wintypes.HANDLE
+        u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        u32.OpenClipboard.argtypes = [wintypes.HWND]
         data = text.encode("utf-16-le") + b"\x00\x00"
         if not u32.OpenClipboard(None):
             return False
         try:
             u32.EmptyClipboard()
             h = k32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+            if not h:
+                return False
             p = k32.GlobalLock(h)
+            if not p:
+                return False
             ctypes.memmove(p, data, len(data))
             k32.GlobalUnlock(h)
-            u32.SetClipboardData(CF_UNICODETEXT, h)
+            if not u32.SetClipboardData(CF_UNICODETEXT, h):
+                return False   # ownership NOT transferred — caller keeps h, but
+                               # we let the process exit handle it (rare path)
         finally:
             u32.CloseClipboard()
         return True
@@ -1392,6 +1411,27 @@ class Bridge:
             if added:
                 c._persist_models()
                 c._log_add(f"Added {added} model(s) to Recorder", "accent")
+        c.after(0, _do)
+        return {"ok": True}
+
+    def saved_record(self, sids):
+        """Add each saved model to the Recorder and immediately start recording
+        (right-click → Add to Recorder & Start Recording, for live models)."""
+        c = self._core
+        def _do():
+            n = 0
+            for sid in list(sids or []):
+                _, site, name = str(sid).split(":", 2)
+                key = f"{site}:{name}"
+                if key not in c._rows:
+                    c.recorder.add_model(name, site, "recorder", quiet=True)
+                    c._rows[key] = True
+                    c._auto_rec.setdefault(key, False)
+                c._launch_recording(name, site)
+                n += 1
+            if n:
+                c._persist_models()
+                c._log_add(f"Added + started recording {n} model(s)", "accent")
         c.after(0, _do)
         return {"ok": True}
 

@@ -32,6 +32,20 @@ grouped by date / milestone.
 - **Embedded preview without VLC:** the new UI plays in-app previews with a
   built-in player (hls.js through the local relay) — python-vlc/libmpv are no
   longer needed for embedded preview in the web UI.
+- **Web UI — multi-condition status filter:** the Recorder and Saved Models
+  status filters now let you pick any combination (e.g. Online **and**
+  Recording), matching the classic app; the button shows how many are active.
+- **Web UI — right-click ▶ Add to Recorder & Start Recording** on an online
+  model in Saved Models (adds it and starts recording in one step).
+
+### Fixed
+- **Web UI:** Copy Model URL now works (a 64-bit clipboard-handle truncation
+  silently dropped the copy); pipeline status lines no longer leave a large
+  blank gap before the log; clicking empty table space clears the selection;
+  Add-to-Saved now has its own site dropdown instead of assuming Chaturbate
+  for a bare username; toolbar button hovers are consistent (destructive
+  buttons are tinted at rest rather than only reddening on hover); the
+  browser-picker radio buttons no longer flicker.
 
 ---
 

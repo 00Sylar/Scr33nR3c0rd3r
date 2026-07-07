@@ -300,6 +300,14 @@ input::placeholder { color: var(--text-3); }
 .modal p { color: var(--text-2); font-size: var(--fs-1); line-height: 1.6; margin-bottom: var(--sp-4); }
 .modal-btns { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .modal-btns .btn-primary { width: auto; padding: 7px 18px; }
+/* Normalize native radios in the browser picker (kills the momentary
+   focus-ring "grow" and matches the red accent). */
+#bpick-list input[type="radio"] { appearance: none; -webkit-appearance: none;
+  width: 14px; height: 14px; margin: 0; border: 1px solid var(--line-strong);
+  border-radius: 50%; background: var(--bg-0); flex: none; cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease); }
+#bpick-list input[type="radio"]:checked { border-color: var(--red);
+  background: radial-gradient(circle at center, var(--red) 0 4px, transparent 5px); }
 
 .toast {
   position: fixed; bottom: 18px; left: 50%; translate: -50% 0; z-index: 300;
@@ -312,9 +320,14 @@ input::placeholder { color: var(--text-3); }
 
 /* ══ toolbar extras ══ */
 .vsep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--sp-1); flex: none; }
+/* Semantic buttons are tinted *persistently* (identifiable at rest), and every
+   button shares the same hover feel — a lift within its own hue — so nothing
+   surprises you with a colour only on hover. */
 .btn.rec { color: var(--red-bright); border-color: var(--red-line); }
 .btn.rec:hover { background: var(--red-subtle); box-shadow: var(--shadow-sm), var(--glow-red); }
-.btn.danger:hover { color: var(--red-bright); border-color: var(--red-line); background: var(--red-subtle); }
+.btn.danger { color: var(--red); border-color: rgba(229, 72, 77, 0.28); }
+.btn.danger:hover { color: var(--red-bright); border-color: var(--red-line);
+                    background: var(--red-subtle); box-shadow: var(--shadow-sm); }
 .btn.mini { padding: 2px 10px; font-size: var(--fs-0); }
 .btn:disabled { opacity: 0.4; pointer-events: none; }
 .search { position: relative; }
@@ -325,6 +338,20 @@ input::placeholder { color: var(--text-3); }
 }
 .count-pill { font-size: var(--fs-0); color: var(--text-2); border: 1px solid var(--line);
               border-radius: var(--r-full); padding: 2px 10px; white-space: nowrap; }
+
+/* multi-select status filter */
+.msf { position: relative; }
+.msf-btn { white-space: nowrap; }
+.msf-btn.active { color: var(--red-bright); border-color: var(--red-line); }
+.msf-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+  background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg); padding: 6px; min-width: 168px;
+  animation: fadein var(--t-fast) var(--ease); }
+.msf-menu label { display: flex; align-items: center; gap: 9px; padding: 6px 8px;
+  border-radius: var(--r-sm); font-size: var(--fs-1); color: var(--text-2); cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.msf-menu label:hover { background: var(--bg-hover); color: var(--text-1); }
+.msf-menu hr { border: none; border-top: 1px solid var(--line); margin: 5px 4px; }
 .lowdisk-pill { font-size: var(--fs-0); font-weight: 600; color: #fff;
                 background: var(--red); border-radius: var(--r-full); padding: 3px 12px;
                 animation: pulse 1.4s var(--ease) infinite; }
@@ -395,7 +422,7 @@ label.check:hover { color: var(--text-1); }
               font-size: var(--fs-1); color: var(--text-2); cursor: pointer;
               transition: color var(--t-fast) var(--ease); }
 .toggle-row:hover { color: var(--text-1); }
-.pipe-lines { white-space: pre; }
+.pipe-lines { white-space: pre; height: auto; line-height: 1.9; }
 
 .sys-row { display: flex; align-items: center; gap: 10px; padding: 5px 0;
            font-size: var(--fs-1); color: var(--text-2); }

@@ -39,7 +39,7 @@ const collapsed = { rec: new Set(), saved: new Set() };
 const anchor = { rec: null, saved: null };
 const sort = { rec: { col: "name", dir: 1 }, saved: { col: "name", dir: 1 } };
 const filter = { rec: "", saved: "" };
-const statusFilter = { rec: "", saved: "" };
+const statusFilter = { rec: new Set(), saved: new Set() };   // empty = all
 let savedCache = { version: -1, items: [] };
 let savedDisplay = [];              // flattened (headers + rows) for virtualization
 let recVisible = [];                // ordered visible keys (for shift ranges)
@@ -145,7 +145,7 @@ function computeRecView(models) {
   const f = filter.rec.toLowerCase();
   const sf = statusFilter.rec;
   const list = models.filter(m =>
-    (!f || m.name.includes(f)) && (!sf || m.status === sf));
+    (!f || m.name.includes(f)) && (sf.size === 0 || sf.has(m.status)));
   const bySite = new Map();
   for (const m of list) {
     if (!bySite.has(m.site)) bySite.set(m.site, []);
@@ -258,7 +258,7 @@ function rebuildSavedDisplay() {
     const stat = stMap[it.sid];
     const status = stat ? stat[0] : "offline";
     if (f && !it.name.toLowerCase().includes(f)) continue;
-    if (sf && status !== sf) continue;
+    if (sf.size && !sf.has(status)) continue;
     items.push({ ...it, status, file: stat ? stat[1] : "", size: stat ? stat[2] : "" });
   }
   const bySite = new Map();
@@ -647,6 +647,13 @@ document.addEventListener("click", (e) => {
     refreshSelectionClasses(tab);
     return;
   }
+
+  // Click on empty table space clears the current selection.
+  const gw = e.target.closest(".grid-wrap");
+  if (gw) {
+    const tab = gw.closest('[data-panel="saved"]') ? "saved" : "rec";
+    if (sel[tab].size) { sel[tab].clear(); anchor[tab] = null; refreshSelectionClasses(tab); }
+  }
 });
 
 function refreshSelectionClasses(tab) {
@@ -745,6 +752,7 @@ document.addEventListener("keydown", (e) => {
     $("modal").hidden = true;
     $("prompt").hidden = true;
     $("bpick").hidden = true;
+    $("addsaved").hidden = true;
   }
 });
 window.addEventListener("blur", closeCtx);
@@ -843,8 +851,12 @@ document.addEventListener("contextmenu", (e) => {
     showMenu(items, e.clientX, e.clientY);
   } else {
     const it = savedCache.items.find(x => x.sid === k0) || { name: "?", site: "?" };
+    const st0 = (S.saved_status || {})[k0];
+    const liveNow = st0 && (st0[0] === "online" || st0[0] === "recording");
     const items = single ? [
       { label: `＋  Add to Recorder  ${it.name}`, action: () => API.saved_to_recorder(keys) },
+      liveNow ? { label: "▶  Add to Recorder & Start Recording",
+                  action: () => API.saved_record(keys) } : null,
       { label: "▶  Preview", action: () => doPreview(it.name, it.site) },
       "hr",
       { label: "🔗  Copy Model URL", action: () => API.copy_urls(keys, true, false) },
@@ -984,20 +996,65 @@ $("b-import").addEventListener("click", async () => {
   else toast(r.error, true);
 });
 $("b-savedadd").addEventListener("click", () => {
-  askText("Add to Saved Models",
-         "Username or URL (chaturbate / stripchat / camsoda / myfreecams):",
-         async (raw) => {
-    if (!raw) return;
-    const r = await API.saved_add(raw, $("add-site").value);
-    toast(r.ok ? `⭐ Added ${r.name} (${r.site}) to Saved Models` : r.error, !r.ok);
-  });
+  $("addsaved-input").value = "";
+  $("addsaved").hidden = false;
+  setTimeout(() => $("addsaved-input").focus(), 60);
 });
+$("addsaved-cancel").addEventListener("click", () => { $("addsaved").hidden = true; });
+$("addsaved-ok").addEventListener("click", doAddSaved);
+$("addsaved-input").addEventListener("keydown", (e) => { if (e.key === "Enter") doAddSaved(); });
+async function doAddSaved() {
+  const raw = $("addsaved-input").value.trim();
+  if (!raw) { toast("Enter a username or link.", true); return; }
+  $("addsaved").hidden = true;
+  const r = await API.saved_add(raw, $("addsaved-site").value);
+  toast(r.ok ? `⭐ Added ${r.name} (${r.site}) to Saved Models` : r.error, !r.ok);
+}
 
 /* filters + sorting */
 $("rec-filter").addEventListener("input", (e) => { filter.rec = e.target.value.trim(); retab("rec"); });
-$("rec-status").addEventListener("change", (e) => { statusFilter.rec = e.target.value; retab("rec"); });
 $("saved-filter").addEventListener("input", (e) => { filter.saved = e.target.value.trim(); rebuildSavedDisplay(); });
-$("saved-status").addEventListener("change", (e) => { statusFilter.saved = e.target.value; rebuildSavedDisplay(); });
+
+/* Multi-select status filters (pick any combination, e.g. Online + Recording). */
+const CAP = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+function updateMsfLabel(tab) {
+  const set = statusFilter[tab];
+  const root = $(`${tab}-msf`);
+  const btn = root.querySelector(".msf-btn");
+  btn.classList.toggle("active", set.size > 0);
+  btn.textContent = (set.size === 0 ? "Status: All"
+    : set.size === 1 ? "Status: " + CAP([...set][0])
+    : `Status: ${set.size}`) + " ▾";
+  root.querySelectorAll(".msf-menu label[data-v]").forEach(l => {
+    const cb = l.querySelector(".cb");
+    if (cb) cb.classList.toggle("on", set.has(l.dataset.v));
+  });
+}
+for (const tab of ["rec", "saved"]) {
+  const root = $(`${tab}-msf`);
+  const menu = root.querySelector(".msf-menu");
+  root.querySelector(".msf-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const wasOpen = !menu.hidden;
+    document.querySelectorAll(".msf-menu").forEach(m => m.hidden = true);
+    menu.hidden = wasOpen;
+  });
+  menu.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const lab = e.target.closest("label[data-v]");
+    if (!lab) return;
+    const v = lab.dataset.v;
+    if (v === "__clear") statusFilter[tab].clear();
+    else if (statusFilter[tab].has(v)) statusFilter[tab].delete(v);
+    else statusFilter[tab].add(v);
+    updateMsfLabel(tab);
+    if (tab === "rec") retab("rec"); else rebuildSavedDisplay();
+  });
+}
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".msf"))
+    document.querySelectorAll(".msf-menu").forEach(m => m.hidden = true);
+});
 for (const [headId, tab] of [["rec-head", "rec"], ["saved-head", "saved"]]) {
   $(headId).addEventListener("click", (e) => {
     const col = e.target.closest(".sortable");
