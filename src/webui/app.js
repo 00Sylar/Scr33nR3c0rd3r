@@ -703,6 +703,24 @@ function refreshSelectionClasses(tab) {
   }
 }
 
+/* Ctrl/Cmd+A — select every visible row in the active table tab (respects the
+   current filter). Ignored while typing in a field so it still selects text. */
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || (e.key !== "a" && e.key !== "A")) return;
+  const t = e.target;
+  if (t instanceof Element && t.matches("input, textarea, select")) return;
+  const panel = document.querySelector(".panel.active");
+  const p = panel && panel.dataset.panel;
+  const tab = p === "recorder" ? "rec" : p === "saved" ? "saved" : null;
+  if (!tab) return;
+  e.preventDefault();
+  const order = visibleOrder(tab);
+  sel[tab].clear();
+  for (const k of order) sel[tab].add(k);
+  if (order.length) anchor[tab] = order[order.length - 1];
+  refreshSelectionClasses(tab);
+});
+
 /* marquee drag-selection */
 let mq = null, mqStart = null;
 document.addEventListener("mousedown", (e) => {
