@@ -18,17 +18,22 @@ before `Scr33nX.bat` switches to it. Sources: README, `src/app.py` control walk
       (chaturbate / stripchat / camsoda / myfreecams), `＋ Add Model` button
 - [ ] Live status panel: `● N LIVE`, total `N models`, per-site rows (CB/SC/CS/MFC — only
       sites present) with recording / online / total columns, `ALL` totals row
+      — **v2 design decision 2026-07-06:** color-coded counts (red REC / green ONLINE /
+      gray IDLE) + per-site proportion bars, glowing dashboard card (no more all-gray icons)
 
 ## 3. Recorder tab
 ### Table
 - [ ] Columns: checkbox, MODEL, RANK (1–5 stars), STATUS, CURRENT FILE, SIZE, AUTO, SAVED
-- [ ] Grouped by site with collapsible site header rows
+- [ ] Grouped by site with collapsible site header rows — explicit [+]/[−] control on each
+      site header (Recorder & Saved; **v2 design decision 2026-07-06**)
 - [ ] Status values with colors: RECORDING / ONLINE / OFFLINE / PRIVATE / CHECKING / errors
       (incl. `Low disk`); RECORDING shows current filename + growing size
 - [ ] Star rank: click star sets rank, click same star clears; changing/clearing an
       *existing* rank asks confirmation (misclick guard); rating unranked is one-click
 - [ ] Checkbox column: click toggles; header/selection interplay; `✓ N checked` / `N selected` label
 - [ ] Shift+click range select, Ctrl+click toggle select (Treeview-equivalent)
+- [ ] **NEW in v2:** desktop-style marquee selection — drag a rectangle over rows to select
+      them; toolbar/context actions apply to that selection (Recorder & Saved)
 - [ ] Column sorting with `↕`/arrow indicators: MODEL, RANK, STATUS, SIZE, AUTO, SAVED —
       stable while live updates stream in (v1.6 fix)
 - [ ] Search box (filters by name) + `Status: All` filter dropdown — stable under live updates
@@ -89,6 +94,8 @@ before `Scr33nX.bat` switches to it. Sources: README, `src/app.py` control walk
 - [ ] Stream preview: Mode (External window / Embedded), Preview engine (Auto/mpv/VLC),
       optional Player path
 - [ ] `💾 Save Settings`; models/AUTO/Saved/ranks still persist immediately on every change
+- [ ] Consistent **color-emoji** labels on every setting row (force emoji presentation with
+      U+FE0F where needed — no mixed gray/color glyphs; **v2 design decision 2026-07-06**)
 - [ ] `🔍 System Check` panel: detect ffmpeg, ffplay, mpv, VLC, python-vlc, python-mpv,
       tdjson, Playwright Chromium; `Add to PATH` + `Install` one-click fixes; `🔍 Re-check`
 

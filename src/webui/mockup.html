@@ -118,14 +118,32 @@
   }
   .live-head .n .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
   .live-head small { color: var(--text-3); font-size: var(--fs-0); }
-  table.live { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--fs-0); }
-  table.live th { color: var(--text-3); font-weight: 400; text-align: right; padding: 2px 0; }
-  table.live th:first-child { text-align: left; }
-  table.live td { color: var(--text-2); text-align: right; padding: 3px 0; }
-  table.live td:first-child { text-align: left; color: var(--text-1); }
-  table.live td.rec { color: var(--red); }
-  table.live td.on { color: var(--ok); }
-  table.live tr.all td { border-top: 1px solid var(--line); color: var(--text-1); padding-top: 6px; }
+  /* dashboard card: soft red glow from the top edge for depth */
+  .card.dash {
+    background: radial-gradient(130% 90% at 50% -25%, rgba(229, 72, 77, 0.12), transparent 62%), var(--bg-2);
+    border-color: rgba(229, 72, 77, 0.18);
+  }
+  .dash-legend { display: flex; gap: 12px; font-size: 10px; letter-spacing: 0.6px;
+                 margin-bottom: var(--sp-2); }
+  .dash-legend .rec { color: var(--red-bright); }
+  .dash-legend .on  { color: var(--ok); }
+  .dash-legend .off { color: var(--text-3); }
+  .dash-row { display: grid; grid-template-columns: 1fr 30px 30px 36px; align-items: center;
+              font-family: var(--font-mono); font-size: var(--fs-1); padding: 3px 0; }
+  .dash-row .chip { justify-self: start; font-size: 10px; letter-spacing: 1px; color: var(--text-2);
+                    border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px;
+                    background: var(--bg-1); box-shadow: var(--shadow-sm); }
+  .dash-row .c { text-align: right; }
+  .dash-row .c.rec { color: var(--red-bright); }
+  .dash-row .c.on  { color: var(--ok); }
+  .dash-row .c.off { color: var(--text-3); }
+  .bar { height: 4px; border-radius: var(--r-full); background: var(--bg-0); overflow: hidden;
+         display: flex; margin: 3px 0 9px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5); }
+  .bar i { display: block; }
+  .bar i.rec { background: linear-gradient(90deg, var(--red), var(--red-bright)); box-shadow: 0 0 6px var(--red); }
+  .bar i.on  { background: var(--ok); }
+  .dash-row.all { border-top: 1px solid var(--line); margin-top: var(--sp-1); padding-top: var(--sp-2); }
+  .dash-row.all .chip { color: var(--text-1); border-color: var(--line-strong); }
 
   /* ── main ── */
   .main { display: grid; grid-template-rows: auto 1fr; min-height: 0; min-width: 0; }
@@ -246,6 +264,22 @@
     font-size: var(--fs-0); font-weight: 600; letter-spacing: 1.6px; color: var(--red);
   }
   .g-site::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .g-site .tog {
+    width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 4px;
+    color: var(--text-2); display: grid; place-items: center; font-size: 12px; line-height: 1;
+    background: var(--bg-2); cursor: pointer;
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  }
+  .g-site .tog::after { content: "−"; }
+  .g-site.closed .tog::after { content: "+"; }
+  .g-site .tog:hover { color: var(--red-bright); border-color: var(--red-line); }
+  .g-site small { color: var(--text-3); font-weight: 400; letter-spacing: 0; }
+  .site-rows.collapsed { display: none; }
+  .site-rows:not(.collapsed) { animation: fadein var(--t-med) var(--ease); }
+
+  /* desktop-style drag-rectangle selection */
+  .marquee { position: fixed; z-index: 99; pointer-events: none;
+             background: var(--red-subtle); border: 1px solid var(--red-line); border-radius: 3px; }
   .row {
     height: 40px; font-size: var(--fs-1); color: var(--text-2);
     border-radius: var(--r-sm);
@@ -337,17 +371,17 @@
         <button class="btn-primary">＋ Add Model</button>
       </div>
 
-      <div class="card">
+      <div class="card dash">
         <div class="live-head">
           <span class="n"><span class="dot"></span>2 LIVE</span>
           <small>31 models</small>
         </div>
-        <table class="live">
-          <tr><th></th><th>▶</th><th>●</th><th>○</th></tr>
-          <tr><td>CB</td><td class="rec">1</td><td class="on">1</td><td>18</td></tr>
-          <tr><td>SC</td><td class="rec">1</td><td class="on">0</td><td>13</td></tr>
-          <tr class="all"><td>ALL</td><td class="rec">2</td><td class="on">1</td><td>31</td></tr>
-        </table>
+        <div class="dash-legend"><span class="rec">▶ REC</span><span class="on">● ONLINE</span><span class="off">○ IDLE</span></div>
+        <div class="dash-row"><span class="chip">CB</span><span class="c rec">1</span><span class="c on">1</span><span class="c off">20</span></div>
+        <div class="bar"><i class="rec" style="width:6%"></i><i class="on" style="width:6%"></i></div>
+        <div class="dash-row"><span class="chip">SC</span><span class="c rec">1</span><span class="c on">0</span><span class="c off">11</span></div>
+        <div class="bar"><i class="rec" style="width:8%"></i></div>
+        <div class="dash-row all"><span class="chip">ALL</span><span class="c rec">2</span><span class="c on">1</span><span class="c off">31</span></div>
       </div>
     </aside>
 
@@ -483,10 +517,10 @@
           </div>
           <div class="card">
             <h3>Behavior</h3>
-            <label class="toggle-row"><span class="switch on"></span>⤵ Minimize to SysTray</label>
+            <label class="toggle-row"><span class="switch on"></span>⤵️ Minimize to SysTray</label>
             <label class="toggle-row"><span class="switch on"></span>🔔 Notifications</label>
-            <label class="toggle-row"><span class="switch on"></span>⚠ Dropped-Segment Warnings</label>
-            <label class="toggle-row"><span class="switch"></span>⬇ Auto-Downgrade Quality</label>
+            <label class="toggle-row"><span class="switch on"></span>⚠️ Dropped-Segment Warnings</label>
+            <label class="toggle-row"><span class="switch"></span>⬇️ Auto-Downgrade Quality</label>
             <label class="toggle-row"><span class="switch"></span>⛔ Stop All if Disk &lt; 20 GB Free</label>
             <label class="toggle-row"><span class="switch on"></span>🎭 Stripchat Browser Fallback</label>
             <label class="toggle-row"><span class="switch"></span>🔒 Privacy Mode</label>
@@ -556,12 +590,12 @@ const DATA = [
 ];
 const ST = { rec: "RECORDING", online: "ONLINE", offline: "OFFLINE", private: "PRIVATE", checking: "CHECKING" };
 
+function siteHeader(site, count) {
+  return `<div class="g-site"><button class="tog"></button>${site}<small>${count} models</small></div>`;
+}
 const rows = document.getElementById("rows");
 for (const [site, models] of DATA) {
-  rows.insertAdjacentHTML("beforeend", `<div class="g-site">${site}</div>`);
-  for (const [name, rank, st, file, size, auto, saved] of models) {
-    const stars = "★".repeat(rank) + "☆".repeat(5 - rank);
-    rows.insertAdjacentHTML("beforeend", `
+  const body = models.map(([name, rank, st, file, size, auto, saved]) => `
       <div class="row gr ${st === "rec" ? "recording" : ""}">
         <span class="cb"></span>
         <span class="name">${name}</span>
@@ -571,8 +605,8 @@ for (const [site, models] of DATA) {
         <span class="size">${size || "—"}</span>
         <span class="switch ${auto ? "on" : ""}"></span>
         <span class="saved-check ${saved ? "" : "no"}">${saved ? "✓" : "—"}</span>
-      </div>`);
-  }
+      </div>`).join("");
+  rows.insertAdjacentHTML("beforeend", siteHeader(site, models.length) + `<div class="site-rows">${body}</div>`);
 }
 
 /* Saved Models fake data (view-only watchlist — no AUTO/SAVED columns). */
@@ -587,9 +621,7 @@ const SAVED = [
   ["_tammarra_", 0, "offline"], ["kristina_ferreira", 5, "offline"], ["ellediane", 5, "offline"],
 ];
 const srows = document.getElementById("savedrows");
-srows.insertAdjacentHTML("beforeend", `<div class="g-site">CHATURBATE</div>`);
-for (const [name, rank, st] of SAVED) {
-  srows.insertAdjacentHTML("beforeend", `
+const savedBody = SAVED.map(([name, rank, st]) => `
     <div class="row gr gr-s">
       <span class="cb"></span>
       <span class="name">${name}</span>
@@ -597,8 +629,8 @@ for (const [name, rank, st] of SAVED) {
       <span class="st ${st}"><span class="dot"></span>${ST[st]}</span>
       <span class="file">—</span>
       <span class="size">—</span>
-    </div>`);
-}
+    </div>`).join("");
+srows.insertAdjacentHTML("beforeend", siteHeader("CHATURBATE", SAVED.length) + `<div class="site-rows">${savedBody}</div>`);
 
 /* Just enough interactivity to feel it: checkboxes, switches, row select, tab panels. */
 const sel = document.getElementById("selcount");
@@ -606,7 +638,16 @@ function refreshSel() {
   const n = document.querySelectorAll("#rows .cb.on").length;
   sel.textContent = n ? `✓ ${n} checked` : "0 selected";
 }
+let suppressClick = false;   /* set after a marquee drag so the mouseup doesn't also toggle a row */
 document.addEventListener("click", (e) => {
+  if (suppressClick) { suppressClick = false; return; }
+  const tog = e.target.closest(".g-site .tog");
+  if (tog) {
+    const head = tog.closest(".g-site");
+    head.classList.toggle("closed");
+    head.nextElementSibling.classList.toggle("collapsed", head.classList.contains("closed"));
+    return;
+  }
   const lbl = e.target.closest("label.check, label.toggle-row");
   if (lbl && !e.target.closest(".cb, .switch")) {
     lbl.querySelector(".cb, .switch")?.classList.toggle("on");
@@ -630,6 +671,43 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   document.querySelector(".panel.active").classList.remove("active");
   document.querySelector(`.panel[data-panel="${t.dataset.tab}"]`).classList.add("active");
 }));
+
+/* Desktop-style marquee selection: press and drag on the table to draw a
+   rectangle; every row it touches becomes selected. */
+let mq = null, mqStart = null;
+document.addEventListener("mousedown", (e) => {
+  const wrap = e.target.closest(".grid-wrap");
+  if (!wrap || e.button !== 0) return;
+  if (e.target.closest(".cb, .switch, .stars, .tog, button, input, select")) return;
+  mqStart = { x: e.clientX, y: e.clientY, wrap };
+});
+document.addEventListener("mousemove", (e) => {
+  if (!mqStart) return;
+  if (!mq) {
+    if (Math.abs(e.clientX - mqStart.x) < 5 && Math.abs(e.clientY - mqStart.y) < 5) return;
+    mq = document.createElement("div");
+    mq.className = "marquee";
+    document.body.appendChild(mq);
+  }
+  const x1 = Math.min(mqStart.x, e.clientX), y1 = Math.min(mqStart.y, e.clientY);
+  const x2 = Math.max(mqStart.x, e.clientX), y2 = Math.max(mqStart.y, e.clientY);
+  Object.assign(mq.style, { left: x1 + "px", top: y1 + "px", width: (x2 - x1) + "px", height: (y2 - y1) + "px" });
+  let n = 0;
+  mqStart.wrap.querySelectorAll(".row").forEach(r => {
+    const b = r.getBoundingClientRect();
+    const hit = !(b.right < x1 || b.left > x2 || b.bottom < y1 || b.top > y2);
+    r.classList.toggle("selected", hit);
+    if (hit) n++;
+  });
+  if (mqStart.wrap.closest('[data-panel="recorder"]')) {
+    sel.textContent = n ? `${n} selected` : "0 selected";
+  }
+  e.preventDefault();
+});
+document.addEventListener("mouseup", () => {
+  if (mq) { mq.remove(); suppressClick = true; }
+  mq = null; mqStart = null;
+});
 </script>
 </body>
 </html>
