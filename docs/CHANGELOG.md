@@ -11,16 +11,27 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
-- **New web-based UI (preview, in development).** A full visual redesign of
-  Scr33nX — modern dark red/black interface with smooth animations — rendered
-  in a native window (Windows WebView2, no browser involved). Launch it with
-  `python src/app_web.py`; the classic app is unchanged and remains the
-  default. The preview shell already runs the real engine: your models,
-  ranks, AUTO flags and settings load, the Recorder tab shows live statuses,
-  Add Model / AUTO toggles / Start Monitor / auto-record / Terminate work,
-  and the port-5200 control API (extensions + bot) is identical. Requires
-  `pip install pywebview`. Remaining tabs arrive phase by phase (see
-  `docs/PARITY.md`).
+- **New web-based UI (complete, in testing).** A full visual redesign of
+  Scr33nX — modern dark red/black interface with smooth animations, shadows,
+  and transitions — rendered in a native window (Windows WebView2, no browser
+  involved). Launch with **`Scr33nX-WebUI.bat`** (or `python src/app_web.py`);
+  the classic app is unchanged and remains the default until sign-off.
+  Everything runs on the same engine and config files: Recorder tab (full
+  toolbar, right-click menus with per-model quality and rank submenus, column
+  sorting, search + status filters, checkboxes, Shift/Ctrl selection), Saved
+  Models (smooth with thousands of rows, scanner, import/export, add prompt),
+  Output/Upload (pipeline with live stage toggles, setup wizard, re-auth,
+  in-app Telegram login prompts), Activity Log, full Settings (all options +
+  System Check with one-click fixes), stream preview (external mpv/VLC/ffplay
+  **and** a new built-in in-app player), privacy mode with starfield cover,
+  tray, update check, single-instance lock, and the identical port-5200 API.
+  Requires `pip install pywebview`. Parity audit checklist: `docs/PARITY.md`.
+- **New in the redesign:** desktop-style drag-rectangle (marquee) selection
+  over the model tables, and collapsible per-site groups with [+]/[−]
+  controls — on both the Recorder and Saved Models tabs.
+- **Embedded preview without VLC:** the new UI plays in-app previews with a
+  built-in player (hls.js through the local relay) — python-vlc/libmpv are no
+  longer needed for embedded preview in the web UI.
 
 ---
 

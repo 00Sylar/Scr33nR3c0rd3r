@@ -4,6 +4,14 @@ Every box below must be checked in the new web UI (`src/app_web.py` + `src/webui
 before `Scr33nX.bat` switches to it. Sources: README, `src/app.py` control walk
 (2026-07-06, v1.6), `src/tray_win.py`. **Zero feature loss** is the acceptance bar.
 
+> **Status 2026-07-07:** implementation of every item below is COMPLETE
+> (launch with `Scr33nX-WebUI.bat` or `python src/app_web.py`). Boxes stay
+> unchecked until each item passes the manual parity audit — tick them as you
+> verify. Known intentional deltas: the embedded preview is the built-in
+> hls.js player (replaces python-vlc/libmpv, per contract §8); the Saved-tab
+> "＋ Add Current Recorder Model" button is renamed "＋ Add Model to Saved"
+> (same username/URL prompt behavior as classic).
+
 ## 1. App shell & header
 - [ ] Window title `Scr33nX`, devil icon, red/black theme
 - [ ] Logo + wordmark, `v{APP_VERSION}` next to it

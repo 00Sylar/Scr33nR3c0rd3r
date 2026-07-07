@@ -15,6 +15,7 @@
       <span class="ver" id="ver">v—</span>
     </div>
     <button class="update-pill" id="update-pill" hidden>● Update available</button>
+    <span class="lowdisk-pill" id="lowdisk-pill" hidden>⛔ LOW DISK — recording blocked</span>
     <div class="spacer"></div>
     <div class="meter">↓ <b id="m-down">0.0</b> Mbps</div>
     <div class="meter">↑ <b id="m-up">0.0</b> Mbps</div>
@@ -57,43 +58,119 @@
         <button class="tab" data-tab="settings">⚙ Settings</button>
       </nav>
 
+      <!-- ═══ RECORDER ═══ -->
       <section class="panel active" data-panel="recorder">
         <div class="toolbar">
-          <span class="sel" id="rec-note">engine live · full toolbar arrives in Phase 3</span>
+          <span class="sel" id="rec-sel">0 selected</span>
+          <button class="btn rec" id="b-rec">▶ REC</button>
+          <button class="btn" id="b-stop">⏹ Stop</button>
+          <button class="btn" id="b-auto">☑ Toggle AUTO</button>
+          <span class="vsep"></span>
+          <button class="btn danger" id="b-remove">✕ Remove</button>
+          <button class="btn danger" id="b-remoff">✕ Remove Offline</button>
+          <button class="btn" id="b-addsaved">★ Add to Saved</button>
+          <span class="vsep"></span>
+          <div class="search"><input id="rec-filter" placeholder="Filter models…" spellcheck="false"></div>
+          <select id="rec-status">
+            <option value="">Status: All</option>
+            <option value="recording">Recording</option>
+            <option value="online">Online</option>
+            <option value="offline">Offline</option>
+            <option value="private">Private</option>
+            <option value="checking">Checking</option>
+            <option value="error">Error</option>
+          </select>
           <div class="spacer"></div>
+          <button class="btn" id="b-clear">🧹 Clear Recorder</button>
+          <button class="btn danger" id="b-stopall">⏹ Stop All Downloads</button>
           <button class="btn go" id="btn-monitor">▶ Start Monitor</button>
         </div>
-        <div class="grid-wrap">
+        <div class="grid-wrap" id="rec-wrap">
           <div class="grid">
-            <div class="gr gr-head">
-              <span></span><span>Model</span><span>Rank</span><span>Status</span>
-              <span>Current file</span><span style="text-align:right">Size</span>
-              <span style="text-align:center">Auto</span><span style="text-align:center">Saved</span>
+            <div class="gr gr-head" id="rec-head">
+              <span></span>
+              <span class="sortable" data-col="name">Model <i></i></span>
+              <span class="sortable" data-col="rank">Rank <i></i></span>
+              <span class="sortable" data-col="status">Status <i></i></span>
+              <span>Current file</span>
+              <span class="sortable" data-col="size" style="text-align:right">Size <i></i></span>
+              <span class="sortable" data-col="auto" style="text-align:center">Auto <i></i></span>
+              <span class="sortable" data-col="saved" style="text-align:center">Saved <i></i></span>
             </div>
             <div id="rows"></div>
           </div>
         </div>
       </section>
 
-      <section class="panel scroll" data-panel="saved">
-        <div class="empty-state">
-          <h2>Saved Models</h2>
-          <p><b id="saved-count">0</b> model(s) loaded and persisted — the engine already
-             knows them. The watchlist table, scanner controls, and import/export
-             land here in <b>Phase 4</b>. Until then, use the classic app for
-             saved-list management.</p>
+      <!-- ═══ SAVED MODELS ═══ -->
+      <section class="panel" data-panel="saved">
+        <div class="toolbar">
+          <span class="sel">Saved Models · view-only status watchlist</span>
+          <span class="count-pill" id="saved-count">0 model(s)</span>
+          <span class="vsep"></span>
+          <div class="search"><input id="saved-filter" placeholder="Filter models…" spellcheck="false"></div>
+          <select id="saved-status">
+            <option value="">Status: All</option>
+            <option value="recording">Recording</option>
+            <option value="online">Online</option>
+            <option value="offline">Offline</option>
+            <option value="private">Private</option>
+            <option value="checking">Checking</option>
+          </select>
+          <div class="spacer"></div>
+          <button class="btn" id="b-export">📤 Export</button>
+          <button class="btn" id="b-import">📥 Import</button>
+          <button class="btn" id="b-savedadd">＋ Add Model to Saved</button>
+          <button class="btn go" id="btn-scanner">▶ Start Scanner</button>
+        </div>
+        <div class="grid-wrap" id="saved-wrap">
+          <div class="grid">
+            <div class="gr gr-s gr-head" id="saved-head">
+              <span></span>
+              <span class="sortable" data-col="name">Model <i></i></span>
+              <span class="sortable" data-col="rank">Rank <i></i></span>
+              <span class="sortable" data-col="status">Status <i></i></span>
+              <span>Current file</span>
+              <span class="sortable" data-col="size" style="text-align:right">Size <i></i></span>
+            </div>
+            <div id="saved-viewport"></div>
+          </div>
         </div>
       </section>
 
+      <!-- ═══ OUTPUT / UPLOAD ═══ -->
       <section class="panel scroll" data-panel="output">
-        <div class="empty-state">
-          <h2>Output / Upload</h2>
-          <p>The Telegram pipeline UI (stages, wizard, credentials, live log)
-             arrives in <b>Phase 5</b>. The pipeline itself keeps running in the
-             classic app; stage flags set via the bot API are persisted.</p>
+        <div class="pipe-top">
+          <button class="btn go" id="b-pipe">▶ Start Pipeline</button>
+          <span class="st offline" id="pipe-state"><span class="dot"></span>STOPPED</span>
+          <div class="spacer"></div>
+          <button class="btn" id="b-wizard">🧙 Setup Wizard</button>
+          <button class="btn" id="b-reauth">🔑 Re-auth / Switch Account</button>
         </div>
+        <div class="stages">
+          <span>Stages:</span>
+          <label class="check"><span class="cb" id="stage-convert"></span>① Convert .ts → .mp4</label>
+          <label class="check"><span class="cb" id="stage-upload"></span>② Upload .mp4 to Telegram</label>
+        </div>
+        <div class="card" style="margin-bottom: var(--sp-4)">
+          <h3>Telegram / Pipeline settings</h3>
+          <div class="form-2col">
+            <div class="field"><label>API ID</label><input id="p-api-id" spellcheck="false"></div>
+            <div class="field"><label>API Hash</label><input id="p-api-hash" spellcheck="false"></div>
+            <div class="field"><label>Chat / Group ID</label><input id="p-group" spellcheck="false"></div>
+            <div class="field"><label>Topic ID (0 if none)</label><input id="p-topic" spellcheck="false"></div>
+            <div class="field"><label>Converted .mp4 folder (empty = output/converted)</label><input id="p-conv" spellcheck="false"></div>
+            <div class="field"><label>TDLib session folder (empty = Pipeline/.tdlib)</label><input id="p-sess" spellcheck="false"></div>
+          </div>
+          <button class="btn" id="b-pipesave">💾 Save Pipeline Settings</button>
+        </div>
+        <div class="pipe-lines logpane" id="pipe-lines">
+          Convert:  idle<br>Upload 1: idle<br>Upload 2: idle
+        </div>
+        <div class="logpane" id="pipe-log" style="margin-top: var(--sp-3); height: 260px"></div>
       </section>
 
+      <!-- ═══ ACTIVITY LOG ═══ -->
       <section class="panel" data-panel="log">
         <div class="toolbar">
           <span class="sel">Activity Log</span>
@@ -105,13 +182,61 @@
         </div>
       </section>
 
+      <!-- ═══ SETTINGS ═══ -->
       <section class="panel scroll" data-panel="settings">
-        <div class="empty-state">
-          <h2>⚙ Settings</h2>
-          <p>Your saved settings are loaded and active (output folder, quality caps,
-             intervals, toggles all drive the engine right now). The editing UI +
-             System Check arrive in <b>Phase 5</b> — change settings in the classic
-             app meanwhile.</p>
+        <div class="cards">
+          <div class="card">
+            <h3>Recording</h3>
+            <div class="field"><label>Output Folder</label>
+              <div class="hrow"><input id="s-output" style="flex:1" spellcheck="false"><button class="btn" id="s-pick">📁</button></div>
+            </div>
+            <div class="form-2col">
+              <div class="field"><label>Max File Size (MB, empty = unlimited)</label><input id="s-maxsize"></div>
+              <div class="field"><label>Check Interval (sec)</label><input id="s-interval"></div>
+            </div>
+            <div class="field"><label>Max Quality (all models)</label>
+              <select id="s-quality"></select>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Behavior</h3>
+            <label class="toggle-row"><span class="switch" id="s-tray"></span>⤵️ Minimize to SysTray</label>
+            <label class="toggle-row"><span class="switch" id="s-notif"></span>🔔 Notifications</label>
+            <label class="toggle-row"><span class="switch" id="s-gap"></span>⚠️ Dropped-Segment Warnings</label>
+            <label class="toggle-row"><span class="switch" id="s-down"></span>⬇️ Auto-Downgrade Quality</label>
+            <label class="toggle-row"><span class="switch" id="s-disk"></span>⛔ Stop All if Disk &lt; 20 GB Free</label>
+            <label class="toggle-row"><span class="switch" id="s-pw"></span>🎭 Stripchat Browser Fallback</label>
+            <label class="toggle-row"><span class="switch" id="s-privacy"></span>🔒 Privacy Mode</label>
+          </div>
+          <div class="card">
+            <h3>Links &amp; Preview</h3>
+            <div class="field"><label>Open links with</label>
+              <select id="s-browser"></select>
+            </div>
+            <div class="form-2col">
+              <div class="field"><label>Preview mode</label>
+                <select id="s-pmode">
+                  <option value="external">External window</option>
+                  <option value="embedded">Embedded (in-app)</option>
+                </select>
+              </div>
+              <div class="field"><label>Preview engine (external)</label>
+                <select id="s-pengine">
+                  <option value="auto">Auto</option>
+                  <option value="mpv">mpv</option>
+                  <option value="vlc">VLC</option>
+                </select>
+              </div>
+            </div>
+            <div class="field"><label>Player path (optional, mpv.exe / vlc.exe)</label>
+              <input id="s-ppath" placeholder="auto-detect" spellcheck="false"></div>
+            <button class="btn-primary" id="s-save" style="margin-top:4px">💾 Save Settings</button>
+          </div>
+          <div class="card">
+            <h3>🔍 System Check</h3>
+            <div id="syscheck"></div>
+            <button class="btn" id="s-recheck" style="margin-top:10px">🔍 Re-check</button>
+          </div>
         </div>
       </section>
 
@@ -119,19 +244,90 @@
   </div>
 </div>
 
+<!-- context menu root -->
+<div class="ctx" id="ctx" hidden></div>
+
+<!-- generic confirm/info modal -->
 <div class="modal-backdrop" id="modal" hidden>
   <div class="modal">
     <h3 id="modal-title"></h3>
     <p id="modal-text"></p>
     <div class="modal-btns">
       <button class="btn" id="modal-cancel">Cancel</button>
-      <button class="btn-primary danger" id="modal-ok">OK</button>
+      <button class="btn-primary" id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- text prompt modal (saved-add, Telegram login code, …) -->
+<div class="modal-backdrop" id="prompt" hidden>
+  <div class="modal">
+    <h3 id="prompt-title"></h3>
+    <p id="prompt-text"></p>
+    <input id="prompt-input" style="width:100%" spellcheck="false">
+    <div class="modal-btns" style="margin-top: var(--sp-4)">
+      <button class="btn" id="prompt-cancel">Cancel</button>
+      <button class="btn-primary" id="prompt-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- browser picker -->
+<div class="modal-backdrop" id="bpick" hidden>
+  <div class="modal">
+    <h3>Open in which browser?</h3>
+    <div id="bpick-list"></div>
+    <label class="toggle-row" style="margin-top: var(--sp-3)">
+      <span class="cb" id="bpick-remember"></span>Remember my choice (change later in Settings)
+    </label>
+    <div class="modal-btns">
+      <button class="btn" id="bpick-cancel">Cancel</button>
+      <button class="btn-primary" id="bpick-ok">Open</button>
+    </div>
+  </div>
+</div>
+
+<!-- setup wizard -->
+<div class="modal-backdrop" id="wizard" hidden>
+  <div class="modal" style="min-width:480px">
+    <h3 id="wiz-title">Setup Wizard</h3>
+    <p class="wiz-step" id="wiz-stepnum"></p>
+    <div id="wiz-body"></div>
+    <div class="modal-btns">
+      <button class="btn" id="wiz-cancel">Cancel</button>
+      <button class="btn" id="wiz-back">← Back</button>
+      <button class="btn-primary" id="wiz-next">Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- embedded preview player -->
+<div class="modal-backdrop" id="player" hidden>
+  <div class="player-box">
+    <div class="player-head">
+      <span id="player-title">Preview</span>
+      <div class="spacer"></div>
+      <button class="btn" id="player-close">✕ Close</button>
+    </div>
+    <video id="player-video" controls autoplay></video>
+  </div>
+</div>
+
+<!-- privacy cover -->
+<div class="privacy" id="privacy" hidden>
+  <canvas id="stars"></canvas>
+  <div class="privacy-exit" id="privacy-exit" hidden>
+    <h3>Exit privacy mode?</h3>
+    <div class="modal-btns" style="justify-content:center">
+      <button class="btn" id="privacy-stay">Stay</button>
+      <button class="btn-primary" id="privacy-leave">Exit</button>
     </div>
   </div>
 </div>
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="vendor/hls.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

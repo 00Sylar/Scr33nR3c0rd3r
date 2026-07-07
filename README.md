@@ -82,6 +82,12 @@ playwright install chromium
 ### 4. Run the app
 Double-click **`Scr33nX.bat`** (launches the GUI with no console window).
 
+> 🧪 **New UI (beta):** a fully redesigned interface is available — same
+> engine, same settings, modern look. Try it with **`Scr33nX-WebUI.bat`**
+> (needs `pip install pywebview`; Windows 11's built-in WebView2 renders it —
+> no browser opens). The classic UI above remains the default during the
+> beta. Run only one of the two at a time (they share the control port).
+
 ### 5. Install the browser extension (optional)
 
 The extension adds models to Scr33nX with one click while you're on their page, and lets you set a 1–5 star rank from the popup once the model is in Saved Models or the Recorder. The app must be running (it listens on `http://localhost:5200`).
