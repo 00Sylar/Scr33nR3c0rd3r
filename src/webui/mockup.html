@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scr33nX — redesign mockup (static, fake data)</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ══ base ══════════════════════════════════════════════════════════ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg-0);
+    color: var(--text-1);
+    font: var(--fs-2)/1.45 var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    user-select: none;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: var(--r-full); border: 2px solid var(--bg-0); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  input, select {
+    font: inherit; color: var(--text-1);
+    background: var(--bg-0); border: 1px solid var(--line);
+    border-radius: var(--r-sm); padding: 7px 10px; outline: none;
+    transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+  }
+  input:focus, select:focus { border-color: var(--red-line); box-shadow: 0 0 0 3px var(--red-subtle); }
+  input::placeholder { color: var(--text-3); }
+
+  .app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; }
+
+  /* ══ header ════════════════════════════════════════════════════════ */
+  .header {
+    display: flex; align-items: center; gap: var(--sp-4);
+    padding: 0 var(--sp-4);
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand .mark {
+    font: 600 var(--fs-4)/1 var(--font-display);
+    letter-spacing: 0.4px;
+  }
+  .brand .mark em { font-style: normal; color: var(--red); }
+  .brand .ver {
+    font-size: var(--fs-0); color: var(--text-3);
+    border: 1px solid var(--line); border-radius: var(--r-full);
+    padding: 1px 8px;
+  }
+  .update-pill {
+    font-size: var(--fs-0); color: var(--warn);
+    background: rgba(255, 178, 36, 0.08);
+    border: 1px solid rgba(255, 178, 36, 0.25);
+    border-radius: var(--r-full); padding: 3px 10px;
+    transition: background var(--t-fast) var(--ease);
+  }
+  .update-pill:hover { background: rgba(255, 178, 36, 0.16); }
+  .header .spacer { flex: 1; }
+  .meter {
+    font-family: var(--font-mono); font-size: var(--fs-0);
+    color: var(--text-2); display: flex; align-items: center; gap: 6px;
+  }
+  .meter b { color: var(--text-1); font-weight: 500; }
+  .status-pill {
+    display: flex; align-items: center; gap: 7px;
+    font-size: var(--fs-0); letter-spacing: 0.8px; color: var(--text-2);
+    border: 1px solid var(--line); border-radius: var(--r-full);
+    padding: 4px 12px; background: var(--bg-2);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
+  .btn-terminate {
+    display: flex; align-items: center; gap: 7px;
+    font-size: var(--fs-1); font-weight: 600; color: #fff;
+    background: var(--red); border-radius: var(--r-sm);
+    padding: 7px 14px; box-shadow: var(--shadow-sm);
+    transition: background var(--t-fast) var(--ease), box-shadow var(--t-med) var(--ease);
+  }
+  .btn-terminate:hover { background: var(--red-bright); box-shadow: var(--shadow-sm), var(--glow-red); }
+
+  /* ══ layout ════════════════════════════════════════════════════════ */
+  .body { display: grid; grid-template-columns: 232px 1fr; min-height: 0; }
+
+  /* ── sidebar ── */
+  .sidebar {
+    background: var(--bg-1); border-right: 1px solid var(--line);
+    padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4);
+    overflow-y: auto;
+  }
+  .card {
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: var(--r-md); padding: var(--sp-4);
+    box-shadow: var(--shadow-sm);
+  }
+  .card h3 {
+    font-size: var(--fs-0); font-weight: 600; letter-spacing: 1.2px;
+    color: var(--text-3); text-transform: uppercase; margin-bottom: var(--sp-3);
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--sp-3); }
+  .field label { font-size: var(--fs-0); color: var(--text-2); }
+  .field input, .field select { width: 100%; }
+  .btn-primary {
+    width: 100%; padding: 8px 0; border-radius: var(--r-sm);
+    background: var(--red); color: #fff; font-weight: 600; font-size: var(--fs-1);
+    box-shadow: var(--shadow-sm);
+    transition: background var(--t-fast) var(--ease), box-shadow var(--t-med) var(--ease), transform var(--t-fast) var(--ease);
+  }
+  .btn-primary:hover { background: var(--red-bright); box-shadow: var(--shadow-sm), var(--glow-red); }
+  .btn-primary:active { transform: translateY(1px); }
+
+  .live-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--sp-3); }
+  .live-head .n {
+    display: flex; align-items: center; gap: 8px;
+    font: 600 var(--fs-3)/1 var(--font-mono); color: var(--red);
+  }
+  .live-head .n .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .live-head small { color: var(--text-3); font-size: var(--fs-0); }
+  table.live { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--fs-0); }
+  table.live th { color: var(--text-3); font-weight: 400; text-align: right; padding: 2px 0; }
+  table.live th:first-child { text-align: left; }
+  table.live td { color: var(--text-2); text-align: right; padding: 3px 0; }
+  table.live td:first-child { text-align: left; color: var(--text-1); }
+  table.live td.rec { color: var(--red); }
+  table.live td.on { color: var(--ok); }
+  table.live tr.all td { border-top: 1px solid var(--line); color: var(--text-1); padding-top: 6px; }
+
+  /* ── main ── */
+  .main { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; min-width: 0; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 2px; padding: var(--sp-3) var(--sp-4) 0; border-bottom: 1px solid var(--line); }
+  .tab {
+    position: relative; padding: 9px 16px 11px;
+    font-size: var(--fs-2); color: var(--text-2);
+    border-radius: var(--r-sm) var(--r-sm) 0 0;
+    transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+  }
+  .tab:hover { color: var(--text-1); background: var(--bg-hover); }
+  .tab.active { color: var(--text-1); }
+  .tab::after {
+    content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
+    background: var(--red); border-radius: var(--r-full);
+    transform: scaleX(0); transition: transform var(--t-med) var(--ease);
+  }
+  .tab.active::after { transform: scaleX(1); }
+
+  /* toolbar */
+  .toolbar {
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .toolbar .sel { font-size: var(--fs-0); color: var(--text-3); min-width: 68px; }
+  .btn {
+    display: flex; align-items: center; gap: 6px;
+    font-size: var(--fs-1); color: var(--text-2);
+    border: 1px solid var(--line); border-radius: var(--r-sm);
+    padding: 6px 12px; background: var(--bg-2);
+    transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+                background var(--t-fast) var(--ease), box-shadow var(--t-med) var(--ease);
+  }
+  .btn:hover { color: var(--text-1); border-color: var(--line-strong); background: var(--bg-3); box-shadow: var(--shadow-sm); }
+  .btn.rec { color: var(--red-bright); border-color: var(--red-line); }
+  .btn.rec:hover { background: var(--red-subtle); box-shadow: var(--shadow-sm), var(--glow-red); }
+  .btn.danger:hover { color: var(--red-bright); border-color: var(--red-line); background: var(--red-subtle); }
+  .btn.go { color: var(--go-bright); border-color: rgba(47, 158, 99, 0.35); }
+  .btn.go:hover { background: var(--go-subtle); }
+  .vsep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--sp-1); }
+  .toolbar .spacer { flex: 1; }
+  .search { position: relative; }
+  .search input { width: 170px; padding-left: 30px; background: var(--bg-2); }
+  .search::before {
+    content: "⌕"; position: absolute; left: 10px; top: 50%; translate: 0 -52%;
+    color: var(--text-3); font-size: 15px; pointer-events: none;
+  }
+
+  /* ── table ── */
+  .grid-wrap { overflow-y: auto; min-height: 0; padding: 0 var(--sp-4) var(--sp-4); }
+  .grid {
+    background: var(--bg-1); border: 1px solid var(--line);
+    border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-md);
+  }
+  .gr {
+    display: grid;
+    grid-template-columns: 40px minmax(160px, 1.4fr) 118px 130px minmax(220px, 2fr) 92px 64px 64px;
+    align-items: center; column-gap: var(--sp-2);
+    padding: 0 var(--sp-3);
+  }
+  .gr-head {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+    height: 36px;
+    font-size: var(--fs-0); letter-spacing: 1px; color: var(--text-3); text-transform: uppercase;
+  }
+  .gr-head span { cursor: pointer; transition: color var(--t-fast) var(--ease); }
+  .gr-head span:hover { color: var(--text-1); }
+  .gr-head .sorted { color: var(--red-bright); }
+  .g-site {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px 6px;
+    font-size: var(--fs-0); font-weight: 600; letter-spacing: 1.6px; color: var(--red);
+  }
+  .g-site::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .row {
+    height: 40px; font-size: var(--fs-1); color: var(--text-2);
+    border-radius: var(--r-sm);
+    transition: background var(--t-fast) var(--ease);
+    cursor: default;
+  }
+  .row:hover { background: var(--bg-hover); }
+  .row.selected { background: var(--red-subtle); box-shadow: inset 2px 0 0 var(--red); }
+  .row .name { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.recording .name { color: var(--red-bright); font-weight: 600; }
+
+  .cb {
+    width: 16px; height: 16px; border: 1px solid var(--line-strong); border-radius: 4px;
+    display: grid; place-items: center; color: transparent; font-size: 11px;
+    transition: all var(--t-fast) var(--ease); cursor: pointer;
+  }
+  .cb:hover { border-color: var(--text-2); }
+  .cb.on { background: var(--red); border-color: var(--red); color: #fff; }
+
+  .stars { display: flex; gap: 1px; font-size: 13px; color: var(--text-3); cursor: pointer; }
+  .stars b { font-weight: 400; color: var(--gold); }
+  .stars span:hover { color: var(--gold); text-shadow: 0 0 6px rgba(217, 184, 120, 0.5); }
+
+  .st { display: flex; align-items: center; gap: 8px; font-size: var(--fs-0); letter-spacing: 0.6px; }
+  .st .dot { transition: background var(--t-med) var(--ease); }
+  .st.rec       { color: var(--red-bright); } .st.rec .dot { background: var(--red); animation: pulse 1.4s var(--ease) infinite; }
+  .st.online    { color: var(--ok); }         .st.online .dot { background: var(--ok); }
+  .st.offline   { color: var(--text-3); }     .st.offline .dot { background: var(--text-3); }
+  .st.private   { color: var(--warn); }       .st.private .dot { background: var(--warn); }
+  .st.checking  { color: var(--info); }       .st.checking .dot { background: var(--info); animation: pulse 1.4s var(--ease) infinite; }
+  @keyframes pulse { 50% { opacity: 0.35; box-shadow: 0 0 0 4px var(--red-subtle); } }
+
+  .file { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-3);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.recording .file { color: var(--text-2); }
+  .size { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-2); text-align: right; }
+
+  .switch {
+    width: 30px; height: 17px; border-radius: var(--r-full);
+    background: var(--bg-3); border: 1px solid var(--line-strong);
+    position: relative; cursor: pointer; transition: background var(--t-med) var(--ease);
+    justify-self: center;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
+    border-radius: 50%; background: var(--text-2); transition: all var(--t-med) var(--ease);
+  }
+  .switch.on { background: var(--red); border-color: var(--red); }
+  .switch.on::after { left: 15px; background: #fff; }
+
+  .saved-check { justify-self: center; color: var(--go-bright); font-size: 13px; }
+  .saved-check.no { color: var(--text-3); opacity: 0.35; }
+
+  /* mockup banner */
+  .mock-note {
+    position: fixed; bottom: 14px; right: 16px; z-index: 9;
+    font-size: var(--fs-0); color: var(--text-3);
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: var(--r-full); padding: 5px 14px; box-shadow: var(--shadow-md);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div class="brand">
+      <span class="mark">Scr33n<em>X</em></span>
+      <span class="ver">v2.0</span>
+    </div>
+    <button class="update-pill">● Update available (v2.1)</button>
+    <div class="spacer"></div>
+    <div class="meter">↓ <b>23.4</b> Mbps</div>
+    <div class="meter">↑ <b>0.0</b> Mbps</div>
+    <div class="status-pill"><span class="dot" style="background:var(--go-bright)"></span>RECORDER ACTIVE</div>
+    <button class="btn-terminate">⛔ Terminate</button>
+  </header>
+
+  <div class="body">
+
+    <aside class="sidebar">
+      <div class="card">
+        <h3>Add Model</h3>
+        <div class="field"><label>Username or Link</label><input placeholder="name or full URL"></div>
+        <div class="field"><label>Site</label>
+          <select><option>chaturbate</option><option>stripchat</option><option>camsoda</option><option>myfreecams</option></select>
+        </div>
+        <button class="btn-primary">＋ Add Model</button>
+      </div>
+
+      <div class="card">
+        <div class="live-head">
+          <span class="n"><span class="dot"></span>2 LIVE</span>
+          <small>31 models</small>
+        </div>
+        <table class="live">
+          <tr><th></th><th>▶</th><th>●</th><th>○</th></tr>
+          <tr><td>CB</td><td class="rec">1</td><td class="on">1</td><td>18</td></tr>
+          <tr><td>SC</td><td class="rec">1</td><td class="on">0</td><td>13</td></tr>
+          <tr class="all"><td>ALL</td><td class="rec">2</td><td class="on">1</td><td>31</td></tr>
+        </table>
+      </div>
+    </aside>
+
+    <main class="main">
+
+      <nav class="tabs">
+        <button class="tab active">Recorder</button>
+        <button class="tab">Saved Models</button>
+        <button class="tab">Output / Upload</button>
+        <button class="tab">Activity Log</button>
+        <button class="tab">⚙ Settings</button>
+      </nav>
+
+      <div class="toolbar">
+        <span class="sel" id="selcount">0 selected</span>
+        <button class="btn rec">▶ REC</button>
+        <button class="btn">⏹ Stop</button>
+        <button class="btn">☑ Toggle AUTO</button>
+        <span class="vsep"></span>
+        <button class="btn danger">✕ Remove</button>
+        <button class="btn danger">✕ Remove Offline</button>
+        <button class="btn">★ Add to Saved</button>
+        <span class="vsep"></span>
+        <div class="search"><input placeholder="Filter models…"></div>
+        <select><option>Status: All</option><option>Recording</option><option>Online</option><option>Offline</option></select>
+        <div class="spacer"></div>
+        <button class="btn">🧹 Clear Recorder</button>
+        <button class="btn danger">⏹ Stop All Downloads</button>
+        <button class="btn go">▶ Start Monitor</button>
+      </div>
+
+      <div class="grid-wrap">
+        <div class="grid">
+          <div class="gr gr-head">
+            <span></span><span class="sorted">Model ↑</span><span>Rank ↕</span><span>Status ↕</span>
+            <span>Current file</span><span style="text-align:right">Size ↕</span>
+            <span style="text-align:center">Auto</span><span style="text-align:center">Saved</span>
+          </div>
+          <div id="rows"></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<div class="mock-note">static design mockup · fake data · nothing is wired</div>
+
+<script>
+/* Fake data — enough variety to show every visual state. */
+const DATA = [
+  ["STRIPCHAT", [
+    ["veronica_isaza_", 5, "rec",      "veronica_isaza__ST_20260706_141002.ts", "1.24 GB", true,  true],
+    ["arieliciousxxx",  4, "online",   "", "", true,  true],
+    ["assh_lee_",       4, "offline",  "", "", false, true],
+    ["annieblluee",     4, "private",  "", "", true,  true],
+    ["stefany_gonzales_",4,"offline",  "", "", false, true],
+    ["julia_roberths",  4, "offline",  "", "", false, true],
+    ["hanna_gomeez_",   5, "checking", "", "", true,  true],
+    ["hailey_hadid",    4, "offline",  "", "", false, true],
+    ["danna_peters",    4, "offline",  "", "", false, false],
+  ]],
+  ["CHATURBATE", [
+    ["sensualcherry_",  5, "rec",      "sensualcherry__CB_20260706_135544_part002.ts", "2.87 GB", true, true],
+    ["naomisainz",      5, "offline",  "", "", false, true],
+    ["missbunnygirl",   5, "offline",  "", "", false, true],
+    ["miablueye",       4, "offline",  "", "", false, true],
+    ["brazilians_doitbetter", 4, "offline", "", "", false, true],
+    ["lil_eva",         4, "offline",  "", "", false, false],
+    ["shiny_lily",      4, "offline",  "", "", false, true],
+    ["cyanide_candys",  3, "offline",  "", "", false, true],
+    ["hayleex",         5, "offline",  "", "", false, true],
+  ]],
+];
+const ST = { rec: "RECORDING", online: "ONLINE", offline: "OFFLINE", private: "PRIVATE", checking: "CHECKING" };
+
+const rows = document.getElementById("rows");
+for (const [site, models] of DATA) {
+  rows.insertAdjacentHTML("beforeend", `<div class="g-site">${site}</div>`);
+  for (const [name, rank, st, file, size, auto, saved] of models) {
+    const stars = "★".repeat(rank) + "☆".repeat(5 - rank);
+    rows.insertAdjacentHTML("beforeend", `
+      <div class="row gr ${st === "rec" ? "recording" : ""}">
+        <span class="cb"></span>
+        <span class="name">${name}</span>
+        <span class="stars"><b>${"★".repeat(rank)}</b>${"☆".repeat(5 - rank)}</span>
+        <span class="st ${st}"><span class="dot"></span>${ST[st]}</span>
+        <span class="file">${file || "—"}</span>
+        <span class="size">${size || "—"}</span>
+        <span class="switch ${auto ? "on" : ""}"></span>
+        <span class="saved-check ${saved ? "" : "no"}">${saved ? "✓" : "—"}</span>
+      </div>`);
+  }
+}
+
+/* Just enough interactivity to feel it: checkboxes, AUTO switches, row select, tabs. */
+const sel = document.getElementById("selcount");
+function refreshSel() {
+  const n = document.querySelectorAll(".cb.on").length;
+  sel.textContent = n ? `✓ ${n} checked` : "0 selected";
+}
+rows.addEventListener("click", (e) => {
+  const cb = e.target.closest(".cb");
+  const sw = e.target.closest(".switch");
+  const row = e.target.closest(".row");
+  if (cb) { cb.classList.toggle("on"); row.classList.toggle("selected", cb.classList.contains("on")); refreshSel(); return; }
+  if (sw) { sw.classList.toggle("on"); return; }
+  if (row) { row.classList.toggle("selected"); }
+});
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelector(".tab.active").classList.remove("active");
+  t.classList.add("active");
+}));
+</script>
+</body>
+</html>
