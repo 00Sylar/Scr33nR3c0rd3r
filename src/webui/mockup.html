@@ -280,6 +280,24 @@
   /* desktop-style drag-rectangle selection */
   .marquee { position: fixed; z-index: 99; pointer-events: none;
              background: var(--red-subtle); border: 1px solid var(--red-line); border-radius: 3px; }
+
+  /* ── context menu ── */
+  .ctx {
+    position: fixed; z-index: 100; min-width: 250px;
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+    padding: 6px; animation: fadein var(--t-fast) var(--ease);
+  }
+  .ctx .mi {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; border-radius: var(--r-sm);
+    font-size: var(--fs-1); color: var(--text-2); cursor: pointer;
+    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  }
+  .ctx .mi:hover { background: var(--bg-hover); color: var(--text-1); }
+  .ctx .mi.danger:hover { background: var(--red-subtle); color: var(--red-bright); }
+  .ctx .mi .sub { margin-left: auto; color: var(--text-3); }
+  .ctx hr { border: none; border-top: 1px solid var(--line); margin: 6px 4px; }
   .row {
     height: 40px; font-size: var(--fs-1); color: var(--text-2);
     border-radius: var(--r-sm);
@@ -708,6 +726,59 @@ document.addEventListener("mouseup", () => {
   if (mq) { mq.remove(); suppressClick = true; }
   mq = null; mqStart = null;
 });
+
+/* Right-click menu (mock: shows the real item set + design; items don't act yet). */
+let ctx = null;
+function closeCtx() { if (ctx) { ctx.remove(); ctx = null; } }
+document.addEventListener("contextmenu", (e) => {
+  const row = e.target.closest(".row");
+  if (!row) return;                              /* elsewhere: browser default */
+  e.preventDefault();
+  closeCtx();
+  const name = row.querySelector(".name").textContent;
+  const saved = !!row.closest('[data-panel="saved"]');
+  const items = saved ? [
+    [`＋  Add to Recorder  ${name}`],
+    ["▶  Preview"],
+    ["hr"],
+    ["🔗  Copy Model URL"],
+    ["🌐  Open in Browser"],
+    ["🌐  Open in Browser (choose…)"],
+    ["⭐  Set Rank", "▸"],
+    ["hr"],
+    ["✕  Remove from Saved Models", "", "danger"],
+  ] : [
+    [`▶  Start Recording  ${name}`],
+    ["⏹  Stop Recording"],
+    ["☑  Auto-Record"],
+    ["🎞  Max Quality  (Global)", "▸"],
+    ["hr"],
+    ["⭐  Add to Saved Models"],
+    ["▶  Preview"],
+    ["⭐  Set Rank", "▸"],
+    ["hr"],
+    ["🔗  Copy Model URL"],
+    ["🌐  Open in Browser"],
+    ["🌐  Open in Browser (choose…)"],
+    ["📁  Open Output Folder"],
+    ["hr"],
+    ["✕  Remove Model", "", "danger"],
+  ];
+  ctx = document.createElement("div");
+  ctx.className = "ctx";
+  ctx.innerHTML = items.map(([label, sub, cls]) =>
+    label === "hr" ? "<hr>" :
+    `<div class="mi ${cls || ""}">${label}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`
+  ).join("");
+  ctx.addEventListener("click", closeCtx);
+  document.body.appendChild(ctx);
+  const x = Math.min(e.clientX, innerWidth - ctx.offsetWidth - 8);
+  const y = Math.min(e.clientY, innerHeight - ctx.offsetHeight - 8);
+  Object.assign(ctx.style, { left: x + "px", top: y + "px" });
+});
+document.addEventListener("mousedown", (e) => { if (ctx && !e.target.closest(".ctx")) closeCtx(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCtx(); });
+window.addEventListener("blur", closeCtx);
 </script>
 </body>
 </html>
