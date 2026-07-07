@@ -661,6 +661,14 @@ class WebCore:
                 return p, kind
         return None, None
 
+    # Short, friendly text shown to the user; the real reason is logged.
+    _PREVIEW_SHORT = "Preview is not available for this model at the moment."
+
+    def _preview_unavailable(self, detail: str) -> dict:
+        """Log the true reason (for later analysis) but return a short message."""
+        self._log_add(detail, "warn")
+        return {"ok": False, "error": self._PREVIEW_SHORT}
+
     def preview_resolve(self, name: str, site: str) -> dict:
         """Blocking (called on a js_api thread): resolve upstream, wrap in the
         relay. External mode spawns the player; embedded returns the localhost
@@ -669,8 +677,10 @@ class WebCore:
         cfg = self.recorder.models.get(key)
         status = cfg.status if cfg else None
         if status not in (ModelStatus.ONLINE, ModelStatus.RECORDING):
-            return {"ok": False, "error": f"{name} ({site}) isn't online right "
-                    "now — preview only works for online or recording models."}
+            return self._preview_unavailable(
+                f"Preview: {name} ({site}) is not online "
+                f"(status={_STATUS_STR.get(status, 'offline')}) — preview only "
+                "works for online or recording models.")
         title = f"{name} ({site})"
         self._log_add(f"Preview: resolving {title}…")
         try:
@@ -680,16 +690,17 @@ class WebCore:
             else:
                 upstream = recorder_mod.get_stream_url(site, name)
         except Exception as e:
-            return {"ok": False, "error": f"Preview failed for {title}: {e}"}
+            return self._preview_unavailable(f"Preview failed for {title}: {e}")
         if not upstream:
-            return {"ok": False, "error": f"Preview: couldn't resolve {title} "
-                    + ("(Stripchat private/needs browser path?)"
-                       if site == "stripchat" else "(offline?)")}
+            return self._preview_unavailable(
+                f"Preview: couldn't resolve {title} "
+                + ("(Stripchat private/needs browser path?)"
+                   if site == "stripchat" else "(offline?)"))
         try:
             url = cb_relay.wrap(upstream, recorder_mod.USER_AGENT, mode=site,
                                 label=f"{site}:{name}")
         except Exception as e:
-            return {"ok": False, "error": f"Preview relay error: {e}"}
+            return self._preview_unavailable(f"Preview relay error: {e}")
         mode = (self.settings.preview_mode or "external").lower()
         if mode == "embedded":
             return {"ok": True, "mode": "embedded", "url": url, "title": title}
