@@ -128,7 +128,7 @@
   table.live tr.all td { border-top: 1px solid var(--line); color: var(--text-1); padding-top: 6px; }
 
   /* ── main ── */
-  .main { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; min-width: 0; }
+  .main { display: grid; grid-template-rows: auto 1fr; min-height: 0; min-width: 0; }
 
   /* tabs */
   .tabs { display: flex; gap: 2px; padding: var(--sp-3) var(--sp-4) 0; border-bottom: 1px solid var(--line); }
@@ -176,6 +176,49 @@
     color: var(--text-3); font-size: 15px; pointer-events: none;
   }
 
+  /* ── tab panels ── */
+  .panel { display: none; min-height: 0; }
+  .panel.active { display: grid; grid-template-rows: auto 1fr; animation: fadein var(--t-slow) var(--ease); }
+  .panel.scroll.active { display: block; overflow-y: auto; padding: var(--sp-4); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(5px); } }
+
+  .count-pill { font-size: var(--fs-0); color: var(--text-2); border: 1px solid var(--line);
+                border-radius: var(--r-full); padding: 2px 10px; }
+  .pipe-top { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+  .panel-title { font: 600 var(--fs-3) var(--font-display); color: var(--text-1); }
+
+  .gr-s { grid-template-columns: 40px minmax(160px, 1.4fr) 118px 130px minmax(220px, 2fr) 92px; }
+
+  .stages { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4);
+            color: var(--text-3); font-size: var(--fs-1); }
+  label.check { display: flex; align-items: center; gap: 8px; color: var(--text-2); cursor: pointer;
+                transition: color var(--t-fast) var(--ease); }
+  label.check:hover { color: var(--text-1); }
+
+  .form-2col { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--sp-4); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: var(--sp-4); }
+
+  .toggle-row { display: flex; align-items: center; gap: 10px; padding: 6px 0;
+                font-size: var(--fs-1); color: var(--text-2); cursor: pointer;
+                transition: color var(--t-fast) var(--ease); }
+  .toggle-row:hover { color: var(--text-1); }
+
+  .sys-row { display: flex; align-items: center; gap: 10px; padding: 5px 0;
+             font-size: var(--fs-1); color: var(--text-2); }
+  .sys-row .mark-ok { color: var(--go-bright); }
+  .sys-row .mark-bad { color: var(--red-bright); }
+  .sys-row .path { color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-0);
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .btn.mini { padding: 2px 10px; font-size: var(--fs-0); }
+
+  .logpane { font-family: var(--font-mono); font-size: var(--fs-0); line-height: 1.9;
+             color: var(--text-2); background: var(--bg-0); border: 1px solid var(--line);
+             border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); overflow-y: auto; }
+  .logpane .t { color: var(--text-3); }
+  .logpane .rec { color: var(--red-bright); }
+  .logpane .ok { color: var(--go-bright); }
+  .logpane .warn { color: var(--warn); }
+
   /* ── table ── */
   .grid-wrap { overflow-y: auto; min-height: 0; padding: 0 var(--sp-4) var(--sp-4); }
   .grid {
@@ -219,6 +262,7 @@
     display: grid; place-items: center; color: transparent; font-size: 11px;
     transition: all var(--t-fast) var(--ease); cursor: pointer;
   }
+  .cb::after { content: "✓"; }
   .cb:hover { border-color: var(--text-2); }
   .cb.on { background: var(--red); border-color: var(--red); color: #fff; }
 
@@ -310,13 +354,14 @@
     <main class="main">
 
       <nav class="tabs">
-        <button class="tab active">Recorder</button>
-        <button class="tab">Saved Models</button>
-        <button class="tab">Output / Upload</button>
-        <button class="tab">Activity Log</button>
-        <button class="tab">⚙ Settings</button>
+        <button class="tab active" data-tab="recorder">Recorder</button>
+        <button class="tab" data-tab="saved">Saved Models</button>
+        <button class="tab" data-tab="output">Output / Upload</button>
+        <button class="tab" data-tab="log">Activity Log</button>
+        <button class="tab" data-tab="settings">⚙ Settings</button>
       </nav>
 
+      <section class="panel active" data-panel="recorder">
       <div class="toolbar">
         <span class="sel" id="selcount">0 selected</span>
         <button class="btn rec">▶ REC</button>
@@ -345,6 +390,137 @@
           <div id="rows"></div>
         </div>
       </div>
+      </section>
+
+      <section class="panel" data-panel="saved">
+        <div class="toolbar">
+          <span class="sel" style="min-width:auto">Saved Models · view-only status watchlist</span>
+          <span class="count-pill">3,825 model(s)</span>
+          <span class="vsep"></span>
+          <div class="search"><input placeholder="Filter models…"></div>
+          <select><option>Status: All</option><option>Online</option><option>Offline</option></select>
+          <div class="spacer"></div>
+          <button class="btn">📤 Export</button>
+          <button class="btn">📥 Import</button>
+          <button class="btn">＋ Add Current Recorder Model</button>
+          <button class="btn go">▶ Start Scanner</button>
+        </div>
+        <div class="grid-wrap">
+          <div class="grid">
+            <div class="gr gr-s gr-head">
+              <span></span><span class="sorted">Model ↑</span><span>Rank ↕</span><span>Status ↕</span>
+              <span>Current file</span><span style="text-align:right">Size ↕</span>
+            </div>
+            <div id="savedrows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="output">
+        <div class="pipe-top">
+          <button class="btn go">▶ Start Pipeline</button>
+          <span class="st offline"><span class="dot"></span>STOPPED</span>
+          <div class="spacer"></div>
+          <button class="btn">🧙 Setup Wizard</button>
+          <button class="btn">🔑 Re-auth / Switch Account</button>
+        </div>
+        <div class="stages">
+          <span>Stages:</span>
+          <label class="check"><span class="cb on"></span>① Convert .ts → .mp4</label>
+          <label class="check"><span class="cb on"></span>② Upload .mp4 to Telegram</label>
+        </div>
+        <div class="card" style="margin-bottom: var(--sp-4)">
+          <h3>Telegram / Pipeline settings</h3>
+          <div class="form-2col">
+            <div class="field"><label>API ID</label><input value="1234567"></div>
+            <div class="field"><label>API Hash</label><input value="0123456789abcdef0123456789abcdef"></div>
+            <div class="field"><label>Chat / Group ID</label><input value="-1001234567890"></div>
+            <div class="field"><label>Topic ID (0 if none)</label><input value="1"></div>
+            <div class="field"><label>Converted .mp4 folder</label><input value="C:\Users\luiis\Downloads\VIDS\1"></div>
+            <div class="field"><label>TDLib session folder</label><input value="C:\Users\luiis\Downloads\VIDS"></div>
+          </div>
+          <button class="btn">💾 Save Pipeline Settings</button>
+        </div>
+        <div class="logpane">
+          <span class="warn">Convert:</span>  idle<br>
+          <span class="ok">Upload 1:</span> idle<br>
+          <span class="ok">Upload 2:</span> idle
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="log">
+        <div class="pipe-top">
+          <span class="panel-title">Activity Log</span>
+          <div class="spacer"></div>
+          <button class="btn">Clear</button>
+        </div>
+        <div class="logpane" style="height: calc(100vh - 210px)">
+          <span class="t">[13:55:44]</span> <span class="ok">MONITOR</span>  started — polling 31 models every 30 s<br>
+          <span class="t">[13:55:47]</span> <span class="rec">REC</span>      sensualcherry_ (CB) went live — recording started, 1080p pinned<br>
+          <span class="t">[13:58:03]</span> <span class="t">INFO</span>     relay: 64 prefetch workers active<br>
+          <span class="t">[14:10:02]</span> <span class="rec">REC</span>      veronica_isaza_ (SC) went live — native MOUFLON path, recording started<br>
+          <span class="t">[14:22:41]</span> <span class="warn">WARN</span>     sensualcherry_: 3 segments expired before download (bandwidth?)<br>
+          <span class="t">[14:23:10]</span> <span class="t">INFO</span>     sensualcherry_: split at 3070 MB → _part002.ts<br>
+          <span class="t">[14:31:07]</span> <span class="t">INFO</span>     hanna_gomeez_: status check → private show<br>
+          <span class="t">[14:40:55]</span> <span class="ok">SAVED</span>    ranks + models flushed to disk
+        </div>
+      </section>
+
+      <section class="panel scroll" data-panel="settings">
+        <div class="cards">
+          <div class="card">
+            <h3>Recording</h3>
+            <div class="field"><label>Output Folder</label>
+              <div style="display:flex;gap:8px"><input value="C:\Users\luiis\Videos\StreamRecorder" style="flex:1"><button class="btn">📁</button></div>
+            </div>
+            <div class="form-2col">
+              <div class="field"><label>Max File Size (MB)</label><input value="3070"></div>
+              <div class="field"><label>Check Interval (sec)</label><input value="30"></div>
+            </div>
+            <div class="field"><label>Max Quality (all models)</label>
+              <select><option>Unlimited</option><option>1080p</option><option>720p</option><option>480p</option></select>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Behavior</h3>
+            <label class="toggle-row"><span class="switch on"></span>⤵ Minimize to SysTray</label>
+            <label class="toggle-row"><span class="switch on"></span>🔔 Notifications</label>
+            <label class="toggle-row"><span class="switch on"></span>⚠ Dropped-Segment Warnings</label>
+            <label class="toggle-row"><span class="switch"></span>⬇ Auto-Downgrade Quality</label>
+            <label class="toggle-row"><span class="switch"></span>⛔ Stop All if Disk &lt; 20 GB Free</label>
+            <label class="toggle-row"><span class="switch on"></span>🎭 Stripchat Browser Fallback</label>
+            <label class="toggle-row"><span class="switch"></span>🔒 Privacy Mode</label>
+          </div>
+          <div class="card">
+            <h3>Links &amp; Preview</h3>
+            <div class="field"><label>Open links with</label>
+              <select><option>Ask each time</option><option>System default</option><option>Brave</option></select>
+            </div>
+            <div class="form-2col">
+              <div class="field"><label>Preview mode</label>
+                <select><option>External window</option><option>Embedded (in-app)</option></select>
+              </div>
+              <div class="field"><label>Preview engine</label>
+                <select><option>Auto</option><option>mpv</option><option>VLC</option></select>
+              </div>
+            </div>
+            <div class="field"><label>Player path (optional)</label><input placeholder="mpv.exe / vlc.exe"></div>
+            <button class="btn-primary" style="margin-top:4px">💾 Save Settings</button>
+          </div>
+          <div class="card">
+            <h3>🔍 System Check</h3>
+            <div class="sys-row"><span class="mark-ok">✓</span>ffmpeg<span class="path">C:\Users\luiis\AppData\Local\Microsoft\WinGet\...\ffmpeg.exe</span></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>ffplay<span class="path">bundled with ffmpeg</span></div>
+            <div class="sys-row"><span class="mark-bad">✗</span>mpv<span class="path">not found</span><button class="btn mini">Add to PATH</button></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>VLC<span class="path">C:\Program Files\VideoLAN\VLC</span></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>python-vlc<span class="path">3.0.20</span></div>
+            <div class="sys-row"><span class="mark-bad">✗</span>python-mpv<span class="path">optional</span><button class="btn mini">Install</button></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>tdjson<span class="path">1.8.56</span></div>
+            <div class="sys-row"><span class="mark-ok">✓</span>Playwright Chromium<span class="path">v1.50</span></div>
+            <button class="btn" style="margin-top:10px">🔍 Re-check</button>
+          </div>
+        </div>
+      </section>
 
     </main>
   </div>
@@ -399,23 +575,60 @@ for (const [site, models] of DATA) {
   }
 }
 
-/* Just enough interactivity to feel it: checkboxes, AUTO switches, row select, tabs. */
+/* Saved Models fake data (view-only watchlist — no AUTO/SAVED columns). */
+const SAVED = [
+  ["kalisa_pearl", 5, "offline"], ["miya_shake", 0, "offline"], ["nuryforerogh", 3, "offline"],
+  ["_healing_hottie_", 5, "online"], ["toomuch_wet_", 4, "offline"], ["yumeko_midari", 4, "offline"],
+  ["bianca_lawwson_", 0, "offline"], ["ellinrose_", 0, "offline"], ["effsweet", 0, "offline"],
+  ["ohanna_", 1, "offline"], ["emilyfinne", 0, "online"], ["emyii", 0, "offline"],
+  ["ayla_mark", 0, "offline"], ["baby_sammyy", 5, "offline"], ["hade_rosse", 0, "offline"],
+  ["lilithhfosterr", 3, "offline"], ["cameron69_", 0, "offline"], ["ss_samantha", 4, "offline"],
+  ["karlenegries", 2, "offline"], ["veronicamartin_", 5, "offline"], ["nina_ponse", 4, "offline"],
+  ["_tammarra_", 0, "offline"], ["kristina_ferreira", 5, "offline"], ["ellediane", 5, "offline"],
+];
+const srows = document.getElementById("savedrows");
+srows.insertAdjacentHTML("beforeend", `<div class="g-site">CHATURBATE</div>`);
+for (const [name, rank, st] of SAVED) {
+  srows.insertAdjacentHTML("beforeend", `
+    <div class="row gr gr-s">
+      <span class="cb"></span>
+      <span class="name">${name}</span>
+      <span class="stars"><b>${"★".repeat(rank)}</b>${"☆".repeat(5 - rank)}</span>
+      <span class="st ${st}"><span class="dot"></span>${ST[st]}</span>
+      <span class="file">—</span>
+      <span class="size">—</span>
+    </div>`);
+}
+
+/* Just enough interactivity to feel it: checkboxes, switches, row select, tab panels. */
 const sel = document.getElementById("selcount");
 function refreshSel() {
-  const n = document.querySelectorAll(".cb.on").length;
+  const n = document.querySelectorAll("#rows .cb.on").length;
   sel.textContent = n ? `✓ ${n} checked` : "0 selected";
 }
-rows.addEventListener("click", (e) => {
+document.addEventListener("click", (e) => {
+  const lbl = e.target.closest("label.check, label.toggle-row");
+  if (lbl && !e.target.closest(".cb, .switch")) {
+    lbl.querySelector(".cb, .switch")?.classList.toggle("on");
+    return;
+  }
   const cb = e.target.closest(".cb");
+  if (cb) {
+    cb.classList.toggle("on");
+    const row = cb.closest(".row");
+    if (row) { row.classList.toggle("selected", cb.classList.contains("on")); refreshSel(); }
+    return;
+  }
   const sw = e.target.closest(".switch");
-  const row = e.target.closest(".row");
-  if (cb) { cb.classList.toggle("on"); row.classList.toggle("selected", cb.classList.contains("on")); refreshSel(); return; }
   if (sw) { sw.classList.toggle("on"); return; }
+  const row = e.target.closest(".row");
   if (row) { row.classList.toggle("selected"); }
 });
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
   document.querySelector(".tab.active").classList.remove("active");
   t.classList.add("active");
+  document.querySelector(".panel.active").classList.remove("active");
+  document.querySelector(`.panel[data-panel="${t.dataset.tab}"]`).classList.add("active");
 }));
 </script>
 </body>
