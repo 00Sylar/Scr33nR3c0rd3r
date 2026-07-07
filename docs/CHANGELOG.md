@@ -11,6 +11,18 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **Notifications settings box + VIP list (web UI).** Notifications now have
+  their own Settings card, separate from Behavior:
+  - **Per-type toggles** — turn each notification on/off independently:
+    Recording started, Recording stopped, Dropped segments, Quality
+    downgraded, Low disk space. (An "app is broken" ffmpeg-missing alert
+    always fires.)
+  - **Toast duration** slider (1–5 s). Note: Windows ultimately controls how
+    long a toast stays up, so the value is a hint it may round.
+  - **🌟 VIP List** — add models via right-click (Recorder **or** Saved
+    Models → *Add to VIP List*), then enable **VIP only** to receive
+    per-model notifications *just* for your VIP models. Global safety alerts
+    (low disk, ffmpeg) always come through. Manage/remove VIPs right in the box.
 - **New web-based UI (complete, in testing).** A full visual redesign of
   Scr33nX — modern dark red/black interface with smooth animations, shadows,
   and transitions — rendered in a native window (Windows WebView2, no browser
@@ -39,6 +51,11 @@ grouped by date / milestone.
   model in Saved Models (adds it and starts recording in one step).
 
 ### Fixed
+- **No more false "dropped segments" toast when a model goes offline.** The
+  last live-edge segments of an ending stream looked identical to bandwidth
+  loss; the toast is now deferred a few seconds and only fires if the model is
+  still recording, so a normal offline no longer triggers a spurious warning.
+  (The gap is still always written to the Activity Log.)
 - **Telegram pipeline — uploads no longer wait for conversion.** The Convert
   and Upload stages now run as fully independent workers: the uploaders start
   sending any `.mp4` in the converted folder as soon as it appears (including

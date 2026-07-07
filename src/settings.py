@@ -37,8 +37,15 @@ class AppSettings:
     max_size_mb: Optional[int] = None          # None = unlimited
     check_interval: int = 30                   # seconds
     minimize_to_tray: bool = False
-    notifications_enabled: bool = True
+    notifications_enabled: bool = True         # master notification toggle
     gap_warnings_enabled: bool = True          # toast when segments are dropped
+    notify_started: bool = True                # per-type notification toggles
+    notify_stopped: bool = True
+    notify_downgraded: bool = True
+    notify_lowdisk: bool = True
+    notify_toast_secs: int = 5                 # toast duration 1-5 s (Windows may round)
+    notify_vip_only: bool = False              # only notify for VIP-listed models
+    vip_list: List[str] = None                 # ["site:name", ...] VIP identities
     privacy_mode_enabled: bool = False         # idle screen cover (starfield)
     max_quality: int = 0                       # global cap: variant height px (0 = unlimited)
     auto_downgrade_enabled: bool = False       # step struggling streams down a quality rung
@@ -69,6 +76,8 @@ class AppSettings:
             self.saved_models = []
         if self.ranks is None:
             self.ranks = {}
+        if self.vip_list is None:
+            self.vip_list = []
 
 
 def _load_pipeline_file() -> dict:
@@ -112,6 +121,13 @@ def load_settings() -> AppSettings:
     s.minimize_to_tray = main.get("minimize_to_tray", s.minimize_to_tray)
     s.notifications_enabled = main.get("notifications_enabled", s.notifications_enabled)
     s.gap_warnings_enabled = main.get("gap_warnings_enabled", s.gap_warnings_enabled)
+    s.notify_started = main.get("notify_started", s.notify_started)
+    s.notify_stopped = main.get("notify_stopped", s.notify_stopped)
+    s.notify_downgraded = main.get("notify_downgraded", s.notify_downgraded)
+    s.notify_lowdisk = main.get("notify_lowdisk", s.notify_lowdisk)
+    s.notify_toast_secs = main.get("notify_toast_secs", s.notify_toast_secs)
+    s.notify_vip_only = main.get("notify_vip_only", s.notify_vip_only)
+    s.vip_list = main.get("vip_list", []) or []
     s.privacy_mode_enabled = main.get("privacy_mode_enabled", s.privacy_mode_enabled)
     s.max_quality = main.get("max_quality", s.max_quality)
     s.auto_downgrade_enabled = main.get("auto_downgrade_enabled", s.auto_downgrade_enabled)
@@ -157,6 +173,13 @@ def save_settings(s: AppSettings):
         "minimize_to_tray": s.minimize_to_tray,
         "notifications_enabled": s.notifications_enabled,
         "gap_warnings_enabled": s.gap_warnings_enabled,
+        "notify_started": s.notify_started,
+        "notify_stopped": s.notify_stopped,
+        "notify_downgraded": s.notify_downgraded,
+        "notify_lowdisk": s.notify_lowdisk,
+        "notify_toast_secs": s.notify_toast_secs,
+        "notify_vip_only": s.notify_vip_only,
+        "vip_list": s.vip_list,
         "privacy_mode_enabled": s.privacy_mode_enabled,
         "max_quality": s.max_quality,
         "auto_downgrade_enabled": s.auto_downgrade_enabled,

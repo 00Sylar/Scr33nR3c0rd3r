@@ -3030,7 +3030,9 @@ class StreamRecorderApp(tk.Tk):
             widget.see("end")
         widget.configure(state="disabled")
 
-    def _cb_notif(self, title: str, body: str):
+    def _cb_notif(self, title: str, body: str, key: str = None):
+        # key (model identity) is used by the web UI's VIP filter; the classic
+        # app just honors the master toggle.
         if self.settings.notifications_enabled and self._v_notif.get():
             send_notification(title, body)
 

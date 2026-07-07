@@ -207,12 +207,33 @@
           <div class="card">
             <h3>Behavior</h3>
             <label class="toggle-row"><span class="switch" id="s-tray"></span>⤵️ Minimize to SysTray</label>
-            <label class="toggle-row"><span class="switch" id="s-notif"></span>🔔 Notifications</label>
-            <label class="toggle-row"><span class="switch" id="s-gap"></span>⚠️ Dropped-Segment Warnings</label>
             <label class="toggle-row"><span class="switch" id="s-down"></span>⬇️ Auto-Downgrade Quality</label>
             <label class="toggle-row"><span class="switch" id="s-disk"></span>⛔ Stop All if Disk &lt; 20 GB Free</label>
             <label class="toggle-row"><span class="switch" id="s-pw"></span>🎭 Stripchat Browser Fallback</label>
             <label class="toggle-row"><span class="switch" id="s-privacy"></span>🔒 Privacy Mode</label>
+          </div>
+          <div class="card">
+            <h3>🔔 Notifications</h3>
+            <label class="toggle-row"><span class="switch" id="s-notif"></span>Enable notifications</label>
+            <div class="notif-types" id="notif-types">
+              <label class="toggle-row sub"><span class="switch" id="s-n-started"></span>▶️ Recording started</label>
+              <label class="toggle-row sub"><span class="switch" id="s-n-stopped"></span>⏹️ Recording stopped</label>
+              <label class="toggle-row sub"><span class="switch" id="s-gap"></span>⚠️ Dropped segments</label>
+              <label class="toggle-row sub"><span class="switch" id="s-n-down"></span>⬇️ Quality downgraded</label>
+              <label class="toggle-row sub"><span class="switch" id="s-n-disk"></span>💽 Low disk space</label>
+            </div>
+            <div class="field" style="margin-top:12px">
+              <label>Toast duration: <b id="dur-val">5</b> s
+                <span style="color:var(--text-3)">(Windows may round)</span></label>
+              <input type="range" id="s-dur" min="1" max="5" step="1" value="5">
+            </div>
+            <label class="toggle-row" style="margin-top:8px">
+              <span class="switch" id="s-vip-only"></span>🌟 VIP only — notify only for VIP models</label>
+            <div class="vip-box">
+              <div class="vip-head">VIP List <span class="count-pill" id="vip-count">0</span></div>
+              <div class="vip-list" id="vip-list"></div>
+              <div class="vip-hint">Right-click a model (Recorder or Saved) → 🌟 Add to VIP List</div>
+            </div>
           </div>
           <div class="card">
             <h3>Links &amp; Preview</h3>

@@ -424,6 +424,33 @@ label.check:hover { color: var(--text-1); }
 .toggle-row:hover { color: var(--text-1); }
 .pipe-lines { white-space: pre; height: auto; line-height: 1.9; }
 
+/* notifications box */
+.notif-types { margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--line);
+               margin-top: 2px; transition: opacity var(--t-med) var(--ease); }
+.notif-types.disabled { opacity: 0.4; pointer-events: none; }
+.toggle-row.sub { font-size: var(--fs-1); padding: 4px 0; }
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+  border-radius: var(--r-full); background: var(--bg-3); outline: none; cursor: pointer; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; border-radius: 50%; background: var(--red);
+  box-shadow: var(--shadow-sm); transition: box-shadow var(--t-fast) var(--ease); }
+input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), var(--glow-red); }
+.vip-box { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r-md);
+           padding: 10px; background: var(--bg-1); }
+.vip-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-0);
+            letter-spacing: 1px; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+.vip-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 130px; overflow-y: auto; }
+.vip-chip { display: flex; align-items: center; gap: 6px; font-size: var(--fs-0);
+            color: var(--gold); background: rgba(217, 184, 120, 0.08);
+            border: 1px solid rgba(217, 184, 120, 0.25); border-radius: var(--r-full);
+            padding: 3px 6px 3px 10px; }
+.vip-chip small { color: var(--text-3); }
+.vip-chip button { color: var(--text-3); font-size: 13px; line-height: 1; padding: 0 2px;
+                   transition: color var(--t-fast) var(--ease); }
+.vip-chip button:hover { color: var(--red-bright); }
+.vip-hint { font-size: var(--fs-0); color: var(--text-3); margin-top: 8px; }
+.vip-empty { font-size: var(--fs-0); color: var(--text-3); font-style: italic; }
+
 .sys-row { display: flex; align-items: center; gap: 10px; padding: 5px 0;
            font-size: var(--fs-1); color: var(--text-2); }
 .sys-row .mark-ok { color: var(--go-bright); }

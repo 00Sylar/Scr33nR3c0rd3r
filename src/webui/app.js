@@ -493,6 +493,14 @@ async function loadSettings() {
   setSwitch("s-tray", s.minimize_to_tray);
   setSwitch("s-notif", s.notifications_enabled);
   setSwitch("s-gap", s.gap_warnings_enabled);
+  setSwitch("s-n-started", s.notify_started);
+  setSwitch("s-n-stopped", s.notify_stopped);
+  setSwitch("s-n-down", s.notify_downgraded);
+  setSwitch("s-n-disk", s.notify_lowdisk);
+  setSwitch("s-vip-only", s.notify_vip_only);
+  $("s-dur").value = s.notify_toast_secs;
+  $("dur-val").textContent = s.notify_toast_secs;
+  updateNotifDim();
   setSwitch("s-down", s.auto_downgrade_enabled);
   setSwitch("s-disk", s.low_disk_guard_enabled);
   setSwitch("s-pw", s.playwright_fallback_enabled);
@@ -509,8 +517,32 @@ async function loadSettings() {
   $("s-pengine").value = s.preview_engine;
   $("s-ppath").value = s.preview_player_path;
   runSystemCheck();
+  loadVip();
 }
 function setSwitch(id, on) { $(id).classList.toggle("on", !!on); }
+function updateNotifDim() {
+  $("notif-types").classList.toggle("disabled", !$("s-notif").classList.contains("on"));
+}
+$("s-dur").addEventListener("input", (e) => { $("dur-val").textContent = e.target.value; });
+$("s-notif").closest(".toggle-row").addEventListener("click", () => setTimeout(updateNotifDim, 0));
+
+async function loadVip() {
+  if (!API) return;
+  const r = await API.vip_get();
+  $("vip-count").textContent = r.items.length;
+  const box = $("vip-list");
+  box.innerHTML = r.items.length
+    ? r.items.map(it => `<span class="vip-chip">${esc(it.name)} <small>${esc(it.site)}</small>` +
+        `<button data-vipdel="${esc(it.key)}" title="Remove from VIP">✕</button></span>`).join("")
+    : `<span class="vip-empty">No VIP models yet.</span>`;
+}
+function vipRefresh(fn) { fn(); setTimeout(loadVip, 150); }
+$("vip-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-vipdel]");
+  if (!b || !API) return;
+  await API.vip_remove([b.dataset.vipdel]);
+  setTimeout(loadVip, 120);
+});
 
 $("s-pick").addEventListener("click", async () => {
   const r = await API.pick_folder($("s-output").value);
@@ -525,6 +557,12 @@ $("s-save").addEventListener("click", async () => {
     minimize_to_tray: $("s-tray").classList.contains("on"),
     notifications_enabled: $("s-notif").classList.contains("on"),
     gap_warnings_enabled: $("s-gap").classList.contains("on"),
+    notify_started: $("s-n-started").classList.contains("on"),
+    notify_stopped: $("s-n-stopped").classList.contains("on"),
+    notify_downgraded: $("s-n-down").classList.contains("on"),
+    notify_lowdisk: $("s-n-disk").classList.contains("on"),
+    notify_toast_secs: $("s-dur").value,
+    notify_vip_only: $("s-vip-only").classList.contains("on"),
     auto_downgrade_enabled: $("s-down").classList.contains("on"),
     low_disk_guard_enabled: $("s-disk").classList.contains("on"),
     playwright_fallback_enabled: $("s-pw").classList.contains("on"),
@@ -822,6 +860,8 @@ document.addEventListener("contextmenu", (e) => {
         : { label: "⭐  Add to Saved Models", action: () => API.add_saved(keys) },
       { label: "▶  Preview", action: () => doPreview(m.name, m.site) },
       { label: "⭐  Set Rank", sub: rankSub(keys, false) },
+      m.vip ? { label: "🌟  Remove from VIP List", action: () => vipRefresh(() => API.vip_remove(keys)) }
+            : { label: "🌟  Add to VIP List", action: () => vipRefresh(() => API.vip_add(keys)) },
       "hr",
       { label: "🔗  Copy Model URL", action: () => API.copy_urls(keys, false, false) },
       { label: "🌐  Open in Browser", action: () => openBrowser(keys, false, false) },
@@ -837,6 +877,8 @@ document.addEventListener("contextmenu", (e) => {
       { label: `☑  Toggle AUTO  (${n} selected)`, action: () => API.toggle_auto(keys) },
       { label: `🎞  Max Quality  (${n} selected)`, sub: qualitySub(keys, null) },
       { label: `⭐  Set Rank  (${n} selected)`, sub: rankSub(keys, false) },
+      { label: `🌟  Add to VIP List  (${n})`, action: () => vipRefresh(() => API.vip_add(keys)) },
+      { label: `🌟  Remove from VIP List  (${n})`, action: () => vipRefresh(() => API.vip_remove(keys)) },
       "hr",
       { label: `🌐  Open in Browser  (${n})`, action: () => openBrowser(keys, false, false) },
       { label: `🌐  Open in Browser (choose…)  (${n})`, action: () => openBrowser(keys, false, true) },
@@ -863,6 +905,8 @@ document.addEventListener("contextmenu", (e) => {
       { label: "🌐  Open in Browser", action: () => openBrowser(keys, true, false) },
       { label: "🌐  Open in Browser (choose…)", action: () => openBrowser(keys, true, true) },
       { label: "⭐  Set Rank", sub: rankSub(keys, true) },
+      it.vip ? { label: "🌟  Remove from VIP List", action: () => vipRefresh(() => API.vip_remove(keys)) }
+             : { label: "🌟  Add to VIP List", action: () => vipRefresh(() => API.vip_add(keys)) },
       "hr",
       { label: "✕  Remove from Saved Models", danger: true,
         action: () => API.saved_remove(keys) },
@@ -870,6 +914,8 @@ document.addEventListener("contextmenu", (e) => {
     ] : [
       { label: `＋  Add to Recorder  (${n})`, action: () => API.saved_to_recorder(keys) },
       { label: `⭐  Set Rank  (${n})`, sub: rankSub(keys, true) },
+      { label: `🌟  Add to VIP List  (${n})`, action: () => vipRefresh(() => API.vip_add(keys)) },
+      { label: `🌟  Remove from VIP List  (${n})`, action: () => vipRefresh(() => API.vip_remove(keys)) },
       "hr",
       { label: `🌐  Open in Browser  (${n})`, action: () => openBrowser(keys, true, false) },
       { label: `🌐  Open in Browser (choose…)  (${n})`, action: () => openBrowser(keys, true, true) },
@@ -1095,7 +1141,7 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   t.classList.add("active");
   document.querySelector(".panel.active").classList.remove("active");
   document.querySelector(`.panel[data-panel="${t.dataset.tab}"]`).classList.add("active");
-  if (t.dataset.tab === "settings") loadSettings();
+  if (t.dataset.tab === "settings") { loadSettings(); loadVip(); }
   if (t.dataset.tab === "output") loadPipeFields();
   if (t.dataset.tab === "saved") { savedCache.version = -1; renderSaved(); }
 }));

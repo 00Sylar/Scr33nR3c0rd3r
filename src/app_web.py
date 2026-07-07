@@ -164,6 +164,7 @@ class WebCore:
         self._model_q: dict[str, int] = {}
         self._ranks: dict[str, int] = {
             k: int(v) for k, v in (self.settings.ranks or {}).items() if v}
+        self._vip: set = {k.lower() for k in (self.settings.vip_list or [])}
         self.recorder.quality_global = self.settings.max_quality
         self.recorder.quality_overrides = self._model_q
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
@@ -254,12 +255,48 @@ class WebCore:
     def _cb_log(self, msg: str):
         self._log_add(msg, "info", echo=False)
 
-    def _cb_notif(self, title: str, msg: str):
-        if self.settings.notifications_enabled:
-            try:
-                send_notification(title, msg)
-            except Exception:
-                pass
+    # Notification title → the settings flag that gates it. Titles absent here
+    # (e.g. "FFmpeg Missing") always fire — they mean the app itself is broken.
+    _NOTIFY_FLAGS = {
+        "Recording Started":  "notify_started",
+        "Recording Stopped":  "notify_stopped",
+        "Dropped segments":   "gap_warnings_enabled",
+        "Quality downgraded": "notify_downgraded",
+        "Low disk space":     "notify_lowdisk",
+    }
+
+    def _cb_notif(self, title: str, msg: str, key: str = None):
+        s = self.settings
+        if not s.notifications_enabled:
+            return
+        flag = self._NOTIFY_FLAGS.get(title)
+        if flag is not None and not getattr(s, flag, True):
+            return
+        # VIP filter: per-model events only fire for VIP models when VIP-only is
+        # on and the list isn't empty. Global alerts (key=None) always pass.
+        if key and s.notify_vip_only and self._vip and key.lower() not in self._vip:
+            return
+        try:
+            send_notification(title, msg,
+                              duration_secs=int(s.notify_toast_secs or 5))
+        except Exception:
+            pass
+
+    def _vip_set(self, keys, add: bool):
+        changed = False
+        for k in keys:
+            kl = str(k).lower()
+            if add and kl not in self._vip:
+                self._vip.add(kl); changed = True
+            elif not add and kl in self._vip:
+                self._vip.discard(kl); changed = True
+        if changed:
+            self.settings.vip_list = sorted(self._vip)
+            self._saved_version += 1     # refresh Saved rows' VIP flags
+            self._persist_models()   # rewrites models/saved/ranks + vip together
+            self._log_add(("Added to" if add else "Removed from") +
+                          f" VIP list: {len(keys)} model(s)",
+                          "accent" if add else "warn")
 
     def _launch_recording(self, name: str, site: str):
         key = f"{site}:{name}"
@@ -1124,6 +1161,7 @@ class WebCore:
                 "rank": self._get_rank(name, site),
                 "saved": self._saved_key(name, site) in self._saved_data,
                 "q": self._model_q.get(key, 0),
+                "vip": key.lower() in self._vip,
             })
         # Saved statuses: only non-offline models are sent; absence = offline.
         saved_status = {}
@@ -1185,9 +1223,35 @@ class Bridge:
     def saved_list(self):
         c = self._core
         items = [{"sid": sid, "name": d["name"], "site": d["site"],
-                  "rank": c._get_rank(d["name"], d["site"])}
+                  "rank": c._get_rank(d["name"], d["site"]),
+                  "vip": f"{d['site']}:{d['name']}".lower() in c._vip}
                  for sid, d in sorted(c._saved_data.items())]
         return {"version": c._saved_version, "items": items}
+
+    @staticmethod
+    def _norm_key(k):
+        """Menu row keys → VIP identity 'site:name' (drops the saved: prefix)."""
+        k = str(k)
+        if k.startswith("saved:"):
+            k = k[len("saved:"):]
+        return k.lower()
+
+    def vip_add(self, keys):
+        ks = [self._norm_key(k) for k in (keys or [])]
+        self._core.after(0, lambda: self._core._vip_set(ks, True))
+        return {"ok": True}
+
+    def vip_remove(self, keys):
+        ks = [self._norm_key(k) for k in (keys or [])]
+        self._core.after(0, lambda: self._core._vip_set(ks, False))
+        return {"ok": True}
+
+    def vip_get(self):
+        items = []
+        for k in sorted(self._core._vip):
+            site, _, name = k.partition(":")
+            items.append({"key": k, "name": name, "site": site})
+        return {"items": items}
 
     # ── add / monitor ──
     def add_model(self, raw, site):
@@ -1603,6 +1667,12 @@ class Bridge:
             "minimize_to_tray": s.minimize_to_tray,
             "notifications_enabled": s.notifications_enabled,
             "gap_warnings_enabled": s.gap_warnings_enabled,
+            "notify_started": s.notify_started,
+            "notify_stopped": s.notify_stopped,
+            "notify_downgraded": s.notify_downgraded,
+            "notify_lowdisk": s.notify_lowdisk,
+            "notify_toast_secs": s.notify_toast_secs,
+            "notify_vip_only": s.notify_vip_only,
             "auto_downgrade_enabled": s.auto_downgrade_enabled,
             "low_disk_guard_enabled": s.low_disk_guard_enabled,
             "playwright_fallback_enabled": s.playwright_fallback_enabled,
@@ -1633,6 +1703,12 @@ class Bridge:
         s.minimize_to_tray      = bool(p.get("minimize_to_tray"))
         s.notifications_enabled = bool(p.get("notifications_enabled"))
         s.gap_warnings_enabled  = bool(p.get("gap_warnings_enabled"))
+        s.notify_started        = bool(p.get("notify_started"))
+        s.notify_stopped        = bool(p.get("notify_stopped"))
+        s.notify_downgraded     = bool(p.get("notify_downgraded"))
+        s.notify_lowdisk        = bool(p.get("notify_lowdisk"))
+        s.notify_toast_secs     = max(1, min(5, _int(p.get("notify_toast_secs"), 5) or 5))
+        s.notify_vip_only       = bool(p.get("notify_vip_only"))
         s.auto_downgrade_enabled = bool(p.get("auto_downgrade_enabled"))
         s.low_disk_guard_enabled = bool(p.get("low_disk_guard_enabled"))
         s.playwright_fallback_enabled = bool(p.get("playwright_fallback_enabled"))
