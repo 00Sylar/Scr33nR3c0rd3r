@@ -39,6 +39,12 @@ grouped by date / milestone.
   model in Saved Models (adds it and starts recording in one step).
 
 ### Fixed
+- **Telegram pipeline — uploads no longer wait for conversion.** The Convert
+  and Upload stages now run as fully independent workers: the uploaders start
+  sending any `.mp4` in the converted folder as soon as it appears (including
+  files already there before you started, or produced mid-batch), instead of
+  waiting for the entire `.ts → .mp4` conversion pass to finish first. Applies
+  to both the classic and the new UI.
 - **Web UI:** Copy Model URL now works (a 64-bit clipboard-handle truncation
   silently dropped the copy); pipeline status lines no longer leave a large
   blank gap before the log; clicking empty table space clears the selection;
