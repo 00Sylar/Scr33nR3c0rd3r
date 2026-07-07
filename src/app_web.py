@@ -942,18 +942,29 @@ class WebCore:
             on_show=lambda: self.after(0, self._restore_from_tray),
             on_quit=lambda: self.after(0, self._api_quit),
             on_terminate=lambda: self.after(0, self._force_terminate))
+        # WinTray only creates the icon once .add() runs (async, on its own
+        # thread). Wait briefly for it to report ready/failed so we never hide
+        # the window when there's no tray icon to bring it back.
+        tray.add()
+        ready = getattr(tray, "_ready", None)
+        if ready is not None:
+            ready.wait(timeout=2.0)
         if tray.failed():
             self._log_add("Tray icon could not be created.", "warn")
+            try:
+                tray.remove()
+            except Exception:
+                pass
             return
         self._tray = tray
 
     def _restore_from_tray(self):
-        try:
-            if self.window is not None:
-                self.window.restore()
-                self.window.show()
-        except Exception:
-            pass
+        if self.window is not None:
+            for op in ("show", "restore"):   # un-hide, then un-minimize
+                try:
+                    getattr(self.window, op)()
+                except Exception:
+                    pass
         self._remove_tray()
 
     def _remove_tray(self):

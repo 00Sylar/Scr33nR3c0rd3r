@@ -569,6 +569,15 @@ document.addEventListener("click", (e) => {
   if (suppressClick) { suppressClick = false; return; }
   closeCtx();
 
+  // Settings switches, wizard/browser-picker checkboxes: a plain visual
+  // toggle read on Save (they carry no data-* hook of their own).
+  const trow = e.target.closest("label.toggle-row");
+  if (trow) {
+    const t = trow.querySelector(".switch, .cb");
+    if (t) t.classList.toggle("on");
+    return;
+  }
+
   const tog = e.target.closest("[data-tog]");
   if (tog) {
     const [tab, site] = tog.dataset.tog.split(":");
@@ -892,8 +901,7 @@ async function openBrowser2(keys, saved, forceChoose) {
   };
   $("bpick-cancel").onclick = () => { $("bpick").hidden = true; };
 }
-$("bpick-remember").addEventListener("click", () =>
-  $("bpick-remember").classList.toggle("on"));
+// bpick-remember toggles via the shared label.toggle-row handler above.
 
 /* ══ preview ══ */
 let hls = null;
