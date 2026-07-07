@@ -7,8 +7,8 @@ websocket-client>=1.7.0                     # MyFreeCams FCS protocol resolver (
 winotify>=1.1.0; sys_platform == "win32"    # Windows toast notifications (notifier.py)
 playwright>=1.50.0                          # Stripchat fallback recorder (stripchat_live.py)
 tdjson>=1.8.56                              # Telegram upload pipeline (pipeline_worker.py)
-python-vlc>=3.0                             # in-app (embedded) stream preview; auto-finds an installed VLC
-pywebview>=5.0; sys_platform == "win32"     # new web-based UI shell (app_web.py) — uses Windows WebView2
+python-vlc>=3.0                             # classic UI (--classic): in-app embedded preview; auto-finds an installed VLC
+pywebview>=5.0; sys_platform == "win32"     # default UI shell (app_web.py) — uses Windows WebView2
 
 # Optional alternative embedded-preview backend (the app can also use VLC above).
 # Needs libmpv-2.dll dropped into the src/ folder (the app adds src/ to its DLL

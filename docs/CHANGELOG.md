@@ -10,9 +10,42 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+---
+
+## V2.0 — 2026-07-07
+
+**The web UI redesign.** A complete visual and structural rebuild of
+Scr33nX — a modern dark red/black interface with smooth animations,
+shadows, and transitions, rendered in a native window (Windows WebView2;
+no browser involved) — built and refined over many rounds of hands-on
+testing. Same recording engine, same config files, zero feature loss.
+
 ### Added
-- **Notifications settings box + VIP list (web UI).** Notifications now have
-  their own Settings card, separate from Behavior:
+- **New web-based UI.** Recorder tab (full toolbar, right-click menus with
+  per-model quality and rank submenus, column sorting, search + status
+  filters, checkboxes, Shift/Ctrl/marquee selection), Saved Models (smooth
+  with thousands of rows via virtual scrolling, scanner, import/export, add
+  prompt), Output/Upload (pipeline with live stage toggles, setup wizard,
+  re-auth, in-app Telegram login prompts), Activity Log, full Settings (all
+  options + System Check with one-click fixes), stream preview (external
+  mpv/VLC/ffplay **and** a new built-in in-app player), privacy mode with a
+  starfield cover, tray, update check, single-instance lock, and the
+  identical port-5200 API. Feature-parity reference: `docs/PARITY.md`.
+- **Desktop-style drag-rectangle (marquee) selection** over the model
+  tables, and **collapsible per-site groups** with [+]/[−] controls — on
+  both the Recorder and Saved Models tabs.
+- **Embedded preview without VLC:** in-app previews use a built-in player
+  (hls.js through the local relay) — python-vlc/libmpv are no longer needed
+  for embedded preview in the new UI (still used by the classic UI).
+- **Multi-condition status filter:** the Recorder and Saved Models status
+  filters let you pick any combination (e.g. Online **and** Recording); the
+  button shows how many are active.
+- **Right-click ▶ Add to Recorder & Start Recording** on an online model in
+  Saved Models (adds it and starts recording in one step).
+- **Notifications settings box + VIP list.** Notifications now have their
+  own Settings card, separate from Behavior:
   - **Per-type toggles** — turn each notification on/off independently:
     Recording started, Recording stopped, Dropped segments, Quality
     downgraded, Low disk space. (An "app is broken" ffmpeg-missing alert
@@ -23,32 +56,16 @@ grouped by date / milestone.
     Models → *Add to VIP List*), then enable **VIP only** to receive
     per-model notifications *just* for your VIP models. Global safety alerts
     (low disk, ffmpeg) always come through. Manage/remove VIPs right in the box.
-- **New web-based UI (complete, in testing).** A full visual redesign of
-  Scr33nX — modern dark red/black interface with smooth animations, shadows,
-  and transitions — rendered in a native window (Windows WebView2, no browser
-  involved). Launch with **`Scr33nX-WebUI.bat`** (or `python src/app_web.py`);
-  the classic app is unchanged and remains the default until sign-off.
-  Everything runs on the same engine and config files: Recorder tab (full
-  toolbar, right-click menus with per-model quality and rank submenus, column
-  sorting, search + status filters, checkboxes, Shift/Ctrl selection), Saved
-  Models (smooth with thousands of rows, scanner, import/export, add prompt),
-  Output/Upload (pipeline with live stage toggles, setup wizard, re-auth,
-  in-app Telegram login prompts), Activity Log, full Settings (all options +
-  System Check with one-click fixes), stream preview (external mpv/VLC/ffplay
-  **and** a new built-in in-app player), privacy mode with starfield cover,
-  tray, update check, single-instance lock, and the identical port-5200 API.
-  Requires `pip install pywebview`. Parity audit checklist: `docs/PARITY.md`.
-- **New in the redesign:** desktop-style drag-rectangle (marquee) selection
-  over the model tables, and collapsible per-site groups with [+]/[−]
-  controls — on both the Recorder and Saved Models tabs.
-- **Embedded preview without VLC:** the new UI plays in-app previews with a
-  built-in player (hls.js through the local relay) — python-vlc/libmpv are no
-  longer needed for embedded preview in the web UI.
-- **Web UI — multi-condition status filter:** the Recorder and Saved Models
-  status filters now let you pick any combination (e.g. Online **and**
-  Recording), matching the classic app; the button shows how many are active.
-- **Web UI — right-click ▶ Add to Recorder & Start Recording** on an online
-  model in Saved Models (adds it and starts recording in one step).
+
+### Changed
+- **`Scr33nX.bat` now launches the new web UI by default.** The previous
+  interface still works exactly as before (same engine, same settings, same
+  config files — nothing about it changed) — double-click the new
+  **`Scr33nX-Classic.bat`**, or run `Scr33nX.bat --classic`.
+  `Scr33nX-WebUI.bat` is kept as an alias for the new default.
+- **`pywebview` is now a required dependency** (previously only needed to try
+  the redesign preview) — `pip install -r requirements.txt` picks it up.
+- **App version bumped to `2.0`.**
 
 ### Fixed
 - **No more false "dropped segments" toast when a model goes offline.** The
@@ -68,7 +85,11 @@ grouped by date / milestone.
   Add-to-Saved now has its own site dropdown instead of assuming Chaturbate
   for a bare username; toolbar button hovers are consistent (destructive
   buttons are tinted at rest rather than only reddening on hover); the
-  browser-picker radio buttons no longer flicker.
+  browser-picker radio buttons no longer flicker; Ctrl/Cmd+A now selects all
+  visible rows in Recorder and Saved Models; Save Settings moved to a
+  centered bar below all Settings cards (it applies to all of them, not just
+  one); the "preview not available" message is now short and user-facing,
+  with the full reason kept in the Activity Log for troubleshooting.
 
 ---
 

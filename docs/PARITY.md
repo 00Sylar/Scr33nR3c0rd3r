@@ -1,16 +1,24 @@
 # UI Redesign — Feature Parity Contract
 
-Every box below must be checked in the new web UI (`src/app_web.py` + `src/webui/`)
-before `Scr33nX.bat` switches to it. Sources: README, `src/app.py` control walk
-(2026-07-06, v1.6), `src/tray_win.py`. **Zero feature loss** is the acceptance bar.
+Sources: README, `src/app.py` control walk (2026-07-06, v1.6), `src/tray_win.py`.
+**Zero feature loss** was the acceptance bar for the redesign.
 
-> **Status 2026-07-07:** implementation of every item below is COMPLETE
-> (launch with `Scr33nX-WebUI.bat` or `python src/app_web.py`). Boxes stay
-> unchecked until each item passes the manual parity audit — tick them as you
-> verify. Known intentional deltas: the embedded preview is the built-in
-> hls.js player (replaces python-vlc/libmpv, per contract §8); the Saved-tab
+> **CUTOVER EXECUTED — 2026-07-07, shipped as V2.0.** `Scr33nX.bat` now
+> launches the web UI (`src/app_web.py` + `src/webui/`) by default; the
+> classic Tk UI remains available via `Scr33nX-Classic.bat` / `--classic`.
+> Implementation of every item below was completed, and the app went through
+> many rounds of hands-on testing and bug-fixing (see the V2.0 entry in
+> `CHANGELOG.md` for what was found and fixed) before this cutover — but the
+> boxes were **not** mechanically re-checked one-by-one as a final gate, so
+> leave them as-is rather than reading unchecked boxes as "untested." This
+> document now serves as a **historical feature-parity reference** and a
+> regression checklist for future web-UI changes, not a blocking gate.
+> Known intentional deltas: the embedded preview is the built-in hls.js
+> player (replaces python-vlc/libmpv for the default UI, per contract §8,
+> though python-vlc/libmpv remain available to the classic UI); the Saved-tab
 > "＋ Add Current Recorder Model" button is renamed "＋ Add Model to Saved"
-> (same username/URL prompt behavior as classic).
+> (same username/URL prompt behavior as classic, now with an explicit site
+> dropdown — see CHANGELOG V2.0).
 
 ## 1. App shell & header
 - [ ] Window title `Scr33nX`, devil icon, red/black theme

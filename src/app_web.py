@@ -1818,6 +1818,67 @@ def _apply_window_icon(title: str):
         pass
 
 
+# WebView2 Runtime's Client ID (Evergreen), used to detect an install via the
+# same registry keys the Edge updater itself writes to.
+_WEBVIEW2_CLIENT_ID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+_WEBVIEW2_DOWNLOAD_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+
+
+def _webview2_installed() -> Optional[bool]:
+    """Best-effort check for the WebView2 Runtime via the registry keys the
+    Edge updater maintains. Returns True/False when it can tell, or None if
+    the check itself is inconclusive (in which case callers should NOT block
+    — false negatives here are worse than skipping the check, since Windows
+    11 ships the runtime out of the box under paths that can vary)."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    candidates = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\%s" % _WEBVIEW2_CLIENT_ID),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\%s" % _WEBVIEW2_CLIENT_ID),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\%s" % _WEBVIEW2_CLIENT_ID),
+    ]
+    found_any_answer = False
+    for hive, path in candidates:
+        try:
+            key = winreg.OpenKey(hive, path)
+            try:
+                pv, _ = winreg.QueryValueEx(key, "pv")
+                if pv:
+                    return True
+            finally:
+                winreg.CloseKey(key)
+            found_any_answer = True
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+    return False if found_any_answer else None
+
+
+def _warn_webview2_missing():
+    """Friendly native message box (no engine running yet) with a link to the
+    WebView2 Runtime download page, instead of a raw pywebview/COM traceback."""
+    try:
+        msg = ("Scr33nX's new interface needs the Microsoft Edge WebView2 "
+               "Runtime, which wasn't detected on this PC.\n\n"
+               "Windows 11 includes it automatically; on Windows 10 it's "
+               "usually installed via Edge auto-update. If it's missing, "
+               "install it from:\n" + _WEBVIEW2_DOWNLOAD_URL + "\n\n"
+               "Click OK to open that page now, or run "
+               "\"Scr33nX-Classic.bat\" to use the classic interface instead "
+               "(no WebView2 needed).")
+        MB_OKCANCEL, IDOK = 0x1, 1
+        choice = ctypes.windll.user32.MessageBoxW(
+            None, msg, "Scr33nX — WebView2 Runtime not found",
+            MB_OKCANCEL | 0x30)  # MB_ICONWARNING
+        if choice == IDOK:
+            webbrowser.open(_WEBVIEW2_DOWNLOAD_URL)
+    except Exception:
+        pass
+
+
 def main():
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Scr33nX.App")
@@ -1829,12 +1890,25 @@ def main():
         print("pywebview is required for the web UI:  pip install pywebview")
         sys.exit(1)
 
+    # Fail fast with a friendly message rather than a cryptic COM/pywebview
+    # traceback — but only on a confirmed "missing" (None = inconclusive,
+    # don't block; the try/except around webview.start below is the backstop).
+    if _webview2_installed() is False:
+        _warn_webview2_missing()
+        sys.exit(1)
+
     core = WebCore()
     bridge = Bridge(core)
-    window = webview.create_window(
-        "Scr33nX", os.path.join(_SRC, "webui", "index.html"),
-        js_api=bridge, width=1280, height=800, min_size=(980, 560),
-        background_color="#0b0b0d")
+    try:
+        window = webview.create_window(
+            "Scr33nX", os.path.join(_SRC, "webui", "index.html"),
+            js_api=bridge, width=1280, height=800, min_size=(980, 560),
+            background_color="#0b0b0d")
+    except Exception as e:
+        log.error("Failed to create the WebView2 window: %s", e)
+        _warn_webview2_missing()
+        core._api_quit()
+        sys.exit(1)
     core.window = window
 
     def on_closing():
@@ -1858,7 +1932,14 @@ def main():
     window.events.shown += lambda: threading.Timer(
         0.4, _apply_window_icon, args=("Scr33nX",)).start()
 
-    webview.start(gui="edgechromium", debug=("--debug" in sys.argv))
+    try:
+        webview.start(gui="edgechromium", debug=("--debug" in sys.argv))
+    except Exception as e:
+        # The EdgeChromium backend is initialized lazily inside .start(), so a
+        # missing/broken WebView2 Runtime often only surfaces here rather than
+        # in create_window() above.
+        log.error("WebView2 backend failed to start: %s", e)
+        _warn_webview2_missing()
     if not core._closing:
         core._api_quit()
     time.sleep(0.5)
