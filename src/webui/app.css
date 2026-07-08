@@ -432,6 +432,8 @@ label.check:hover { color: var(--text-1); }
 .notif-types { margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--line);
                margin-top: 2px; transition: opacity var(--t-med) var(--ease); }
 .notif-types.disabled { opacity: 0.4; pointer-events: none; }
+#disk-thresholds { transition: opacity var(--t-med) var(--ease); }
+#disk-thresholds.disabled { opacity: 0.4; pointer-events: none; }
 .toggle-row.sub { font-size: var(--fs-1); padding: 4px 0; }
 input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
   border-radius: var(--r-full); background: var(--bg-3); outline: none; cursor: pointer; }

@@ -564,6 +564,8 @@ class StreamRecorderApp(tk.Tk):
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
         self.recorder.low_disk_guard_enabled = self.settings.low_disk_guard_enabled
+        self.recorder.low_disk_stop_gb = self.settings.low_disk_stop_gb
+        self.recorder.low_disk_resume_gb = self.settings.low_disk_resume_gb
         self._monitoring_recorder = False
         self._monitoring_saved    = False
         self._tray: Optional[WinTray] = None
@@ -759,6 +761,8 @@ class StreamRecorderApp(tk.Tk):
 
         s.configure("TEntry", fieldbackground=BG3, foreground=TEXT,
                     insertcolor=ACCENT, relief="flat", padding=(8, 6))
+        s.map("TEntry", fieldbackground=[("disabled", BG2)],
+              foreground=[("disabled", TEXT3)])
         s.configure("TCombobox", fieldbackground=BG3, background=BG3,
                     foreground=TEXT, arrowcolor=TEXT2, relief="flat", padding=(8, 5))
         s.map("TCombobox", fieldbackground=[("readonly", BG3)],
@@ -967,11 +971,25 @@ class StreamRecorderApp(tk.Tk):
             anchor="w", padx=16, pady=(0,0))
 
         self._v_lowdisk = tk.BooleanVar(value=self.settings.low_disk_guard_enabled)
-        tk.Checkbutton(p, text="⛔ Stop All if Disk < 20 GB Free",
-                       variable=self._v_lowdisk,
+        tk.Checkbutton(p, text="⛔ Stop All on Low Disk Space",
+                       variable=self._v_lowdisk, command=self._update_disk_dim,
                        bg=BG2, fg=TEXT2, selectcolor=BG3, activebackground=BG2,
                        activeforeground=TEXT, font=UI, relief="flat").pack(
             anchor="w", padx=16, pady=(0,0))
+
+        row_disk = tk.Frame(p, bg=BG2)
+        row_disk.pack(fill="x", padx=16, pady=(2,6))
+        tk.Label(row_disk, text="Stop below (GB free)", fg=TEXT3, bg=BG2, font=UI).pack(
+            side="left")
+        self._v_disk_stop = tk.StringVar(value=str(self.settings.low_disk_stop_gb))
+        self._e_disk_stop = ttk.Entry(row_disk, textvariable=self._v_disk_stop, width=6)
+        self._e_disk_stop.pack(side="left", padx=(6,16))
+        tk.Label(row_disk, text="Resume at (GB free)", fg=TEXT3, bg=BG2, font=UI).pack(
+            side="left")
+        self._v_disk_resume = tk.StringVar(value=str(self.settings.low_disk_resume_gb))
+        self._e_disk_resume = ttk.Entry(row_disk, textvariable=self._v_disk_resume, width=6)
+        self._e_disk_resume.pack(side="left", padx=(6,0))
+        self._update_disk_dim()
 
         self._v_pwfallback = tk.BooleanVar(value=self.settings.playwright_fallback_enabled)
         tk.Checkbutton(p, text="🎭 Stripchat Browser Fallback",
@@ -4256,6 +4274,11 @@ class StreamRecorderApp(tk.Tk):
             self._e_folder.delete(0, "end")
             self._e_folder.insert(0, f)
 
+    def _update_disk_dim(self):
+        state = "normal" if self._v_lowdisk.get() else "disabled"
+        self._e_disk_stop.configure(state=state)
+        self._e_disk_resume.configure(state=state)
+
     def _save_settings(self):
         self.settings.output_dir            = self._e_folder.get().strip()
         self.settings.max_size_mb           = self._parse_int(self._v_maxsize.get())
@@ -4267,10 +4290,18 @@ class StreamRecorderApp(tk.Tk):
         self.settings.auto_downgrade_enabled = self._v_autodown.get()
         self.settings.playwright_fallback_enabled = self._v_pwfallback.get()
         self.settings.low_disk_guard_enabled = self._v_lowdisk.get()
+        self.settings.low_disk_stop_gb   = max(1.0, self._parse_float(
+            self._v_disk_stop.get(), self.settings.low_disk_stop_gb) or self.settings.low_disk_stop_gb)
+        self.settings.low_disk_resume_gb = self._parse_float(
+            self._v_disk_resume.get(), self.settings.low_disk_resume_gb) or self.settings.low_disk_resume_gb
+        if self.settings.low_disk_resume_gb <= self.settings.low_disk_stop_gb:
+            self.settings.low_disk_resume_gb = self.settings.low_disk_stop_gb + 1
         self.recorder.quality_global = self.settings.max_quality
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
         self.recorder.low_disk_guard_enabled = self.settings.low_disk_guard_enabled
+        self.recorder.low_disk_stop_gb = self.settings.low_disk_stop_gb
+        self.recorder.low_disk_resume_gb = self.settings.low_disk_resume_gb
         self.settings.privacy_mode_enabled  = self._v_privacy.get()
         disp = self._v_browser.get()
         for d, v in self._browser_choices:
@@ -4666,6 +4697,13 @@ class StreamRecorderApp(tk.Tk):
     def _parse_int(val: str, default: int = None) -> Optional[int]:
         try:
             return int(val.strip()) if val.strip() else default
+        except ValueError:
+            return default
+
+    @staticmethod
+    def _parse_float(val: str, default: float = None) -> Optional[float]:
+        try:
+            return float(val.strip()) if val.strip() else default
         except ValueError:
             return default
 

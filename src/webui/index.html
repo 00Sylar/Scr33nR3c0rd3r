@@ -208,7 +208,11 @@
             <h3>Behavior</h3>
             <label class="toggle-row"><span class="switch" id="s-tray"></span>⤵️ Minimize to SysTray</label>
             <label class="toggle-row"><span class="switch" id="s-down"></span>⬇️ Auto-Downgrade Quality</label>
-            <label class="toggle-row"><span class="switch" id="s-disk"></span>⛔ Stop All if Disk &lt; 20 GB Free</label>
+            <label class="toggle-row"><span class="switch" id="s-disk"></span>⛔ Stop All on Low Disk Space</label>
+            <div class="form-2col" id="disk-thresholds" style="margin:-4px 0 8px">
+              <div class="field"><label>Stop below (GB free)</label><input id="s-disk-stop"></div>
+              <div class="field"><label>Resume at (GB free)</label><input id="s-disk-resume"></div>
+            </div>
             <label class="toggle-row"><span class="switch" id="s-pw"></span>🎭 Stripchat Browser Fallback</label>
             <label class="toggle-row"><span class="switch" id="s-privacy"></span>🔒 Privacy Mode</label>
           </div>

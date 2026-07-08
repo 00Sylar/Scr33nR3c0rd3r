@@ -10,7 +10,20 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **Low-disk guard restart loop.** The guard used a single free-space
+  threshold (20 GB) to both trip and clear, so as soon as free space ticked
+  back over the line, auto-record models would relaunch immediately, eat the
+  sliver of headroom, and re-trip the guard on the next check — looping
+  start/stop indefinitely. The guard now trips below a **stop** threshold and
+  stays tripped until free space climbs back up to a separate, higher
+  **resume** threshold (hysteresis), stopping the flapping.
+
+### Added
+- **Configurable low-disk thresholds.** Settings → Behavior now has "Stop
+  below (GB free)" and "Resume at (GB free)" fields (defaults 20 GB / 40 GB)
+  instead of a hardcoded 20 GB cutoff. Applied to both the web UI and the
+  classic (`--classic`) Tkinter UI.
 
 ---
 

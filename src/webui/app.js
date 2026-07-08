@@ -503,6 +503,9 @@ async function loadSettings() {
   updateNotifDim();
   setSwitch("s-down", s.auto_downgrade_enabled);
   setSwitch("s-disk", s.low_disk_guard_enabled);
+  $("s-disk-stop").value = s.low_disk_stop_gb;
+  $("s-disk-resume").value = s.low_disk_resume_gb;
+  updateDiskDim();
   setSwitch("s-pw", s.playwright_fallback_enabled);
   setSwitch("s-privacy", s.privacy_mode_enabled);
   const b = await API.browsers();
@@ -523,8 +526,15 @@ function setSwitch(id, on) { $(id).classList.toggle("on", !!on); }
 function updateNotifDim() {
   $("notif-types").classList.toggle("disabled", !$("s-notif").classList.contains("on"));
 }
+function updateDiskDim() {
+  const on = $("s-disk").classList.contains("on");
+  $("disk-thresholds").classList.toggle("disabled", !on);
+  $("s-disk-stop").disabled = !on;
+  $("s-disk-resume").disabled = !on;
+}
 $("s-dur").addEventListener("input", (e) => { $("dur-val").textContent = e.target.value; });
 $("s-notif").closest(".toggle-row").addEventListener("click", () => setTimeout(updateNotifDim, 0));
+$("s-disk").closest(".toggle-row").addEventListener("click", () => setTimeout(updateDiskDim, 0));
 
 async function loadVip() {
   if (!API) return;
@@ -565,6 +575,8 @@ $("s-save").addEventListener("click", async () => {
     notify_vip_only: $("s-vip-only").classList.contains("on"),
     auto_downgrade_enabled: $("s-down").classList.contains("on"),
     low_disk_guard_enabled: $("s-disk").classList.contains("on"),
+    low_disk_stop_gb: $("s-disk-stop").value,
+    low_disk_resume_gb: $("s-disk-resume").value,
     playwright_fallback_enabled: $("s-pw").classList.contains("on"),
     privacy_mode_enabled: $("s-privacy").classList.contains("on"),
     preferred_browser: $("s-browser").value,

@@ -561,9 +561,15 @@ def launch_stripchat_native(model_name: str, output_path: str,
 
 # ── StreamRecorder ────────────────────────────────────────────────────────────
 
-# Low-disk guard threshold: with the guard enabled, all recordings stop and no
-# new ones may start while the output drive has less free space than this.
-LOW_DISK_MIN_FREE_GB = 20
+# Low-disk guard thresholds (user-configurable via Settings): with the guard
+# enabled, all recordings stop and no new ones may start once free space drops
+# below the stop threshold; they stay blocked until free space climbs back up
+# to the (higher) resume threshold. The gap between the two is a hysteresis
+# margin — without it, a recording that trips the guard would immediately be
+# allowed to restart the moment a few MB free back up, re-trip on the next
+# tick, and loop forever (see CHANGELOG).
+LOW_DISK_STOP_GB_DEFAULT = 20
+LOW_DISK_RESUME_GB_DEFAULT = 40
 
 
 class StreamRecorder:
@@ -587,8 +593,11 @@ class StreamRecorder:
         self._gap_warn_ts: dict[str, float] = {}
 
         # Low-disk guard: when enabled, every recording is stopped and new ones
-        # are refused while the output drive has < LOW_DISK_MIN_FREE_GB free.
+        # are refused while the output drive is below low_disk_stop_gb; it
+        # stays tripped until free space climbs back up to low_disk_resume_gb.
         self.low_disk_guard_enabled: bool = False
+        self.low_disk_stop_gb: float = LOW_DISK_STOP_GB_DEFAULT
+        self.low_disk_resume_gb: float = LOW_DISK_RESUME_GB_DEFAULT
         self._low_disk_tripped: bool = False   # guard is currently blocking
         self._low_disk_log_ts: float = 0.0     # throttle refused-start log lines
 
@@ -926,42 +935,54 @@ class StreamRecorder:
             return None
 
     def low_disk_blocked(self) -> Optional[float]:
-        """If the guard is enabled and the output drive is below the threshold,
-        return the current free GB; otherwise None (not blocked)."""
-        if not self.low_disk_guard_enabled:
+        """If the guard is currently tripped, return the current free GB;
+        otherwise None (not blocked). Reads the tripped flag maintained by
+        _enforce_low_disk_guard — it does not itself decide trip/resume, so
+        callers between ticks see a stable answer instead of re-deciding
+        against a single threshold (which is what caused the restart loop:
+        see LOW_DISK_STOP_GB_DEFAULT / LOW_DISK_RESUME_GB_DEFAULT above)."""
+        if not self.low_disk_guard_enabled or not self._low_disk_tripped:
             return None
-        free = self._disk_free_gb()
-        if free is not None and free < LOW_DISK_MIN_FREE_GB:
-            return free
-        return None
+        return self._disk_free_gb()
 
     def _enforce_low_disk_guard(self):
-        """Called once per monitor/watcher tick: when the guard trips, stop
-        every active download; log/notify the trip and the recovery once."""
-        free = self.low_disk_blocked()
-        if free is None:
-            if self._low_disk_tripped:
-                self._low_disk_tripped = False
-                if self.low_disk_guard_enabled:
-                    self._log("✓ Disk space recovered — recordings are "
-                              "allowed again.")
+        """Called once per monitor/watcher tick. Hysteresis: trips when free
+        space drops below low_disk_stop_gb, stays tripped (blocking all
+        starts) until free space climbs back up to low_disk_resume_gb. The
+        gap between the two thresholds stops the guard from flapping — a
+        single shared threshold would let a just-resumed recording eat the
+        sliver of headroom and re-trip on the very next tick."""
+        if not self.low_disk_guard_enabled:
+            self._low_disk_tripped = False
             return
-        first = not self._low_disk_tripped
-        self._low_disk_tripped = True
-        with self._lock:
-            has_active = any(c.session for c in self.models.values())
-        if first:
+        free = self._disk_free_gb()
+        if free is None:
+            return   # never block on a probe failure
+        if self._low_disk_tripped:
+            if free >= self.low_disk_resume_gb:
+                self._low_disk_tripped = False
+                self._log(f"✓ Disk space recovered — {free:.1f} GB free "
+                          f"(>= {self.low_disk_resume_gb:.0f} GB resume "
+                          f"threshold) — recordings are allowed again.")
+            return
+        if free < self.low_disk_stop_gb:
+            self._low_disk_tripped = True
+            with self._lock:
+                has_active = any(c.session for c in self.models.values())
             self._log(f"⛔ LOW DISK: {free:.1f} GB free on the output drive "
-                      f"(< {LOW_DISK_MIN_FREE_GB} GB) — stopping all downloads; "
-                      f"new recordings blocked until space is freed or the "
-                      f"guard is disabled in Settings.")
+                      f"(< {self.low_disk_stop_gb:.0f} GB) — stopping all "
+                      f"downloads; new recordings blocked until free space "
+                      f"reaches {self.low_disk_resume_gb:.0f} GB or the guard "
+                      f"is disabled in Settings.")
             if self.on_notification:
                 self.on_notification(
                     "Low disk space",
                     f"Only {free:.1f} GB free — all recordings stopped. "
-                    f"Free up space (or disable the disk guard) to continue.")
-        if has_active:
-            self.stop_all_recordings()
+                    f"Recording resumes automatically at "
+                    f"{self.low_disk_resume_gb:.0f} GB free (or disable the "
+                    f"disk guard).")
+            if has_active:
+                self.stop_all_recordings()
 
     # Online checks for due models run in a small shared pool: the old serial
     # pass meant one slow site response delayed every other model's check AND
@@ -1288,8 +1309,9 @@ class StreamRecorder:
             if now - self._low_disk_log_ts >= 60:   # don't spam per model/tick
                 self._low_disk_log_ts = now
                 self._log(f"⛔ Not recording {cfg.name} ({cfg.site}): only "
-                          f"{free:.1f} GB free (< {LOW_DISK_MIN_FREE_GB} GB). "
-                          f"Free up space or disable the disk guard.")
+                          f"{free:.1f} GB free (guard resumes at "
+                          f"{self.low_disk_resume_gb:.0f} GB). Free up space "
+                          f"or disable the disk guard.")
             self._set_status(cfg, ModelStatus.ERROR,
                              f"Low disk: {free:.1f} GB free")
             return

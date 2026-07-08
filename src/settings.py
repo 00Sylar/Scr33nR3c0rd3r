@@ -50,7 +50,9 @@ class AppSettings:
     max_quality: int = 0                       # global cap: variant height px (0 = unlimited)
     auto_downgrade_enabled: bool = False       # step struggling streams down a quality rung
     playwright_fallback_enabled: bool = True   # Stripchat: use browser fallback when native fails
-    low_disk_guard_enabled: bool = False       # stop/block all recording when output drive < 20 GB free
+    low_disk_guard_enabled: bool = False       # stop/block all recording when output drive is low on space
+    low_disk_stop_gb: float = 20.0             # trip the guard below this many GB free
+    low_disk_resume_gb: float = 40.0           # stay tripped until free space reaches this many GB (hysteresis)
     preferred_browser: str = ""                # "" = ask each time, "system" = OS default, else exe path
     preview_mode: str = "external"             # "external" (player window) | "embedded" (in-app)
     preview_engine: str = "auto"               # "auto" | "mpv" | "vlc"
@@ -133,6 +135,10 @@ def load_settings() -> AppSettings:
     s.auto_downgrade_enabled = main.get("auto_downgrade_enabled", s.auto_downgrade_enabled)
     s.playwright_fallback_enabled = main.get("playwright_fallback_enabled", s.playwright_fallback_enabled)
     s.low_disk_guard_enabled = main.get("low_disk_guard_enabled", s.low_disk_guard_enabled)
+    s.low_disk_stop_gb = main.get("low_disk_stop_gb", s.low_disk_stop_gb)
+    s.low_disk_resume_gb = main.get("low_disk_resume_gb", s.low_disk_resume_gb)
+    if s.low_disk_resume_gb <= s.low_disk_stop_gb:
+        s.low_disk_resume_gb = s.low_disk_stop_gb + 1
     s.preferred_browser = main.get("preferred_browser", s.preferred_browser)
     s.preview_mode = main.get("preview_mode", s.preview_mode)
     s.preview_engine = main.get("preview_engine", s.preview_engine)
@@ -185,6 +191,8 @@ def save_settings(s: AppSettings):
         "auto_downgrade_enabled": s.auto_downgrade_enabled,
         "playwright_fallback_enabled": s.playwright_fallback_enabled,
         "low_disk_guard_enabled": s.low_disk_guard_enabled,
+        "low_disk_stop_gb": s.low_disk_stop_gb,
+        "low_disk_resume_gb": s.low_disk_resume_gb,
         "preferred_browser": s.preferred_browser,
         "preview_mode": s.preview_mode,
         "preview_engine": s.preview_engine,

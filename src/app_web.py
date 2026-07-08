@@ -170,6 +170,8 @@ class WebCore:
         self.recorder.auto_downgrade_enabled = self.settings.auto_downgrade_enabled
         self.recorder.playwright_fallback_enabled = self.settings.playwright_fallback_enabled
         self.recorder.low_disk_guard_enabled = self.settings.low_disk_guard_enabled
+        self.recorder.low_disk_stop_gb = self.settings.low_disk_stop_gb
+        self.recorder.low_disk_resume_gb = self.settings.low_disk_resume_gb
 
         self._monitoring_recorder = False
         self._monitoring_saved    = False
@@ -1675,6 +1677,8 @@ class Bridge:
             "notify_vip_only": s.notify_vip_only,
             "auto_downgrade_enabled": s.auto_downgrade_enabled,
             "low_disk_guard_enabled": s.low_disk_guard_enabled,
+            "low_disk_stop_gb": s.low_disk_stop_gb,
+            "low_disk_resume_gb": s.low_disk_resume_gb,
             "playwright_fallback_enabled": s.playwright_fallback_enabled,
             "privacy_mode_enabled": s.privacy_mode_enabled,
             "preferred_browser": s.preferred_browser,
@@ -1696,6 +1700,13 @@ class Bridge:
                 return int(v) if v else default
             except (ValueError, TypeError):
                 return default
+
+        def _float(v, default=None):
+            try:
+                v = str(v).strip()
+                return float(v) if v else default
+            except (ValueError, TypeError):
+                return default
         s.output_dir            = str(p.get("output_dir", s.output_dir)).strip() or s.output_dir
         s.max_size_mb           = _int(p.get("max_size_mb"), None)
         s.check_interval        = _int(p.get("check_interval"), 30) or 30
@@ -1711,6 +1722,10 @@ class Bridge:
         s.notify_vip_only       = bool(p.get("notify_vip_only"))
         s.auto_downgrade_enabled = bool(p.get("auto_downgrade_enabled"))
         s.low_disk_guard_enabled = bool(p.get("low_disk_guard_enabled"))
+        s.low_disk_stop_gb       = max(1.0, _float(p.get("low_disk_stop_gb"), s.low_disk_stop_gb) or s.low_disk_stop_gb)
+        s.low_disk_resume_gb     = _float(p.get("low_disk_resume_gb"), s.low_disk_resume_gb) or s.low_disk_resume_gb
+        if s.low_disk_resume_gb <= s.low_disk_stop_gb:
+            s.low_disk_resume_gb = s.low_disk_stop_gb + 1
         s.playwright_fallback_enabled = bool(p.get("playwright_fallback_enabled"))
         s.privacy_mode_enabled  = bool(p.get("privacy_mode_enabled"))
         s.preferred_browser     = str(p.get("preferred_browser", s.preferred_browser))
@@ -1721,6 +1736,8 @@ class Bridge:
         c.recorder.auto_downgrade_enabled = s.auto_downgrade_enabled
         c.recorder.playwright_fallback_enabled = s.playwright_fallback_enabled
         c.recorder.low_disk_guard_enabled = s.low_disk_guard_enabled
+        c.recorder.low_disk_stop_gb = s.low_disk_stop_gb
+        c.recorder.low_disk_resume_gb = s.low_disk_resume_gb
         c.recorder.gap_warnings_enabled = s.gap_warnings_enabled
         c.recorder.output_dir = s.output_dir
         c.recorder.max_size_mb = s.max_size_mb
