@@ -6,32 +6,129 @@ in the repository, and each version is also a
 
 ---
 
-## V1.6 — 2026‑07‑04
+## V2.1 — 2026‑07‑09
 
-Minor bug fixes plus a few safety features.
+**The ▶ Player tab.** Watch several live models at once inside the app, and
+record straight from what you're watching.
 
 **Added**
-- **⛔ Low-disk guard** (Settings, off by default) — under 20 GB free on the
-  output drive, all downloads stop and new ones are blocked until space is
-  freed; recovery is automatic. The Telegram pipeline keeps running.
-- **Single-instance lock** — a second Scr33nX now shows "You can only open one
-  instance of this app" and closes itself.
-- **Rank misclick guard** and a **✕ Remove Offline** toolbar button.
+- **▶ Player tab** *(default UI)* — models open as live **muted** tiles in a
+  **Grid** wall; click a tile for **Theater** mode (that tile large + a
+  Bottom/Side thumbnail strip, all still playing). Add tiles via **+ Add
+  Tile** or right‑click → **▶ Add to Player**; capped by a new **Max Player
+  tiles** setting (1–20, default 9).
+- **▶ REC / ⏹ Stop from the Player and the embedded preview** — next to a
+  live status badge. Starting a model that isn't in the Recorder adds it
+  automatically.
+- **Configurable low‑disk thresholds** — separate **Stop below** / **Resume
+  at** GB values (defaults 20/40) replace the hardcoded 20 GB cutoff, in both
+  UIs.
 
 **Changed**
-- Launcher renamed `StreamRecorder.bat` → **`Scr33nX.bat`** (update your shortcuts).
+- All six navigation tabs now have matching icons; Theater layout always
+  keeps the thumbnail strip on screen; switching tiles no longer rebuffers
+  streams.
 
 **Fixed**
-- Faster RECORDING → offline detection (≈25 s instead of ~75 s), including
-  Stripchat advert-loop and never-created-file cases.
-- Column sorting no longer resets while a status filter is active.
+- Star ratings no longer silently lost when rating a model right after
+  adding it.
+- Low‑disk guard no longer start/stop loops around the threshold
+  (stop/resume hysteresis).
+- Telegram uploads: failed sends are no longer marked as uploaded and
+  forgotten — they log the real error and retry (up to 3×); files still
+  being written by ffmpeg are never queued; wrongly‑marked files from before
+  will upload on the next run.
+- A long list of Player‑tile bugs: invisible/duplicate tiles, streams
+  playing into hidden elements, silent failures that never retried, and
+  background streams continuing after leaving the tab.
+
+## V2.0 — 2026‑07‑07
+
+**The web UI redesign.** A complete visual and structural rebuild — a modern
+native window (Windows WebView2) becomes the default interface, with the
+original Tk UI kept as a fallback. Same recording engine, same config files,
+zero feature loss.
+
+**Added**
+- **New default UI** — full Recorder tab (toolbar, right‑click menus with
+  per‑model quality/rank submenus, column sorting, search + multi‑condition
+  status filters, checkboxes, Shift/Ctrl/marquee selection), Saved Models
+  (virtual‑scrolled for thousands of rows, scanner, import/export), Output/
+  Upload (pipeline, wizard, re‑auth, in‑app Telegram login prompts), Activity
+  Log, full Settings + System Check, stream preview (external **and** a new
+  built‑in in‑app player), Privacy Mode, tray, update check, single‑instance
+  lock, and the identical local API.
+- **Desktop‑style marquee selection** and **collapsible per‑site groups**
+  ([+]/[−]) on the model tables.
+- **Right‑click ▶ Add to Recorder & Start Recording** on an online Saved model.
+- **Notifications box + 🌟 VIP List** — per‑type notification toggles, a toast
+  duration slider, and a VIP list that restricts per‑model notifications to
+  models you've starred via right‑click.
+
+**Changed**
+- **`Scr33nX.bat` now launches the new UI by default.** The classic UI is
+  unchanged, available via `Scr33nX-Classic.bat` / `--classic`.
+- `pywebview` is now a required dependency.
+
+**Fixed**
+- **False "dropped segments" toast on a normal offline** — the toast is now
+  deferred a few seconds and only fires if the model is still recording.
+- **Telegram uploads no longer wait for the whole conversion batch** — Convert
+  and Upload run as fully independent workers.
+
+## V1.6 — 2026‑07‑04
+
+**Added**
+- **⛔ Low‑disk guard** (off by default) — stops all recordings and blocks new
+  ones under 20 GB free on the output drive; auto‑recovers.
+- **Rank misclick guard** — changing/clearing an *existing* star rank asks for
+  confirmation first; rating an unranked model stays one‑click.
+- **Single‑instance lock** — a second Scr33nX now shows "You can only open
+  one instance of this app" and closes itself, instead of silently
+  corrupting the first instance's models/ranks on save.
+- **✕ Remove Offline** toolbar button — removes every currently‑OFFLINE model
+  from the Recorder in one click (confirms first).
+
+**Changed**
+- Launcher renamed `StreamRecorder.bat` → `Scr33nX.bat`.
+
+**Fixed**
+- **Faster RECORDING → offline detection** (~25 s instead of ~75 s) via a
+  stall probe that asks the resolver directly instead of waiting out the
+  full timeout.
+- **Stripchat recordings no longer get stuck on RECORDING** when the CDN
+  swaps in an advert‑loop placeholder after the model goes offline.
+- **Stall detection now also covers recordings that never create their
+  output file.**
+- **Column sorting no longer resets** while a status filter is active.
 
 ## V1.5 — 2026‑06‑28
 
-In-app stream preview (mpv/VLC/ffplay, external or embedded), a dedicated
-Settings tab with a dependency **System Check** and one-click fixes, a guided
-Telegram setup, split stand-by pipeline stages, a browser picker for
-**Open in Browser**, and a round of UI-freeze fixes.
+**Added**
+- **▶ Stream preview (mpv / VLC / ffplay)** — right‑click a model → Preview
+  to watch it live, external (own process) or embedded in‑app, through the
+  same local relay the recorder uses.
+- **Choose which browser "Open in Browser" uses** — pick once, with a
+  *Remember my choice* option; change it later in Settings.
+- **Telegram Setup Wizard** — guided first‑time pipeline setup.
+- **Split the pipeline into independent Convert and Upload stages**, with a
+  live **● STAND BY** mode — tick/untick either at any time, nothing in
+  flight is ever interrupted.
+- **🔍 System Check** (Settings) — detects ffmpeg, ffplay, mpv, VLC,
+  python‑vlc, python‑mpv, tdjson, Playwright Chromium, with one‑click
+  **Add to PATH** / **Install** fixes.
+
+**Changed**
+- **Settings moved to their own ⚙ Settings tab.**
+
+**Fixed**
+- **Preview an offline model no longer crashes the app** — restricted to
+  online/recording models.
+- **UI no longer freezes opening many browser tabs at once.**
+- **Smoother UI under heavy load** — status updates batched (~150 ms) instead
+  of one event per model.
+
+---
 
 ## V1.4 — 2026‑06‑26
 

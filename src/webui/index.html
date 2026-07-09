@@ -51,11 +51,24 @@
     <main class="main">
 
       <nav class="tabs">
-        <button class="tab active" data-tab="recorder">Recorder</button>
-        <button class="tab" data-tab="saved">Saved Models</button>
-        <button class="tab" data-tab="output">Output / Upload</button>
-        <button class="tab" data-tab="log">Activity Log</button>
-        <button class="tab" data-tab="settings">⚙ Settings</button>
+        <button class="tab active" data-tab="recorder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.25"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
+          Recorder</button>
+        <button class="tab" data-tab="saved">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.6 21 12 17.25 6.4 21V4.9c0-.91.74-1.65 1.65-1.65h7.9c.91 0 1.65.74 1.65 1.65V21Z"/></svg>
+          Saved Models</button>
+        <button class="tab" data-tab="player">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.25 5.65c0-1.42 1.53-2.33 2.78-1.64l11.54 6.35c1.3.71 1.3 2.57 0 3.28L8.03 19.99c-1.25.69-2.78-.22-2.78-1.64V5.65Z"/></svg>
+          Player</button>
+        <button class="tab" data-tab="output">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/></svg>
+          Output / Upload</button>
+        <button class="tab" data-tab="log">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h10.5"/></svg>
+          Activity Log</button>
+        <button class="tab" data-tab="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.34 4.2a1.7 1.7 0 0 1 3.32 0l.22.94c.13.55.58.96 1.12 1.11.55.16 1.14.05 1.56-.31l.73-.62a1.7 1.7 0 0 1 2.39 2.39l-.62.73c-.36.42-.47 1.01-.31 1.56.15.54.56.99 1.11 1.12l.94.22a1.7 1.7 0 0 1 0 3.32l-.94.22c-.55.13-.96.58-1.11 1.12-.16.55-.05 1.14.31 1.56l.62.73a1.7 1.7 0 0 1-2.39 2.39l-.73-.62c-.42-.36-1.01-.47-1.56-.31-.54.15-.99.56-1.12 1.11l-.22.94a1.7 1.7 0 0 1-3.32 0l-.22-.94a1.66 1.66 0 0 0-1.12-1.11 1.66 1.66 0 0 0-1.56.31l-.73.62a1.7 1.7 0 0 1-2.39-2.39l.62-.73c.36-.42.47-1.01.31-1.56a1.66 1.66 0 0 0-1.11-1.12l-.94-.22a1.7 1.7 0 0 1 0-3.32l.94-.22c.55-.13.96-.58 1.11-1.12.16-.55.05-1.14-.31-1.56l-.62-.73a1.7 1.7 0 0 1 2.39-2.39l.73.62c.42.36 1.01.47 1.56.31.54-.15.99-.56 1.12-1.11l.22-.94Z"/><circle cx="12" cy="12" r="2.9"/></svg>
+          Settings</button>
       </nav>
 
       <!-- ═══ RECORDER ═══ -->
@@ -140,6 +153,32 @@
               <span class="sortable" data-col="size" style="text-align:right">Size <i></i></span>
             </div>
             <div id="saved-viewport"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ PLAYER ═══ -->
+      <section class="panel" data-panel="player">
+        <div class="toolbar">
+          <span class="sel" id="player-count">0 / 9 tiles</span>
+          <span class="vsep"></span>
+          <div class="player-toggle-group" id="player-layout">
+            <button class="btn mini active" data-layout="grid">▦ Grid</button>
+            <button class="btn mini" data-layout="theater">▶ Theater</button>
+          </div>
+          <div class="player-toggle-group" id="player-strip-pos" hidden>
+            <button class="btn mini" data-stripe="bottom">⬓ Strip: Bottom</button>
+            <button class="btn mini" data-stripe="side">▥ Strip: Side</button>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn" id="player-add">＋ Add Tile</button>
+        </div>
+        <div class="player-empty" id="player-empty">No tiles open. Click "＋ Add Tile" to pick a model from Recorder or Saved Models.</div>
+        <div class="player-stage" id="player-stage" data-layout="grid" data-stripe="bottom" hidden>
+          <div class="player-grid" id="player-grid"></div>
+          <div class="player-theater" id="player-theater" hidden>
+            <div class="theater-active" id="theater-active"></div>
+            <div class="theater-strip" id="theater-strip"></div>
           </div>
         </div>
       </section>
@@ -261,6 +300,8 @@
             </div>
             <div class="field"><label>Player path (optional, mpv.exe / vlc.exe)</label>
               <input id="s-ppath" placeholder="auto-detect" spellcheck="false"></div>
+            <div class="field"><label>Max Player tiles open at once (1-20)</label>
+              <input id="s-player-max" title="Caps how many tiles you can have open in the Player tab. Every open tile streams live (muted) at once, so raising this raises bandwidth/CPU use too — lower it if you're stretched thin."></div>
           </div>
           <div class="card">
             <h3>🔍 System Check</h3>
@@ -340,6 +381,19 @@
   </div>
 </div>
 
+<!-- add player tile -->
+<div class="modal-backdrop" id="playerpick" hidden>
+  <div class="modal">
+    <h3>Add Player Tile</h3>
+    <p>Pick a tracked model to open as a tile. Click a row to add it.</p>
+    <input id="playerpick-filter" style="width:100%" spellcheck="false" placeholder="Filter models…">
+    <div id="playerpick-list" class="playerpick-list"></div>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="btn" id="playerpick-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- setup wizard -->
 <div class="modal-backdrop" id="wizard" hidden>
   <div class="modal" style="min-width:480px">
@@ -360,6 +414,9 @@
     <div class="player-head">
       <span id="player-title">Preview</span>
       <div class="spacer"></div>
+      <button class="btn rec" id="player-rec">▶ REC</button>
+      <button class="btn" id="player-stop">⏹ Stop</button>
+      <span class="st" id="player-status" hidden><span class="dot"></span><span class="st-txt"></span></span>
       <button class="btn" id="player-close">✕ Close</button>
     </div>
     <video id="player-video" controls autoplay></video>

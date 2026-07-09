@@ -34,6 +34,17 @@ ffmpeg never talks to the CDN directly. All HLS traffic goes through a relay on
   *Note: the browser fallback doesn't pass through the relay, so it isn't
   counted by the bandwidth meter.*
 
+## Reliability
+
+- **Stuck‑RECORDING → offline stall probe** — when a recording's file stalls
+  for ~20 s, the app quietly asks the resolver whether the model is still
+  online; if not, it stops right away instead of waiting for the full 60 s
+  stall timeout.
+- **Low‑disk guard** (optional) — stops every active recording and blocks new
+  ones while the output drive has under 20 GB free; recovers automatically.
+- **Single‑instance lock** — a second Scr33nX can't bind the API port, so it
+  can't silently corrupt the first instance's models/ranks on save.
+
 ## Quality, downgrade & splitting
 
 - **Quality cap** resolution order: per‑model override → global *Max Quality* →

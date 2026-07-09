@@ -5,7 +5,7 @@ app.py — Scr33nX — GUI
 # Single source of truth for the running version. Shown in the header and
 # compared against the latest GitHub release by the update checker.
 # When cutting a release (see CONTRIBUTING.md), bump this to match the new tag.
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 GITHUB_REPO = "00Sylar/Scr33nX"   # owner/repo, used for the update check
 
 import os
@@ -296,10 +296,19 @@ class _ApiHandler(BaseHTTPRequestHandler):
         if target != "saved" and key in app._rows:
             self._json({"ok": False, "error": "Already in Recorder"})
             return
+        # Write the membership entry synchronously (plain dict write, no
+        # widgets touched) before scheduling the UI/engine work on the main
+        # thread. Otherwise a /rank call that lands right after this /add
+        # response can run its own live-state check before the deferred
+        # _add_to_saved/_add_to_recorder has actually executed, and gets
+        # rejected even though the client just got {"ok": true} — the star
+        # rating silently doesn't save.
         if target == "saved":
-            app.after(0, lambda n=name, s=site: app._add_to_saved(n, s))
+            app._saved_data[sid] = {"name": name, "site": site}
+            app.after(0, lambda n=name, s=site: app._finish_add_saved(n, s))
         else:
-            app.after(0, lambda n=name, s=site: app._add_to_recorder(n, s))
+            app._rows[key] = True
+            app.after(0, lambda n=name, s=site: app._finish_add_recorder(n, s))
         self._json({"ok": True})
 
     def _handle_record(self):
@@ -3430,6 +3439,15 @@ class StreamRecorderApp(tk.Tk):
                                  f"{name} ({site}) is already in Saved Models.")
             return
         self._saved_data[sid] = {"name": name, "site": site}
+        self._finish_add_saved(name, site)
+
+    def _finish_add_saved(self, name: str, site: str):
+        """Widget/engine side of adding to Saved Models. The API path
+        (_handle_add) writes the _saved_data entry synchronously — before this
+        runs on the Tk thread — so a /rank call arriving right after /add sees
+        the model as saved instead of racing the deferred insert. This only
+        does the UI/engine work, so it's safe whether or not the dict entry
+        was already there."""
         # Engine registration is only needed while the scanner runs; otherwise
         # it happens in bulk at scanner start.
         if self._monitoring_saved:
@@ -3449,6 +3467,12 @@ class StreamRecorderApp(tk.Tk):
             messagebox.showerror("Already in Recorder",
                                  f"{name} ({site}) is already in the Recorder list.")
             return
+        self._rows[key] = True
+        self._finish_add_recorder(name, site)
+
+    def _finish_add_recorder(self, name: str, site: str):
+        """Widget/engine side of adding to Recorder — see _finish_add_saved
+        for why this is split from the dict write."""
         self.recorder.add_model(name, site, "recorder")
         self._insert_model(name, site)
         self._persist_models()

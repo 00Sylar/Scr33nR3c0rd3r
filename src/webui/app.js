@@ -46,6 +46,7 @@ let recVisible = [];                // ordered visible keys (for shift ranges)
 const rowEls = new Map();
 let settingsLoaded = false;
 let suppressClick = false;
+let playerMaxTiles = 9;             // cached from settings; see Player tab section
 
 /* ══ boot ══ */
 function start() {
@@ -90,6 +91,8 @@ function render(s) {
   renderDash(s.dash);
   renderRec(s.models);
   renderSaved();
+  patchPlayerStatuses();
+  patchPreviewControls();
   renderLog(s.log, s.log_seq);
   renderPipe(s.pipe);
   $("saved-count").textContent = `${s.saved_count.toLocaleString()} model(s)`;
@@ -519,6 +522,8 @@ async function loadSettings() {
   $("s-pmode").value = s.preview_mode;
   $("s-pengine").value = s.preview_engine;
   $("s-ppath").value = s.preview_player_path;
+  $("s-player-max").value = s.max_player_tiles;
+  playerMaxTiles = s.max_player_tiles;
   runSystemCheck();
   loadVip();
 }
@@ -583,7 +588,10 @@ $("s-save").addEventListener("click", async () => {
     preview_mode: $("s-pmode").value,
     preview_engine: $("s-pengine").value,
     preview_player_path: $("s-ppath").value,
+    max_player_tiles: $("s-player-max").value,
   });
+  playerMaxTiles = Number($("s-player-max").value) || playerMaxTiles;
+  renderPlayerTab();
   toast("✓ Settings saved" + (r.note ? ` — ${r.note}` : ""));
 });
 
@@ -889,6 +897,8 @@ document.addEventListener("contextmenu", (e) => {
             action: () => API.saved_remove([`saved:${k0}`]) }
         : { label: "⭐  Add to Saved Models", action: () => API.add_saved(keys) },
       { label: "▶  Preview", action: () => doPreview(m.name, m.site) },
+      (m.status === "online" || m.status === "recording")
+        ? { label: "▶  Add to Player", action: () => addPlayerTile(m.name, m.site) } : null,
       { label: "⭐  Set Rank", sub: rankSub(keys, false) },
       m.vip ? { label: "🌟  Remove from VIP List", action: () => vipRefresh(() => API.vip_remove(keys)) }
             : { label: "🌟  Add to VIP List", action: () => vipRefresh(() => API.vip_add(keys)) },
@@ -909,6 +919,10 @@ document.addEventListener("contextmenu", (e) => {
       { label: `⭐  Set Rank  (${n} selected)`, sub: rankSub(keys, false) },
       { label: `🌟  Add to VIP List  (${n})`, action: () => vipRefresh(() => API.vip_add(keys)) },
       { label: `🌟  Remove from VIP List  (${n})`, action: () => vipRefresh(() => API.vip_remove(keys)) },
+      { label: `▶  Add to Player  (${n})`, action: () => addPlayerTilesBulk(
+          keys.map(k => (S.models || []).find(x => x.key === k))
+              .filter(mm => mm && (mm.status === "online" || mm.status === "recording"))
+              .map(mm => ({ name: mm.name, site: mm.site }))) },
       "hr",
       { label: `🌐  Open in Browser  (${n})`, action: () => openBrowser(keys, false, false) },
       { label: `🌐  Open in Browser (choose…)  (${n})`, action: () => openBrowser(keys, false, true) },
@@ -930,6 +944,7 @@ document.addEventListener("contextmenu", (e) => {
       liveNow ? { label: "▶  Add to Recorder & Start Recording",
                   action: () => API.saved_record(keys) } : null,
       { label: "▶  Preview", action: () => doPreview(it.name, it.site) },
+      liveNow ? { label: "▶  Add to Player", action: () => addPlayerTile(it.name, it.site) } : null,
       "hr",
       { label: "🔗  Copy Model URL", action: () => API.copy_urls(keys, true, false) },
       { label: "🌐  Open in Browser", action: () => openBrowser(keys, true, false) },
@@ -946,6 +961,12 @@ document.addEventListener("contextmenu", (e) => {
       { label: `⭐  Set Rank  (${n})`, sub: rankSub(keys, true) },
       { label: `🌟  Add to VIP List  (${n})`, action: () => vipRefresh(() => API.vip_add(keys)) },
       { label: `🌟  Remove from VIP List  (${n})`, action: () => vipRefresh(() => API.vip_remove(keys)) },
+      { label: `▶  Add to Player  (${n})`, action: () => {
+          const stMap = S.saved_status || {};
+          addPlayerTilesBulk(keys.map(k => savedCache.items.find(x => x.sid === k))
+            .filter(it => it && stMap[it.sid] && (stMap[it.sid][0] === "online" || stMap[it.sid][0] === "recording"))
+            .map(it => ({ name: it.name, site: it.site })));
+        } },
       "hr",
       { label: `🌐  Open in Browser  (${n})`, action: () => openBrowser(keys, true, false) },
       { label: `🌐  Open in Browser (choose…)  (${n})`, action: () => openBrowser(keys, true, true) },
@@ -993,6 +1014,7 @@ async function openBrowser2(keys, saved, forceChoose) {
 
 /* ══ preview ══ */
 let hls = null;
+let previewModel = null;   // {name, site} while the embedded overlay is open
 async function doPreview(name, site) {
   toast(`● Opening preview for ${name} (${site}) — resolving the stream…`);
   const r = await API.preview(name, site);
@@ -1000,6 +1022,8 @@ async function doPreview(name, site) {
   if (r.mode === "external") { toast(`Preview: ${r.player} window opened.`); return; }
   const video = $("player-video");
   $("player-title").textContent = `▶ ${r.title}`;
+  previewModel = { name, site };
+  patchPreviewControls();
   $("player").hidden = false;
   if (window.Hls && Hls.isSupported()) {
     if (hls) hls.destroy();
@@ -1015,6 +1039,7 @@ async function doPreview(name, site) {
 }
 function closePlayer() {
   if (hls) { hls.destroy(); hls = null; }
+  previewModel = null;
   const v = $("player-video");
   v.pause();
   v.removeAttribute("src");
@@ -1022,6 +1047,502 @@ function closePlayer() {
   $("player").hidden = true;
 }
 $("player-close").addEventListener("click", closePlayer);
+
+// ── Start/Stop recording from the preview overlay ──
+// Start via saved_record (adds the model to the Recorder if it isn't there
+// yet, then records); Stop hits the engine directly.
+function recControl(name, site, start) {
+  if (start) API.saved_record([`saved:${site}:${name}`]);
+  else API.record([`${site}:${name}`], false);
+}
+
+// Live status of a model by name/site, checking both the Recorder engine
+// and the Saved-Models scanner (same logic tiles use).
+function statusOfNameSite(name, site) {
+  return statusOfTile({ key: `${site}:${name}`, name, site });
+}
+
+// Called from doPreview and every tick — keeps the overlay's status badge
+// and REC/Stop buttons in sync while it's open.
+function patchPreviewControls() {
+  if (!previewModel) return;
+  const st = statusOfNameSite(previewModel.name, previewModel.site);
+  const badge = $("player-status");
+  badge.hidden = false;
+  badge.className = `st ${st}`;
+  badge.querySelector(".st-txt").textContent = STATUS_TXT[st];
+  $("player-rec").disabled = st !== "online";
+  $("player-stop").disabled = st !== "recording";
+}
+$("player-rec").addEventListener("click", () => {
+  if (previewModel) recControl(previewModel.name, previewModel.site, true);
+});
+$("player-stop").addEventListener("click", () => {
+  if (previewModel) recControl(previewModel.name, previewModel.site, false);
+});
+
+/* ══ Player tab (grid + theater preview) ══
+   Every open tile streams live (muted) at once, in either layout — up to
+   playerMaxTiles concurrent HLS connections. That's the real bandwidth/CPU
+   cost of opening more tiles; the Settings cap exists to bound it. */
+let playerTiles = [];           // [{id, key, name, site}], insertion order = grid order
+let playerHls = new Map();      // tileId -> Hls instance (or {destroy,media} stub)
+let playerLayout = "grid";      // "grid" | "theater"
+let playerStripPos = "bottom";  // "bottom" | "side"
+let playerActiveId = null;      // tileId centered in theater mode
+let playerTileSeq = 0;
+let playerTabLoaded = false;
+let playerPickerList = [];
+let playerPending = new Set();       // tileIds with an in-flight preview_embedded() call
+let playerCooldownUntil = new Map(); // tileId -> ms timestamp; skip auto-retry until then
+let playerTileErr = new Map();       // tileId -> short error text shown on the tile
+
+const PLAYER_RETRY_MS = 30000;  // wait between attempts for a tile that failed
+
+function playerTabActive() {
+  const p = document.querySelector('.panel[data-panel="player"]');
+  return !!(p && p.classList.contains("active"));
+}
+
+// Playback diagnostics land in the Activity Log ("[ui] …") — in-page media
+// failures are otherwise completely invisible from outside the WebView.
+function plog(msg) { try { API.client_log(msg); } catch (_) {} }
+
+// An immediate play() can lose the race against hls.js's own media load
+// ("AbortError: interrupted by a new load request") and the video then sits
+// paused forever. Try now AND once more when the element reports canplay.
+function tilePlay(el, name) {
+  const attempt = () => el.play().catch((e) =>
+    plog(`tile ${name}: play() rejected — ${e && e.name}: ${e && e.message}`));
+  el.addEventListener("canplay", attempt, { once: true });
+  attempt();
+}
+
+function setTileError(tileId, msg) {
+  playerTileErr.set(tileId, msg);
+  const el = document.querySelector(`[data-tile="${tileId}"] .tile-err`);
+  if (el) { el.textContent = msg; el.hidden = false; }
+}
+function clearTileError(tileId) {
+  playerTileErr.delete(tileId);
+  const el = document.querySelector(`[data-tile="${tileId}"] .tile-err`);
+  if (el) el.hidden = true;
+}
+
+function tileKey(name, site) { return `${site}:${name}`; }
+function findPlayerTile(id) { return playerTiles.find(t => t.id === id); }
+function statusOfKey(key) {
+  const m = (S && S.models || []).find(x => x.key === key);
+  return m ? m.status : "offline";
+}
+
+// Like statusOfKey, but also checks Saved Models' live status — needed for
+// Player tiles added from Saved Models, which aren't tracked in S.models.
+function statusOfTile(t) {
+  const st = statusOfKey(t.key);
+  if (st !== "offline") return st;
+  const sv = S && S.saved_status && S.saved_status[`saved:${t.site}:${t.name.toLowerCase()}`];
+  return sv ? sv[0] : "offline";
+}
+
+function loadPlayerTab() {
+  if (playerTabLoaded) return;
+  playerTabLoaded = true;
+  plog("player tab opened (diagnostics active)");
+  if (!settingsLoaded) API.get_settings().then(s => { playerMaxTiles = s.max_player_tiles; renderPlayerTab(); });
+}
+
+// REC/Stop buttons are in every tile's markup but only displayed (via CSS)
+// on the big theater tile — identical markup lets tiles MOVE between the
+// grid / theater containers without being rebuilt, so playback survives.
+function tileHtml(t) {
+  const st = statusOfTile(t);
+  const playing = playerHls.has(t.id);
+  return `
+    <div class="tile" data-tile="${t.id}">
+      <div class="tile-media">
+        <video class="tile-video" autoplay muted playsinline></video>
+        <div class="tile-poster"${playing ? " hidden" : ""}>${esc((t.name[0] || "?").toUpperCase())}</div>
+        <div class="tile-err"${playerTileErr.has(t.id) ? "" : " hidden"}>${esc(playerTileErr.get(t.id) || "")}</div>
+        <button class="tile-close" title="Close tile" data-tile-close="${t.id}">✕</button>
+      </div>
+      <div class="tile-info">
+        <span class="tile-name">${esc(t.name)}</span>
+        <span class="tile-site">${SITE_LABEL[t.site] || t.site}</span>
+        <button class="btn rec tile-recbtn" data-tile-rec="${t.id}"${st === "online" ? "" : " disabled"}>▶ REC</button>
+        <button class="btn tile-stopbtn" data-tile-stop="${t.id}"${st === "recording" ? "" : " disabled"}>⏹ Stop</button>
+        <span class="st ${st}"><span class="dot"></span><span class="st-txt">${STATUS_TXT[st]}</span></span>
+      </div>
+      <div class="tile-actions" data-phase2-slot></div>
+    </div>`;
+}
+
+// tileId -> live DOM element; elements are created once and MOVED between
+// containers on layout/active changes instead of re-rendered, so <video>
+// playback continues without the rebuffer "blackout".
+let playerTileEls = new Map();
+function ensureTileEl(t) {
+  let el = playerTileEls.get(t.id);
+  if (!el) {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = tileHtml(t);
+    el = tmp.firstElementChild;
+    playerTileEls.set(t.id, el);
+  }
+  return el;
+}
+
+function renderPlayerTab() {
+  if (!$("player-stage")) return;
+  $("player-count").textContent = `${playerTiles.length} / ${playerMaxTiles} tiles`;
+  $("player-empty").hidden = playerTiles.length > 0;
+  $("player-stage").hidden = playerTiles.length === 0;
+  // Reconcile, don't rebuild: each tile has ONE persistent element that is
+  // moved into the right container. A tile can only exist in one place, so
+  // there are never stale duplicates, and moving keeps videos playing.
+  for (const [id, el] of playerTileEls) {
+    if (!findPlayerTile(id)) { el.remove(); playerTileEls.delete(id); }
+  }
+  if (playerLayout === "grid") {
+    $("player-grid").hidden = false;
+    $("player-theater").hidden = true;
+    for (const t of playerTiles) $("player-grid").appendChild(ensureTileEl(t));
+  } else {
+    $("player-grid").hidden = true;
+    $("player-theater").hidden = false;
+    const active = findPlayerTile(playerActiveId) || playerTiles[0] || null;
+    playerActiveId = active ? active.id : null;
+    if (active) $("theater-active").appendChild(ensureTileEl(active));
+    for (const t of playerTiles) {
+      if (!active || t.id !== active.id) $("theater-strip").appendChild(ensureTileEl(t));
+    }
+  }
+  // Native player controls only on the big theater tile.
+  for (const [id, el] of playerTileEls) {
+    const v = el.querySelector(".tile-video");
+    if (v) v.controls = (playerLayout === "theater" && id === playerActiveId);
+  }
+  reattachPlayerPlayback();
+}
+
+// Structural re-renders replace tile DOM nodes; re-point any live Hls
+// instance at its (possibly new) <video> element instead of restarting it.
+// hls.js requires an explicit detach before re-attaching a new element.
+function reattachPlayerPlayback() {
+  for (const [tileId, inst] of playerHls) {
+    const el = document.querySelector(`[data-tile="${tileId}"] .tile-video`);
+    if (!el) continue;
+    if (inst.media !== el) {
+      if (inst.attachMedia) {
+        try { inst.detachMedia(); } catch (_) {}
+        inst.attachMedia(el);
+      } else {
+        el.src = inst.media ? inst.media.src : "";
+        inst.media = el;
+      }
+      const t = findPlayerTile(tileId);
+      tilePlay(el, t ? t.name : tileId);
+    } else if (el.paused) {
+      // Moving an element in the DOM pauses its <video>; just resume.
+      el.play().catch(() => {});
+    }
+    const poster = document.querySelector(`[data-tile="${tileId}"] .tile-poster`);
+    if (poster) poster.hidden = true;
+  }
+}
+
+// Called every tick — patches status badges, and starts/stops per-tile
+// playback as models go online/offline. Never touches a <video> element
+// that's already correctly playing, so an active stream isn't interrupted.
+function patchPlayerStatuses() {
+  for (const t of playerTiles) {
+    const st = statusOfTile(t);
+    const el = document.querySelector(`[data-tile="${t.id}"] .st`);
+    if (el) {
+      el.className = `st ${st}`;
+      el.querySelector(".st-txt").textContent = STATUS_TXT[st];
+    }
+    const recBtn = document.querySelector(`[data-tile-rec="${t.id}"]`);
+    if (recBtn) recBtn.disabled = st !== "online";
+    const stopBtn = document.querySelector(`[data-tile-stop="${t.id}"]`);
+    if (stopBtn) stopBtn.disabled = st !== "recording";
+    // "checking" is a transient recorder-poll state, not a real status change
+    // — reacting to it stopped live playback every poll cycle.
+    if (st === "checking") continue;
+    const live = st === "online" || st === "recording";
+    // Only auto-start playback while the Player tab is in front — otherwise
+    // streams would silently restart in the background after leaving the tab.
+    if (live && !playerHls.has(t.id) && playerTabActive()) playTile(t.id, { silent: true });
+    else if (!live && playerHls.has(t.id)) stopTilePlayback(t.id);
+  }
+}
+
+function stopAllPlayerPlayback() {
+  for (const tileId of [...playerHls.keys()]) stopTilePlayback(tileId);
+}
+
+// Plays a tile without disturbing any other tile's stream — the Player
+// tab runs every open tile live (muted) at once. opts.silent suppresses
+// toasts, used for the automatic per-tick play/retry pass so a model
+// that's briefly unavailable doesn't spam the user every second.
+async function playTile(tileId, opts = {}) {
+  const t = findPlayerTile(tileId);
+  if (!t || playerHls.has(tileId) || playerPending.has(tileId)) return;
+  const cd = playerCooldownUntil.get(tileId);
+  if (cd && Date.now() < cd) return;
+  playerPending.add(tileId);
+  let r;
+  try {
+    // The bridge call can take a while (Stripchat resolution makes several
+    // upstream requests); the race keeps a wedged call from pinning the tile
+    // in "pending" forever, which would permanently stop retries.
+    r = await Promise.race([
+      API.preview_embedded(t.name, t.site),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timed out")), 60000)),
+    ]);
+  } catch (e) {
+    playerCooldownUntil.set(tileId, Date.now() + PLAYER_RETRY_MS);
+    setTileError(tileId, "preview error — retrying…");
+    try { API.client_log(`Player tile ${t.name} (${t.site}): bridge call failed — ${e && e.message}`); } catch (_) {}
+    return;
+  } finally {
+    playerPending.delete(tileId);
+  }
+  if (!findPlayerTile(tileId)) return;   // tile closed while awaiting
+  if (!r.ok) {
+    playerCooldownUntil.set(tileId, Date.now() + PLAYER_RETRY_MS);
+    setTileError(tileId, "no public stream — retrying…");
+    if (!opts.silent) toast(r.error || "Preview failed.", true);
+    return;
+  }
+  playerCooldownUntil.delete(tileId);
+  clearTileError(tileId);
+  if (r.mode === "external") { toast(`Preview: ${r.player} window opened.`); return; }
+  const el = document.querySelector(`[data-tile="${tileId}"] .tile-video`);
+  if (!el) { plog(`tile ${t.name}: no <video> element found (layout=${playerLayout})`); return; }
+  let inst;
+  if (window.Hls && Hls.isSupported()) {
+    plog(`tile ${t.name}: url ok — attaching hls.js`);
+    // Tight retry budget: a stream that doesn't play should fail fast and
+    // fall back to the 30 s retry cycle, not grind for a minute in silence.
+    inst = new Hls({
+      liveDurationInfinity: true,
+      manifestLoadingMaxRetry: 2, levelLoadingMaxRetry: 2, fragLoadingMaxRetry: 2,
+      manifestLoadingRetryDelay: 1000, levelLoadingRetryDelay: 1000, fragLoadingRetryDelay: 1000,
+    });
+    inst.loadSource(r.url);
+    inst.attachMedia(el);
+    inst.once(Hls.Events.MANIFEST_PARSED, () => plog(`tile ${t.name}: manifest parsed`));
+    inst.once(Hls.Events.FRAG_BUFFERED, () => plog(`tile ${t.name}: first fragment buffered`));
+    el.addEventListener("playing", () => {
+      plog(`tile ${t.name}: video playing ✓`);
+      // 5 s later, report decode + layout facts: separates "not playing"
+      // from "playing but not painting" without needing devtools.
+      setTimeout(() => {
+        const rc = el.getBoundingClientRect();
+        plog(`tile ${t.name}: t=${el.currentTime.toFixed(1)}s decoded=${el.videoWidth}x${el.videoHeight} ` +
+             `paused=${el.paused} rect=${Math.round(rc.width)}x${Math.round(rc.height)}@${Math.round(rc.x)},${Math.round(rc.y)} ` +
+             `inDoc=${document.contains(el)}`);
+      }, 5000);
+    }, { once: true });
+    let errLogged = 0;
+    inst.on(Hls.Events.ERROR, (_e, data) => {
+      if (errLogged < 3 || data.fatal) {
+        errLogged++;
+        plog(`tile ${t.name}: hls ${data.fatal ? "FATAL" : "warn"} ${data.type}/${data.details}`);
+      }
+      if (data.fatal) {
+        if (!opts.silent) toast("Player tile playback error.", true);
+        stopTilePlayback(tileId);
+        playerCooldownUntil.set(tileId, Date.now() + PLAYER_RETRY_MS);
+        setTileError(tileId, "playback error — retrying…");
+      }
+    });
+  } else {
+    plog(`tile ${t.name}: hls.js unavailable — native <video> fallback`);
+    el.src = r.url;   // native HLS fallback
+    inst = { media: el, destroy() {} };
+  }
+  playerHls.set(tileId, inst);
+  tilePlay(el, t.name);
+  // The opaque poster overlays the video; hiding it reveals playback.
+  const poster = document.querySelector(`[data-tile="${tileId}"] .tile-poster`);
+  if (poster) poster.hidden = true;
+}
+
+function stopTilePlayback(tileId) {
+  const inst = playerHls.get(tileId);
+  if (!inst) return;
+  inst.destroy();
+  playerHls.delete(tileId);
+  const el = document.querySelector(`[data-tile="${tileId}"] .tile-video`);
+  if (el) { el.pause(); el.removeAttribute("src"); el.load(); }
+  const poster = document.querySelector(`[data-tile="${tileId}"] .tile-poster`);
+  if (poster) poster.hidden = false;
+}
+
+const PLAYER_CAP_MSG = "Player has the max tiles open — remove one to add a new one, or raise the cap in Settings.";
+
+function _pushPlayerTile(name, site) {
+  // returns "added" | "dup" | "cap" — shared by addPlayerTile/addPlayerTilesBulk
+  const key = tileKey(name, site);
+  if (playerTiles.some(t => t.key === key)) return "dup";
+  if (playerTiles.length >= playerMaxTiles) return "cap";
+  playerTiles.push({ id: ++playerTileSeq, key, name, site });
+  return "added";
+}
+function addPlayerTile(name, site) {
+  const r = _pushPlayerTile(name, site);
+  if (r === "dup") { toast("That model already has an open tile.", true); return false; }
+  if (r === "cap") { toast(PLAYER_CAP_MSG, true); return false; }
+  renderPlayerTab();
+  toast(`▶ Added ${name} to the Player tab.`);
+  playTile(playerTiles[playerTiles.length - 1].id);
+  return true;
+}
+function addPlayerTilesBulk(items) {
+  let added = 0, cap = false;
+  const newIds = [];
+  for (const { name, site } of items) {
+    const r = _pushPlayerTile(name, site);
+    if (r === "added") { added++; newIds.push(playerTiles[playerTiles.length - 1].id); }
+    else if (r === "cap") { cap = true; break; }
+  }
+  if (added) {
+    renderPlayerTab();
+    toast(`▶ Added ${added} model(s) to the Player tab.`);
+    for (const id of newIds) playTile(id);
+  }
+  if (cap) toast(PLAYER_CAP_MSG, true);
+  else if (!added) toast("Those models already have open tiles.", true);
+}
+
+function closePlayerTile(tileId) {
+  tileId = Number(tileId);
+  stopTilePlayback(tileId);
+  playerPending.delete(tileId);
+  playerCooldownUntil.delete(tileId);
+  playerTileErr.delete(tileId);
+  const i = playerTiles.findIndex(t => t.id === tileId);
+  if (i === -1) return;
+  playerTiles.splice(i, 1);
+  if (playerActiveId === tileId) {
+    playerActiveId = playerTiles.length ? playerTiles[0].id : null;
+    if (playerLayout === "theater" && !playerTiles.length) playerLayout = "grid";
+  }
+  renderPlayerTab();
+}
+
+function setPlayerLayoutButtons() {
+  document.querySelectorAll("#player-layout [data-layout]")
+    .forEach(b => b.classList.toggle("active", b.dataset.layout === playerLayout));
+  $("player-strip-pos").hidden = playerLayout !== "theater";
+}
+
+function enterTheater(tileId) {
+  if (!playerTiles.length) return;
+  playerLayout = "theater";
+  playerActiveId = (tileId != null ? Number(tileId) : playerTiles[0].id);
+  setPlayerLayoutButtons();
+  renderPlayerTab();
+  playTile(playerActiveId);
+}
+
+function exitTheater() {
+  playerLayout = "grid";
+  setPlayerLayoutButtons();
+  renderPlayerTab();
+}
+
+function setStripPosition(pos) {
+  playerStripPos = pos;
+  $("player-stage").dataset.stripe = pos;
+  document.querySelectorAll("#player-strip-pos [data-stripe]")
+    .forEach(b => b.classList.toggle("active", b.dataset.stripe === pos));
+}
+
+function openPlayerPicker() {
+  const open = new Set(playerTiles.map(t => t.key));
+  const seen = new Set();
+  const list = [];
+  for (const m of (S && S.models) || []) {
+    if (seen.has(m.key) || open.has(m.key)) continue;
+    seen.add(m.key);
+    list.push({ name: m.name, site: m.site, key: m.key });
+  }
+  for (const it of savedCache.items || []) {
+    const key = tileKey(it.name, it.site);
+    if (seen.has(key) || open.has(key)) continue;
+    seen.add(key);
+    list.push({ name: it.name, site: it.site, key });
+  }
+  list.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  playerPickerList = list;
+  renderPlayerPickerList(list);
+  $("playerpick-filter").value = "";
+  $("playerpick").hidden = false;
+  setTimeout(() => $("playerpick-filter").focus(), 60);
+}
+
+function renderPlayerPickerList(list) {
+  $("playerpick-list").innerHTML = list.length
+    ? list.map(it => `
+        <div class="playerpick-row" data-pp-name="${esc(it.name)}" data-pp-site="${esc(it.site)}">
+          <span class="tile-name">${esc(it.name)}</span>
+          <span class="tile-site">${SITE_LABEL[it.site] || it.site}</span>
+        </div>`).join("")
+    : `<div class="playerpick-empty">No tracked models available — add one to Recorder or Saved Models first.</div>`;
+}
+
+$("player-add").addEventListener("click", openPlayerPicker);
+$("playerpick-cancel").addEventListener("click", () => { $("playerpick").hidden = true; });
+$("playerpick-filter").addEventListener("input", (e) => {
+  const f = e.target.value.trim().toLowerCase();
+  renderPlayerPickerList(playerPickerList.filter(it => it.name.toLowerCase().includes(f)));
+});
+$("playerpick-list").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-pp-name]");
+  if (!row) return;
+  $("playerpick").hidden = true;
+  addPlayerTile(row.dataset.ppName, row.dataset.ppSite);
+});
+
+$("player-layout").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-layout]");
+  if (!b) return;
+  if (b.dataset.layout === "theater") enterTheater(playerActiveId);
+  else exitTheater();
+});
+$("player-strip-pos").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-stripe]");
+  if (b) setStripPosition(b.dataset.stripe);
+});
+// Bottom strip: translate the mouse wheel into horizontal scrolling.
+$("theater-strip").addEventListener("wheel", (e) => {
+  if (playerStripPos !== "bottom" || !e.deltaY) return;
+  e.preventDefault();
+  $("theater-strip").scrollLeft += e.deltaY;
+}, { passive: false });
+$("player-stage").addEventListener("click", (e) => {
+  const closeBtn = e.target.closest("[data-tile-close]");
+  if (closeBtn) { closePlayerTile(closeBtn.dataset.tileClose); return; }
+  const recBtn = e.target.closest("[data-tile-rec]");
+  if (recBtn) {
+    const t = findPlayerTile(Number(recBtn.dataset.tileRec));
+    if (t) recControl(t.name, t.site, true);
+    return;
+  }
+  const stopBtn = e.target.closest("[data-tile-stop]");
+  if (stopBtn) {
+    const t = findPlayerTile(Number(stopBtn.dataset.tileStop));
+    if (t) recControl(t.name, t.site, false);
+    return;
+  }
+  const tileEl = e.target.closest("[data-tile]");
+  if (!tileEl) return;
+  const tileId = Number(tileEl.dataset.tile);
+  if (playerLayout !== "theater" || tileId !== playerActiveId) enterTheater(tileId);
+});
 
 /* ══ toolbar wiring ══ */
 function needSel(tab) {
@@ -1174,6 +1695,12 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   if (t.dataset.tab === "settings") { loadSettings(); loadVip(); }
   if (t.dataset.tab === "output") loadPipeFields();
   if (t.dataset.tab === "saved") { savedCache.version = -1; renderSaved(); }
+  if (t.dataset.tab === "player") {
+    loadPlayerTab(); renderPlayerTab();
+    playerCooldownUntil.clear();   // fresh visit → retry failed tiles now
+    patchPlayerStatuses();
+  }
+  else stopAllPlayerPlayback();   // leaving Player tab: no background streams
 }));
 
 /* ══ privacy mode (idle starfield cover) ══ */

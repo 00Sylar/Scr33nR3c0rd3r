@@ -421,6 +421,9 @@ async function render(appData) {
           btnSaved.textContent = '⭐  In Saved Models';
           fb.className = 'feedback ok';
           fb.textContent = 'Added successfully';
+          // Re-render so the rank stars unlock immediately (they're disabled
+          // until inSaved/inRec is true) instead of waiting on the next poll.
+          setTimeout(render, 250);
         } else {
           btnSaved.disabled = false;
           btnSaved.textContent = '⭐  Add to Saved Models';

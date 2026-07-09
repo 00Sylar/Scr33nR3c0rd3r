@@ -20,12 +20,13 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 
 ### Monitoring & UI
 - ✅ Modern black & red UI — a native window (Windows WebView2, no browser involved) with smooth animations, shadows, drag-rectangle multi-select, and collapsible per-site groups. The previous Tk interface is still available (see *Two interfaces* below)
-- ✅ **Version number** shown in the header next to the logo (`v2.0`) so you always know which build you're running
+- ✅ **Version number** shown in the header next to the logo (`v2.1`) so you always know which build you're running
 - ✅ **Update check** — on startup Scr33nX quietly asks GitHub for the latest release; if a newer one exists, a clickable `● Update available` indicator appears in the header and opens the releases page. Runs in the background and fails silently when offline
 - ✅ **Live bandwidth meter** in the header (`↓ X.X Mbps` download / `↑` Telegram upload) showing Scr33nX's total traffic — your indicator for when you're approaching your internet connection's limit
 - ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)
 - ✅ **Dropped-segment warnings** — get notified when a stream is losing segments because bandwidth can't keep up (toggle in Settings)
 - ✅ **▶ Stream preview** — right-click a model → **Preview** to watch its live stream. Opens in a standalone **mpv / VLC / ffplay** window by default (own process, minimal impact on recording), or an optional **embedded in-app** player (mpv or VLC) with play/pause/mute/volume. Pick the engine in Settings; plays through the same local relay the recorder uses
+- ✅ **▶ Player tab** *(default UI only)* — open several models as tiles picked from Recorder/Saved. Every open tile streams live and **muted** at once in a **Grid** wall so you can monitor several cams visually without the noise; click a tile to switch to **Theater** mode (that tile large + a thumbnail strip, still all playing, toggle strip Bottom/Side). The big Theater tile has player controls plus **▶ REC / ⏹ Stop** buttons to start/stop recording the model you're watching (same buttons in the embedded preview overlay, next to a live status badge). More open tiles means more concurrent streams, so the count is capped in Settings (**Max Player tiles**, default 9)
 - ✅ **✕ Remove Offline** — one-click toolbar button that removes every model currently showing **OFFLINE** from the Recorder (asks first; recording/private/checking rows and Saved Models are untouched)
 - ✅ **Saved Models** tab — view-only watchlist with online/offline status
 - ✅ **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab (click a star, click it again to clear; or right-click → **Set Rank** for one row or a whole selection at once). Sortable **RANK** column, shared per-model across both tabs, and saved between sessions
@@ -148,6 +149,7 @@ The Settings tab also has a **🔍 System Check** panel that shows whether each 
 | 🔒 Privacy Mode | Idle screen cover |
 | Open links with | Which browser **Open in Browser** uses: *Ask each time*, *System default*, or a specific installed browser. You're prompted the first time (with a *Remember my choice* option); change or reset it here anytime. Right-click → **Open in Browser (choose…)** picks a one-off browser without changing this default |
 | Stream preview | How right-click → **Preview** plays a stream. **Mode:** *External window* (standalone player, lowest impact — default) or *Embedded (in-app)*. **Preview engine:** *Auto* / *mpv* / *VLC* (Auto uses whatever's installed; external also falls back to ffplay). Optional **Player path** points at a specific `mpv.exe`/`vlc.exe` |
+| Max Player tiles | *(default UI only)* Caps how many tiles you can have open at once in the **▶ Player** tab (1–20, default 9). Every open tile streams live (muted), so this is also a bandwidth/CPU cap — lower it if opening many tiles strains your connection |
 
 ---
 

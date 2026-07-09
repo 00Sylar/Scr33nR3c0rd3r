@@ -27,19 +27,34 @@ segments when bandwidth gets tight.
 | [[Features]] | Everything Scr33nX can do, by area |
 | [[Usage]] | Day‑to‑day: add models, record, split, rank |
 | [[Settings]] | Every setting in the left panel explained |
-| [[Browser Extension|Browser-Extension]] | One‑click add from Chrome/Firefox |
-| [[Telegram Pipeline|Telegram-Pipeline]] | Auto‑convert + upload finished recordings |
-| [[Local Control API|Local-Control-API]] | The HTTP API on port 5200 |
-| [[OpenClaw Bot|OpenClaw-Bot]] | Drive Scr33nX from your phone |
-| [[Recording Internals|Recording-Internals]] | Relay, resolvers, quality pinning |
+| [[Browser Extension\|Browser-Extension]] | One‑click add from Chrome/Firefox |
+| [[Telegram Pipeline\|Telegram-Pipeline]] | Auto‑convert + upload finished recordings |
+| [[Local Control API\|Local-Control-API]] | The HTTP API on port 5200 |
+| [[OpenClaw Bot\|OpenClaw-Bot]] | Drive Scr33nX from your phone |
+| [[Recording Internals\|Recording-Internals]] | Relay, resolvers, quality pinning |
 | [[Troubleshooting]] | Common problems and fixes |
-| [[Release History|Release-History]] | Version‑by‑version changes |
+| [[Release History\|Release-History]] | Version‑by‑version changes |
 
 ---
+
+## Two interfaces, one engine
+
+Since **V2.0**, Scr33nX ships two interfaces on the same recording engine,
+settings, and config files:
+
+- **Default** — a modern native window (Windows WebView2), launched by
+  `Scr33nX.bat` (or `Scr33nX-WebUI.bat`).
+- **Classic** — the original Tk interface, launched by `Scr33nX-Classic.bat`
+  (or `Scr33nX.bat --classic`).
+
+Everything in this wiki applies to both — only the look differs. See
+[[Installation]] for details.
 
 ## Requirements at a glance
 
 - **Windows 10/11**
+- **WebView2 Runtime** — for the default UI; built into Windows 11, usually
+  present on Windows 10 via Edge auto‑update
 - **Python 3.10+** (add to PATH during install)
 - **ffmpeg**
 - **Playwright Chromium** — only for the Stripchat browser fallback

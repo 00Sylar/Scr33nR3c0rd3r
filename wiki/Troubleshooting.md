@@ -8,7 +8,8 @@
 
 | Symptom | Cause / fix |
 |---|---|
-| Tray icon controls the "wrong" app, extension does nothing | A **second instance** was running. Current builds refuse to start a second instance ("You can only open one instance of this app"); on older builds, close the extras — only one Scr33nX can bind port 5200. |
+| Tray icon controls the "wrong" app, extension does nothing | A **second instance** is running — either interface, since both bind the same port 5200. Only one Scr33nX (default *or* classic) can run at a time; a second one shows "You can only open one instance of this app" and closes itself. |
+| Default UI won't open / shows a WebView2 message | The **WebView2 Runtime** wasn't detected. Windows 11 ships it; on Windows 10 it's normally there via Edge auto‑update — if not, the message links the installer. Or just use **`Scr33nX-Classic.bat`**, which doesn't need it. |
 | Window looks frozen | If it happened around Privacy Mode, update — older builds could pop a modal hidden behind the cover. Otherwise check the log for a stalled subprocess. |
 | Update indicator never appears | The check needs a **published GitHub Release**, not just a tag. If no releases are published, nothing triggers. It also fails silently when offline. |
 

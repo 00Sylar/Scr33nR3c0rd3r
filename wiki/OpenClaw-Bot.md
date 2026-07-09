@@ -37,7 +37,9 @@ Three moving parts: the **API** (`app.py`, port 5200), the **control script**
 | "is she recording?" | `status <name>` | report her state |
 | "start/stop the monitor" | `monitor recorder on` / `off` | recorder monitor |
 | "start/stop the scanner" | `monitor saved on` / `off` | saved‑models scanner |
-| "start/stop the pipeline" | `pipeline on` / `off` | Telegram upload pipeline |
+| "start/stop the pipeline" | `pipeline on` / `off` | Telegram upload pipeline (starts in stand‑by) |
+| "turn on/off pipeline convert" | `pipeline convert on` / `off` | tick/untick the Convert stage, live |
+| "turn on/off pipeline upload" | `pipeline upload on` / `off` | tick/untick the Upload stage, live |
 | "open / launch Scr33nX" | `open` | start the app |
 | "close / quit Scr33nX" | `close` | gracefully shut it down |
 

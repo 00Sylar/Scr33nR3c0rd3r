@@ -10,7 +10,69 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+---
+
+## V2.1 — 2026-07-09
+
+**The ▶ Player tab.** Watch several live models at once inside the app — a
+muted grid of tiles, or one playing large in Theater mode — and start/stop
+recording straight from the tile or preview you're watching. Plus
+configurable low-disk thresholds, consistent tab icons, and a round of
+Player, Telegram-upload, and star-rating fixes.
+
+### Added
+- **▶ Player tab** (web UI only). Open several models at once as tiles
+  picked from Recorder/Saved Models. Every open tile streams live and
+  **muted** at once in a **Grid** wall, so you can monitor several cams
+  visually without a wall of simultaneous audio; click a tile to switch to
+  **Theater** mode, where that tile plays large and the rest sit — still
+  playing — in a thumbnail strip you can toggle between Bottom and Side
+  placement. More open tiles means more concurrent streams, so the number
+  you can have open at once is capped by a new **Max Player tiles** setting
+  (1–20, default 9). Add tiles from the Player tab's **+ Add Tile** picker,
+  or right-click an **online/recording** model on the Recorder or Saved
+  Models tab → **▶ Add to Player** (single or multi-select) for a faster
+  path.
+- **Start/Stop recording from the Player and the preview.** The embedded
+  preview overlay now shows the model's live status next to Close, plus
+  **▶ REC** / **⏹ Stop** buttons; the big Theater tile gets the same
+  controls beside its status badge (thumbnails stay clean). REC is enabled
+  only when the model is online, Stop only while recording. Starting a
+  model that isn't in the Recorder adds it automatically.
+- **Configurable low-disk thresholds.** Settings → Behavior now has "Stop
+  below (GB free)" and "Resume at (GB free)" fields (defaults 20 GB / 40 GB)
+  instead of a hardcoded 20 GB cutoff. Applied to both the web UI and the
+  classic (`--classic`) Tkinter UI.
+
+### Changed
+- **Web UI: consistent tab icons.** All six navigation tabs now carry a
+  matching line icon (previously only Player and Settings had ad-hoc text
+  glyphs, which looked inconsistent).
+- **Player Theater layout fits the window.** The big Theater tile is now
+  height-capped so the thumbnail strip always stays on screen (previously
+  a tall stream pushed the Bottom strip out of view entirely), and the
+  Side strip scrolls vertically when more tiles are open than fit. In
+  Bottom mode the big tile hugs the video's 16:9 shape and stays centered
+  (no letterbox bars), and the strip scrolls horizontally — previously,
+  once enough tiles were open, their combined width silently stretched
+  the whole stage past the window edge, shoving the player off-center and
+  putting the strip's scrollbar out of reach.
+- **Smooth Theater switching + polish.** Switching the active Theater tile
+  (or Grid ↔ Theater) now moves the live tiles in place instead of
+  rebuilding them, so streams keep playing with no gray flicker/rebuffer.
+  The status badge is centered in the big tile's bar and in the preview
+  overlay's header (REC/Stop stay on the right), the theater strip's
+  scrollbar is red for visibility, and the mouse wheel scrolls the Bottom
+  strip horizontally.
+
 ### Fixed
+- **Star rating silently lost right after adding a model.** Rating a model
+  (via the browser extension, or the web UI's own Add buttons) immediately
+  after adding it to Saved Models/Recorder could race the add — the server
+  confirmed the add before the model actually registered, so a rank request
+  landing in that window was rejected and the rating never saved, even
+  though the extension's stars appeared to update. Model membership is now
+  recorded synchronously on add, closing the race.
 - **Low-disk guard restart loop.** The guard used a single free-space
   threshold (20 GB) to both trip and clear, so as soon as free space ticked
   back over the line, auto-record models would relaunch immediately, eat the
@@ -18,12 +80,54 @@ grouped by date / milestone.
   start/stop indefinitely. The guard now trips below a **stop** threshold and
   stays tripped until free space climbs back up to a separate, higher
   **resume** threshold (hysteresis), stopping the flapping.
-
-### Added
-- **Configurable low-disk thresholds.** Settings → Behavior now has "Stop
-  below (GB free)" and "Resume at (GB free)" fields (defaults 20 GB / 40 GB)
-  instead of a hardcoded 20 GB cutoff. Applied to both the web UI and the
-  classic (`--classic`) Tkinter UI.
+- **Player tab showed a stretched, empty duplicate tile.** Switching Grid ↔
+  Theater layout set the other panel's `hidden` attribute, but the panel's
+  own CSS `display` rule silently overrode it, leaving both panels visible
+  at once. Also, Player tiles now always resolve an embedded in-page stream
+  regardless of the general **Preview mode** setting — previously, if that
+  setting was left on its default (**External window**), tiles would try to
+  spawn external mpv/VLC windows instead of playing in the tile itself.
+- **Telegram uploads silently lost when a send failed.** When Telegram
+  rejected a video (wrong topic ID, size cap, no write access, …), the
+  uploader treated the failure exactly like a success: the file was marked
+  as uploaded and skipped forever — with no error anywhere. A whole folder
+  of .mp4s could pile up "ignored" this way. Failed sends now log the real
+  Telegram error, are retried up to 3 times, and are **never** marked as
+  uploaded; files that were wrongly marked before have been un-marked and
+  will upload on the next pipeline run. Bonus hardening: the uploader no
+  longer queues .mp4s that ffmpeg is still writing (previously it could
+  send a truncated video), and a file that uploads but can't be deleted is
+  now reported instead of silently left behind.
+- **Player tiles failed silently and could stop retrying.** A tile whose
+  stream couldn't start (model in a private show, playback error, stalled
+  resolver call) just sat on its poster forever with no hint. Tiles now
+  show a short error line ("no public stream — retrying…"), retry every
+  30 s (immediately when you re-open the tab), log in-page playback errors
+  to the Activity Log, and a stuck resolver call can no longer wedge the
+  tile permanently. Tiles also no longer restart their streams in the
+  background after you leave the Player tab, and switching Grid ↔ Theater
+  re-attaches live streams correctly instead of corrupting them.
+- **Player tiles played video into invisible elements.** The two big ones:
+  switching Grid ↔ Theater left the previous layout's tile nodes in the
+  (hidden) inactive panel, so the player attached the stream to the stale
+  hidden copy of the tile — audio-less video "played" where nobody could
+  see it while the visible tile kept its poster. And the tile's initial
+  `play()` could be cancelled by the player's own media load ("AbortError"),
+  leaving the video permanently paused. Layout switches now clear the
+  inactive panel, and playback retries once the media is ready.
+- **Player tiles: video played but stayed invisible — root cause found.**
+  The tile videos had been playing correctly all along; the gray poster
+  card drawn over each tile never actually went away, because the HTML
+  `hidden` attribute is only a browser *default* (`display:none`) and the
+  poster's own `display:flex` rule silently overrode it. A global
+  `[hidden] { display:none !important }` rule now makes `hidden` always
+  win, app-wide, eliminating this entire bug class (the same trap had
+  already caused the duplicate-panel bug). Along the way the tile player
+  was also rebuilt on the preview overlay's proven pattern
+  (`<video autoplay muted>`, plain block styling), the big Theater tile
+  gained player controls (pause / unmute one model — tiles stay muted by
+  default), and the recorder's transient "checking" poll state no longer
+  stops tile playback every cycle.
 
 ---
 

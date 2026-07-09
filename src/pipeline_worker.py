@@ -155,7 +155,7 @@ class PipelineWorker:
         ]
         for i in range(cfg.upload_workers):
             tasks.append(loop.create_task(
-                self._uploader_worker(i + 1, upload_queue, uploaded)))
+                self._uploader_worker(i + 1, upload_queue, queued, uploaded)))
         try:
             await asyncio.gather(*tasks)
         finally:
@@ -268,11 +268,15 @@ class PipelineWorker:
                     for f in sorted(os.listdir(self.cfg.output_folder)):
                         if (f.endswith(".mp4") and f not in uploaded
                                 and f not in queued):
+                            path = os.path.join(self.cfg.output_folder, f)
+                            # Skip files ffmpeg is still writing — uploading a
+                            # half-converted .mp4 sends a corrupt video.
+                            if not _is_free(path):
+                                continue
                             queued.add(f)
-                            await upload_queue.put(
-                                os.path.join(self.cfg.output_folder, f))
-                except Exception:
-                    pass
+                            await upload_queue.put(path)
+                except Exception as e:
+                    self.on_log(f"[upload] scan error: {e}")
             # Scan a bit faster than the converter's cycle so freshly produced
             # .mp4s are picked up promptly.
             for _ in range(10):
@@ -281,10 +285,11 @@ class PipelineWorker:
                 await asyncio.sleep(0.1)
 
     async def _uploader_worker(self, slot: int, upload_queue: asyncio.Queue,
-                                uploaded: set):
+                                queued: set, uploaded: set):
         td = None
         connect_failed = False
         prev_upload = False
+        attempts: dict = {}   # basename -> failed attempts this run
         while True:
             # Stop pulling new files the moment the pipeline is stopping. An
             # in-flight send_video already completed this iteration (finish
@@ -348,13 +353,28 @@ class PipelineWorker:
                 self._mark_uploaded(name)
                 try:
                     os.remove(path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Still marked uploaded (dedup by basename), so it won't
+                    # re-send — but tell the user the file lingers on disk.
+                    self.on_log(f"[upload #{slot}] ⚠ uploaded {name} but "
+                                f"couldn't delete it: {e}")
                 uploaded.add(name)
+                attempts.pop(name, None)
                 self.on_progress(kind, "", 100.0, 0.0)   # empty name → "idle"
                 self.on_log(f"[upload #{slot}] ✓ {name}")
             except Exception as e:
-                self.on_log(f"[upload #{slot}] ✗ {name}: {e}")
+                n = attempts.get(name, 0) + 1
+                attempts[name] = n
+                if n < 3:
+                    self.on_log(f"[upload #{slot}] ✗ {name}: {e} — "
+                                f"retrying (attempt {n}/3)")
+                    await asyncio.sleep(5)
+                    queued.discard(name)   # feeder re-queues on its next scan
+                else:
+                    self.on_log(f"[upload #{slot}] ✗ {name}: {e} — giving up "
+                                f"after 3 attempts; will retry when the "
+                                f"pipeline is restarted.")
+                self.on_progress(kind, "", 100.0, 0.0)
             finally:
                 self._ul_inflight[kind] = 0
                 upload_queue.task_done()
@@ -527,6 +547,7 @@ class _TDLibClient:
         self._futures: dict = {}
         self._file_evts: dict = {}
         self._send_evts: dict = {}
+        self._send_errors: dict = {}   # old_message_id -> "code: message" on send failure
         self._lock = threading.Lock()
         self._counter = 0
         self._ready: Optional[asyncio.Event] = None
@@ -604,9 +625,16 @@ class _TDLibClient:
             if ev:
                 ev.set()
         elif t == "updateMessageSendFailed":
+            # A failed send MUST surface as an error — treating it like
+            # success once marked hundreds of never-sent files as uploaded,
+            # permanently skipping them (they're deduped by basename).
             old = upd.get("old_message_id")
+            err = upd.get("error") or {}
+            code = err.get("code", upd.get("error_code", "?"))
+            msg = err.get("message", upd.get("error_message", "send failed"))
             with self._lock:
                 ev = self._send_evts.pop(old, None)
+                self._send_errors[old] = f"{code}: {msg}"
             if ev:
                 ev.set()
 
@@ -718,6 +746,11 @@ class _TDLibClient:
             if file_id:
                 with self._lock:
                     self._file_evts.pop(file_id, None)
+
+        with self._lock:
+            err = self._send_errors.pop(temp_msg_id, None)
+        if err:
+            raise Exception(f"TDLib: {err}")
 
         if progress_cb:
             try:

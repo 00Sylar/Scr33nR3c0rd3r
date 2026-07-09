@@ -1,6 +1,13 @@
 /* Scr33nX web UI — component styles (design language lives in tokens.css). */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+/* The HTML `hidden` attribute is only a UA default (display:none) — ANY
+   author display rule (e.g. .tile-poster { display:flex }) silently beats
+   it and the element stays visible. That single trap caused both the
+   Player's duplicate-panel bug and days of "tiles never play" (the poster
+   never actually hid over a perfectly playing video). Make hidden ALWAYS
+   win, everywhere, forever. */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   background: var(--bg-0);
@@ -139,12 +146,15 @@ input::placeholder { color: var(--text-3); }
 
 .tabs { display: flex; gap: 2px; padding: var(--sp-3) var(--sp-4) 0; border-bottom: 1px solid var(--line); }
 .tab {
-  position: relative; padding: 9px 16px 11px;
+  position: relative; display: flex; align-items: center; gap: 7px;
+  padding: 9px 16px 11px;
   font-size: var(--fs-2); color: var(--text-2);
   border-radius: var(--r-sm) var(--r-sm) 0 0;
   transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
+.tab svg { width: 15px; height: 15px; flex: none; opacity: 0.75; transition: opacity var(--t-fast) var(--ease); }
 .tab:hover { color: var(--text-1); background: var(--bg-hover); }
+.tab:hover svg, .tab.active svg { opacity: 1; }
 .tab.active { color: var(--text-1); }
 .tab::after {
   content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
@@ -477,11 +487,109 @@ input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), 
   border-radius: var(--r-lg); box-shadow: var(--shadow-lg); overflow: hidden;
   animation: fadein var(--t-med) var(--ease);
 }
-.player-head { display: flex; align-items: center; gap: var(--sp-2);
+.player-head { display: flex; align-items: center; gap: var(--sp-2); position: relative;
                padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line);
                color: var(--text-1); font-size: var(--fs-1); }
 .player-head .spacer { flex: 1; }
+/* Preview overlay: status badge centered in the header bar */
+#player-status { position: absolute; left: 50%; transform: translateX(-50%); }
 #player-video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+
+/* ══ Player tab (grid + theater preview) ══ */
+/* Grid items default to min-width:auto, so with many strip tiles the
+   theater strip's content width propagated up and silently widened the
+   whole stage past the window — pushing the centered player to the right
+   and clipping the strip's scrollbar off-screen. Clamp the player panel's
+   children so the strip scrolls inside itself instead. */
+.panel[data-panel="player"].active > * { min-width: 0; }
+.player-toggle-group { display: flex; gap: 4px; }
+.player-toggle-group .btn.active { color: var(--red-bright); border-color: var(--red-line); }
+.player-empty { padding: var(--sp-6); text-align: center; color: var(--text-3); font-size: var(--fs-1); }
+
+.player-stage { padding: 0 var(--sp-4) var(--sp-4); }
+
+.player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-4); }
+.player-grid[hidden] { display: none; }
+
+.tile {
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: var(--r-md); box-shadow: var(--shadow-sm); overflow: hidden;
+}
+/* The video is styled exactly like the (known-working) preview overlay's
+   #player-video: block, width-driven, own aspect-ratio, no object-fit —
+   the previous cover-inside-aspect-wrapper setup played audio/decoded but
+   never painted frames in WebView2. */
+.tile-media { position: relative; background: #000; cursor: pointer; }
+.tile-video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.tile-poster {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--text-3); font-size: var(--fs-4); font-weight: 600; background: var(--bg-3);
+}
+.tile-err {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  padding: 3px 8px; font-size: var(--fs-0); color: var(--red-bright);
+  background: rgba(0,0,0,0.65); text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile-err[hidden] { display: none; }
+.tile-close {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  width: 22px; height: 22px; padding: 0; line-height: 1;
+  background: rgba(0,0,0,0.55); border: 1px solid var(--line); border-radius: var(--r-sm);
+  color: var(--text-1);
+}
+.tile-close:hover { background: var(--red); border-color: var(--red); color: #fff; }
+.tile-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: var(--sp-2) var(--sp-3); }
+.tile-name { font-weight: 600; font-size: var(--fs-1); color: var(--text-1); }
+.tile-site { font-size: var(--fs-0); color: var(--text-3); letter-spacing: 0.6px; }
+.tile-info .st { margin-left: auto; }
+.tile-actions:empty { display: none; }
+.tile-actions { display: flex; gap: 6px; padding: 0 var(--sp-3) var(--sp-3); }
+
+.player-theater { display: flex; gap: var(--sp-4); }
+.player-theater[hidden] { display: none; }
+.player-stage[data-stripe="bottom"] .player-theater { flex-direction: column; }
+.player-stage[data-stripe="side"] .player-theater { flex-direction: row; }
+
+.theater-active { flex: 1; min-width: 0; }
+.theater-active:empty { display: none; }
+/* Cap the big tile so the thumbnail strip always stays on screen. In
+   bottom-strip mode the tile hugs the video's own 16:9 shape and centers
+   (height-driven), so no letterbox bars appear around the player. */
+.player-stage[data-stripe="bottom"] .theater-active .tile { width: fit-content; max-width: 100%; margin: 0 auto; }
+.player-stage[data-stripe="bottom"] .theater-active .tile-video {
+  width: auto; height: calc(100vh - 470px); max-width: calc(100vw - 330px);
+}
+.player-stage[data-stripe="side"]   .theater-active .tile-video { max-height: calc(100vh - 250px); }
+
+.theater-strip { display: flex; gap: var(--sp-2); }
+.player-stage[data-stripe="bottom"] .theater-strip { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+.player-stage[data-stripe="bottom"] .theater-strip .tile { flex: none; width: 210px; }
+.player-stage[data-stripe="side"] .theater-strip {
+  flex-direction: column; width: 230px; flex: none;
+  overflow-y: auto; max-height: calc(100vh - 210px);
+}
+.player-stage[data-stripe="side"] .theater-strip .tile { flex: none; }
+.theater-strip .tile-media { cursor: pointer; }
+/* The strip scrollbar sits on near-black — give it a visible red thumb. */
+.theater-strip::-webkit-scrollbar-thumb { background: var(--red); border: 2px solid var(--bg-0); }
+.theater-strip::-webkit-scrollbar-thumb:hover { background: var(--red-bright); }
+.theater-strip::-webkit-scrollbar-track { background: var(--bg-2); border-radius: var(--r-full); }
+
+/* Theater big-tile REC/Stop: rendered in every tile (identical markup lets
+   tiles move between containers without a rebuild) but only shown on the
+   active theater tile. Status badge centers in the bar; buttons sit right. */
+.tile-recbtn, .tile-stopbtn { display: none; padding: 3px 10px; font-size: var(--fs-0); }
+.theater-active .tile-recbtn, .theater-active .tile-stopbtn { display: inline-block; }
+.theater-active .tile-recbtn { margin-left: auto; }
+.theater-active .tile-info { position: relative; }
+.theater-active .tile-info .st { position: absolute; left: 50%; transform: translateX(-50%); margin-left: 0; }
+
+.playerpick-list { max-height: 320px; overflow-y: auto; margin-top: var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.playerpick-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.playerpick-row:last-child { border-bottom: none; }
+.playerpick-row:hover { background: var(--bg-hover); }
+.playerpick-empty { padding: var(--sp-4); text-align: center; color: var(--text-3); }
 
 /* ══ privacy cover ══ */
 .privacy { position: fixed; inset: 0; z-index: 500; background: #03030a; cursor: pointer; }

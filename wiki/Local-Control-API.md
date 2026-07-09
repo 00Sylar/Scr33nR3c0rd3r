@@ -22,7 +22,8 @@ While Scr33nX is running it serves a small HTTP API on
 | `POST /stop_all` | — | stop every active download + clear all AUTO |
 | `POST /clear` | — | stop monitor + all downloads, clear AUTO, remove every Recorder model (Saved kept) |
 | `POST /monitor` | `{target, enabled}` | start/stop the `recorder` monitor or `saved` scanner |
-| `POST /pipeline` | `{enabled}` | start/stop the Telegram upload pipeline |
+| `POST /pipeline` | `{enabled}` | start/stop the Telegram upload pipeline (starts in stand‑by) |
+| `POST /pipeline/stage` | `{convert?, upload?}` | tick/untick the Convert and/or Upload stages; applies live if running, otherwise on next start |
 | `POST /quit` | — | gracefully shut the app down |
 
 All POST actions run through no‑dialog code paths so they never block the UI

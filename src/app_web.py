@@ -390,8 +390,16 @@ class WebCore:
         if key in self._rows:
             self._log_add(f"{name} ({site}) is already in the Recorder list.", "warn")
             return
-        self.recorder.add_model(name, site, "recorder")
         self._rows[key] = True
+        self._finish_add_recorder(name, site)
+
+    def _finish_add_recorder(self, name: str, site: str):
+        """Engine/persist side of adding to Recorder. The API path
+        (_handle_add) writes the _rows entry synchronously — before this runs
+        on the task-queue thread — so a /rank call arriving right after /add
+        sees the model as tracked instead of racing the deferred queue."""
+        key = f"{site}:{name.lower()}"
+        self.recorder.add_model(name, site, "recorder")
         self._auto_rec.setdefault(key, False)
         self._persist_models()
         self._log_add(f"Added to Recorder: {name} ({site})", "accent")
@@ -402,6 +410,10 @@ class WebCore:
             self._log_add(f"{name} ({site}) is already in Saved Models.", "warn")
             return
         self._saved_data[sid] = {"name": name, "site": site}
+        self._finish_add_saved(name, site)
+
+    def _finish_add_saved(self, name: str, site: str):
+        """See _finish_add_recorder — same split, same reason."""
         if self._monitoring_saved:
             self.recorder.add_model(name, site, "saved")
         self._saved_version += 1
@@ -708,10 +720,13 @@ class WebCore:
         self._log_add(detail, "warn")
         return {"ok": False, "error": self._PREVIEW_SHORT}
 
-    def preview_resolve(self, name: str, site: str) -> dict:
+    def preview_resolve(self, name: str, site: str, force_embedded: bool = False) -> dict:
         """Blocking (called on a js_api thread): resolve upstream, wrap in the
         relay. External mode spawns the player; embedded returns the localhost
-        URL for the in-page hls.js player."""
+        URL for the in-page hls.js player. force_embedded is used by the
+        Player tab, which always needs the in-page URL regardless of the
+        general Preview mode setting (that setting only governs the
+        right-click Preview action)."""
         key = f"{site}:{name.lower()}"
         cfg = self.recorder.models.get(key)
         status = cfg.status if cfg else None
@@ -740,7 +755,7 @@ class WebCore:
                                 label=f"{site}:{name}")
         except Exception as e:
             return self._preview_unavailable(f"Preview relay error: {e}")
-        mode = (self.settings.preview_mode or "external").lower()
+        mode = "embedded" if force_embedded else (self.settings.preview_mode or "external").lower()
         if mode == "embedded":
             return {"ok": True, "mode": "embedded", "url": url, "title": title}
         return self._preview_launch_external(url, title)
@@ -1263,7 +1278,10 @@ class Bridge:
         key = f"{site}:{name}"
         if key in self._core._rows:
             return {"ok": False, "error": f"{name} ({site}) is already in the list."}
-        self._core.after(0, lambda: self._core._add_to_recorder(name, site))
+        # Write synchronously so a set_rank() call right behind this one
+        # doesn't race the deferred _finish_add_recorder — see _handle_add.
+        self._core._rows[key] = True
+        self._core.after(0, lambda: self._core._finish_add_recorder(name, site))
         return {"ok": True, "name": name, "site": site}
 
     def set_monitor(self, target, enabled):
@@ -1452,14 +1470,29 @@ class Bridge:
     def preview(self, name, site):
         return self._core.preview_resolve(str(name), str(site))
 
+    def preview_embedded(self, name, site):
+        # Player tab tiles: always embedded in-page, regardless of the
+        # general Preview mode setting (which only governs right-click Preview).
+        return self._core.preview_resolve(str(name), str(site), force_embedded=True)
+
+    def client_log(self, msg):
+        # In-page playback errors (hls.js etc.) are invisible from Python —
+        # let the JS side surface them in the Activity Log for debugging.
+        self._core._log_add(f"[ui] {str(msg)[:300]}", "warn")
+        return {"ok": True}
+
     # ── saved models ──
     def saved_add(self, raw, site):
         name, site = parse_model_input(str(raw or ""), str(site or ""))
         if not name:
             return {"ok": False, "error": "Could not parse a username."}
-        if self._core._saved_key(name, site) in self._core._saved_data:
+        sid = self._core._saved_key(name, site)
+        if sid in self._core._saved_data:
             return {"ok": False, "error": f"{name} ({site}) is already in Saved Models."}
-        self._core.after(0, lambda: self._core._add_to_saved(name, site))
+        # Write synchronously so a set_rank() call right behind this one
+        # doesn't race the deferred _finish_add_saved — see _handle_add.
+        self._core._saved_data[sid] = {"name": name, "site": site}
+        self._core.after(0, lambda: self._core._finish_add_saved(name, site))
         return {"ok": True, "name": name, "site": site}
 
     def saved_remove(self, sids):
@@ -1685,6 +1718,7 @@ class Bridge:
             "preview_mode": s.preview_mode,
             "preview_engine": s.preview_engine,
             "preview_player_path": s.preview_player_path,
+            "max_player_tiles": s.max_player_tiles,
             "quality_options": [{"label": l, "height": h}
                                 for l, h in QUALITY_OPTIONS.items()],
         }
@@ -1732,6 +1766,7 @@ class Bridge:
         s.preview_mode          = str(p.get("preview_mode", s.preview_mode))
         s.preview_engine        = str(p.get("preview_engine", s.preview_engine))
         s.preview_player_path   = str(p.get("preview_player_path", "")).strip()
+        s.max_player_tiles      = max(1, min(20, _int(p.get("max_player_tiles"), s.max_player_tiles) or s.max_player_tiles))
         c.recorder.quality_global = s.max_quality
         c.recorder.auto_downgrade_enabled = s.auto_downgrade_enabled
         c.recorder.playwright_fallback_enabled = s.playwright_fallback_enabled

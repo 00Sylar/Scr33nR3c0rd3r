@@ -1,5 +1,8 @@
 # Usage
 
+*These steps apply to both interfaces — the default UI and the classic one
+(`--classic`) behave the same way; only the look differs. See [[Installation]].*
+
 1. **Add models** using the left panel — enter the username (or paste a full
    model URL; the site is auto‑detected) and select the site: `chaturbate`,
    `stripchat`, `camsoda`, or `myfreecams`.
@@ -17,6 +20,18 @@
    tab (click a star in the **RANK** column, or right‑click → **Set Rank** to
    rate a whole selection), then click the `RANK` header to sort. Ranks stay
    with the model across both tabs and persist between sessions.
+8. **Preview a stream** — right‑click an **online (or recording)** model →
+   **Preview** to watch it live (offline models are skipped with a note).
+   Choose external or embedded, and the preferred engine, under **Settings →
+   Stream preview**. The embedded preview has **▶ REC / ⏹ Stop** buttons next
+   to a live status badge — REC starts recording the model on the spot (adding
+   it to the Recorder first if needed).
+9. **Watch several at once** *(default UI)* — the **▶ Player** tab opens
+   models as live muted tiles in a **Grid** wall; click one for **Theater**
+   mode (large player with controls and its own REC/Stop, the rest in a
+   thumbnail strip). Add tiles with **+ Add Tile** or right‑click an online
+   model → **▶ Add to Player**. Tile count is capped by **Max Player tiles**
+   in Settings, since every open tile is a live stream.
 
 ---
 

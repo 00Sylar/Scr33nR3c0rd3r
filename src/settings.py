@@ -57,6 +57,7 @@ class AppSettings:
     preview_mode: str = "external"             # "external" (player window) | "embedded" (in-app)
     preview_engine: str = "auto"               # "auto" | "mpv" | "vlc"
     preview_player_path: str = ""              # optional override path to mpv.exe/vlc.exe (empty = auto-detect)
+    max_player_tiles: int = 9                  # Player tab: cap on simultaneously open (and streaming) tiles
     models: List[dict] = None                  # [{name, site, auto_rec, max_q}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list
     ranks: dict = None                         # "site:name" → 0-5 star rank
@@ -143,6 +144,7 @@ def load_settings() -> AppSettings:
     s.preview_mode = main.get("preview_mode", s.preview_mode)
     s.preview_engine = main.get("preview_engine", s.preview_engine)
     s.preview_player_path = main.get("preview_player_path", s.preview_player_path)
+    s.max_player_tiles = max(1, min(20, int(main.get("max_player_tiles", s.max_player_tiles) or s.max_player_tiles)))
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
     s.ranks = main.get("ranks", {}) or {}
@@ -197,6 +199,7 @@ def save_settings(s: AppSettings):
         "preview_mode": s.preview_mode,
         "preview_engine": s.preview_engine,
         "preview_player_path": s.preview_player_path,
+        "max_player_tiles": s.max_player_tiles,
         "models": s.models,
         "saved_models": s.saved_models,
         "ranks": s.ranks,

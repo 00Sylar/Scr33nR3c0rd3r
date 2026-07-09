@@ -26,22 +26,56 @@ See [[Recording Internals|Recording-Internals]] for how all of this works.
 
 ## Monitoring & UI
 
-- Clean black & red dark GUI — no terminal needed.
+- **Two interfaces, one engine** — a modern default UI (native window, no
+  browser involved, smooth animations, drag‑rectangle multi‑select,
+  collapsible per‑site groups) and a classic Tk fallback (`--classic`). See
+  [[Installation]].
 - **Version number** in the header next to the logo, plus a background
   **update check** against GitHub (see [[Installation]]).
 - **Live bandwidth meter** in the header (`↓` download / `↑` Telegram upload) —
   your signal for when you're approaching your connection's limit.
 - **Log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash
   tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log`
-  (rotating, 5 MB × 3).
+  (rotating, 5 MB × 3) — shared by both interfaces.
 - **Dropped‑segment warnings** — get notified when a stream is losing segments
-  because bandwidth can't keep up (toggle in [[Settings]]).
-- **Saved Models** tab — view‑only watchlist with online/offline status.
+  because bandwidth can't keep up (toggle in [[Settings]]). A model simply
+  going offline no longer triggers a false warning.
+- **▶ Stream preview** — right‑click an online/recording model → **Preview**.
+  External mode opens a standalone mpv/VLC/ffplay window; embedded mode plays
+  in‑app (a built‑in player in the default UI, VLC/mpv in the classic UI). The
+  embedded preview shows the model's live status plus **▶ REC / ⏹ Stop**
+  buttons — starting a model that isn't in the Recorder adds it automatically.
+- **▶ Player tab** *(default UI only)* — open several models as live tiles
+  picked from Recorder/Saved Models. All tiles stream **muted** at once in a
+  **Grid** wall; click a tile for **Theater** mode (that tile large, with
+  player controls and **▶ REC / ⏹ Stop**, the rest in a Bottom/Side thumbnail
+  strip, still playing). Add tiles via **+ Add Tile** or right‑click an
+  online/recording model → **▶ Add to Player**. The open‑tile count is capped
+  by **Max Player tiles** in [[Settings]] (every tile is a live stream, so
+  it's also a bandwidth/CPU cap).
+- **Saved Models** tab — view‑only watchlist with online/offline status,
+  import/export, and a background scanner.
 - **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab
   (click a star, click again to clear; or right‑click → **Set Rank** for a whole
   selection). Sortable **RANK** column, shared per‑model across both tabs and the
-  extension, saved between sessions.
-- Windows desktop notifications (started/stopped/split/dropped segments).
+  extension, saved between sessions. Changing/clearing an *existing* rank asks
+  for confirmation first (misclick guard).
+- **🔔 Notifications** — Windows desktop toasts for recording started/stopped,
+  dropped segments, quality downgrades, and low disk space, each independently
+  toggleable, plus a **🌟 VIP List**: right‑click any model → *Add to VIP List*,
+  then enable **VIP only** to be notified for just those models.
+- **✕ Remove Offline** — one click removes every currently‑OFFLINE model from
+  the Recorder (asks first; recording/private/checking rows and Saved Models
+  are untouched).
+- **⛔ Terminate** — hard‑kills the app and every child process (ffmpeg, relay,
+  Chromium) instantly, like Task Manager's *End Task*; confirms only if a
+  recording is active. Also available from the tray menu.
+- **⛔ Low‑disk guard** (off by default) — stops all recordings and blocks new
+  ones when the output drive drops below a configurable **Stop** threshold
+  (default 20 GB free); recovers automatically once free space climbs back to
+  a separate **Resume** threshold (default 40 GB), so it can't flap on/off.
+- **Single‑instance lock** — a second Scr33nX can't silently corrupt your
+  models/ranks; it shows a warning and closes itself instead.
 - Minimize to system tray.
 - 🔒 **Privacy Mode** — idle screen cover.
 - Activity log with timestamps; settings saved between sessions.
@@ -52,7 +86,11 @@ See [[Recording Internals|Recording-Internals]] for how all of this works.
   model's page, plus 1–5 star rating right from the popup. See
   [[Browser Extension|Browser-Extension]].
 - **Telegram upload pipeline** (optional) — converts finished recordings and
-  uploads them to a Telegram group/topic. See
+  uploads them to a Telegram group/topic, as two independent stages you can
+  run alone or together, with a guided **Setup Wizard**. See
   [[Telegram Pipeline|Telegram-Pipeline]].
+- **🔍 System Check** (Settings) — shows whether each external tool/package is
+  found (ffmpeg, ffplay, mpv, VLC, python‑vlc, tdjson, Playwright Chromium),
+  with one‑click **Add to PATH** / **Install** fixes.
 - **Chat‑bot / agent control (OpenClaw)** — drive Scr33nX from your phone over
   Telegram/WhatsApp. See [[OpenClaw Bot|OpenClaw-Bot]].

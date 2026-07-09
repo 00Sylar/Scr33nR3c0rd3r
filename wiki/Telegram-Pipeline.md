@@ -3,28 +3,60 @@
 The **Output / Upload** tab can convert finished `.ts` recordings to `.mp4` and
 upload them to a Telegram group/topic automatically.
 
+## Two independent stages
+
+Tick either or both, at any time, with the **Stages** checkboxes at the top of
+the tab:
+
+- **① Convert .ts → .mp4** — converts (and size‑splits) finished recordings
+  into `.mp4` files in the converted folder, and *keeps* them. Use alone for
+  `.mp4` files with no Telegram setup needed.
+- **② Upload .mp4 to Telegram** — uploads `.mp4` files from the converted
+  folder. Use with ① for the full convert‑then‑upload flow, or alone to
+  upload `.mp4`s you already have. As of V2.0, uploading no longer waits for
+  an in‑progress conversion batch to finish — an uploader grabs a file the
+  moment it's ready.
+
+**Stand‑by model:** the pipeline starts even with *no* stage checked — it
+sits in **● STAND BY** doing nothing. Ticking a stage takes effect
+immediately (header shows **● CONVERTING**, **● UPLOADING**, or
+**● CONVERTING & UPLOADING**); unticking stops it after the current task
+finishes — nothing in flight is ever interrupted. No restart is ever needed,
+including turning Upload on for the first time (it connects to Telegram on
+demand, reusing your saved session).
+
 ## Setup
 
+**First time? Use the wizard.** Click **🧙 Setup Wizard** on the Output /
+Upload tab — it walks you through the API ID/Hash (with a link to
+my.telegram.org), the destination group/topic, and optional folders, saves
+everything, and can start the pipeline for you (you'll be prompted for your
+phone number and login code on first connect).
+
+To set it up manually instead:
+
 1. Get your `api_id` / `api_hash` from <https://my.telegram.org>.
-2. Fill in the **Telegram / Pipeline settings** in the Output / Upload tab
-   (group ID, optional topic ID).
-3. Save and enable the pipeline.
+2. Fill in the **Telegram / Pipeline settings** (group ID, optional topic
+   ID) and save.
+3. Start the pipeline and tick the stages you want, whenever you want.
 
-Settings are stored in `Pipeline/pipeline_settings.json`. The pipeline requires
-the `tdjson` package (installed via `requirements.txt`).
+Telegram credentials are only required once you enable **②**; if they're
+missing, the pipeline log says so and Upload stays idle until you fill them
+in and re‑tick it. Settings (including stage choices) are stored in
+`Pipeline/pipeline_settings.json`. Upload requires the `tdjson` package
+(installed via `requirements.txt`); Convert‑only does not.
 
-## How it behaves
+## Re‑auth
 
-- Finished `.ts` recordings are converted to `.mp4` and uploaded to the
-  configured group/topic.
-- Large `.mp4` files are split using the same 3‑digit `_partNNN` padding as the
-  recorder's own file splitting.
-- **Stopping the pipeline** lets the in‑flight upload finish, then halts the
-  uploader workers and closes the TDLib clients until you resume — it no longer
-  keeps draining the queued backlog after you stop the converter.
+**🔑 Re‑auth / Switch Account** clears the cached TDLib session — use it to
+log in as a different Telegram account, or if your session gets stuck.
 
 ## Controlling it remotely
 
-The pipeline can be toggled through the [[Local Control API|Local-Control-API]]
-(`POST /pipeline {enabled}`) and therefore from the
-[[OpenClaw Bot|OpenClaw-Bot]] ("start/stop the pipeline").
+Via the [[Local Control API|Local-Control-API]]:
+
+- `POST /pipeline {enabled}` — start/stop (starts in stand‑by).
+- `POST /pipeline/stage {convert?, upload?}` — tick/untick a stage live.
+
+...and therefore from the [[OpenClaw Bot|OpenClaw-Bot]] ("start/stop the
+pipeline", "turn on pipeline convert/upload").

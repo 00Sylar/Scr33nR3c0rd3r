@@ -33,9 +33,19 @@ fallback — skip it if you don't record Stripchat.
 
 ## 4. Run the app
 
-Double‑click **`Scr33nX.bat`** — it launches the GUI with no console
-window. Only one instance can run at a time (it binds the API on port 5200); a
-second instance shows an error and closes itself.
+Double‑click **`Scr33nX.bat`** — it launches the GUI with no console window.
+Only one instance can run at a time (it binds the API on port 5200); a second
+instance shows a warning and closes itself.
+
+### Two interfaces
+
+| | Launcher | Notes |
+|---|---|---|
+| **Default (recommended)** | `Scr33nX.bat` (or `Scr33nX-WebUI.bat`) | Modern native window (Windows WebView2) — smooth animations, drag‑select, built‑in preview player. Needs the **WebView2 Runtime** (built into Windows 11; usually already present on Windows 10 via Edge auto‑update). If it's missing, the app tells you and links the installer instead of crashing. |
+| **Classic** | `Scr33nX-Classic.bat` (or `Scr33nX.bat --classic`) | The original Tk interface, unchanged. No WebView2 needed. |
+
+Same recording engine, same settings, same config files either way — pick
+whichever you prefer, or fall back to Classic if WebView2 isn't available.
 
 ## 5. Install the browser extension (optional)
 
@@ -46,7 +56,7 @@ page" helper (Chromium **and** Firefox).
 
 ## Checking your version & updates
 
-The running version shows in the header next to the logo (e.g. `v1.4`). On
+The running version shows in the header next to the logo (e.g. `v2.0`). On
 startup Scr33nX quietly checks GitHub for the latest **published release**; if a
 newer one exists, a clickable **● Update available** indicator appears in the
 header and opens the [Releases page](https://github.com/00Sylar/Scr33nX/releases).
