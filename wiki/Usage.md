@@ -30,8 +30,10 @@
    models as live muted tiles in a **Grid** wall; click one for **Theater**
    mode (large player with controls and its own REC/Stop, the rest in a
    thumbnail strip). Add tiles with **+ Add Tile** or right‑click an online
-   model → **▶ Add to Player**. Tile count is capped by **Max Player tiles**
-   in Settings, since every open tile is a live stream.
+   model → **▶ Add to Player**. Tiles keep streaming while you're on other
+   tabs (no reload when you come back); **🧹 Clear Player** empties the tab
+   in one click. Tile count is capped by **Max Player tiles** in Settings,
+   since every open tile is a live stream.
 
 ---
 

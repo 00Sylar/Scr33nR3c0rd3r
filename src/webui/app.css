@@ -506,7 +506,7 @@ input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), 
 .player-toggle-group .btn.active { color: var(--red-bright); border-color: var(--red-line); }
 .player-empty { padding: var(--sp-6); text-align: center; color: var(--text-3); font-size: var(--fs-1); }
 
-.player-stage { padding: 0 var(--sp-4) var(--sp-4); }
+.player-stage { padding: 0 var(--sp-4) var(--sp-4); overflow-y: auto; min-height: 0; }
 
 .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-4); }
 .player-grid[hidden] { display: none; }
@@ -541,6 +541,7 @@ input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), 
 .tile-close:hover { background: var(--red); border-color: var(--red); color: #fff; }
 .tile-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: var(--sp-2) var(--sp-3); }
 .tile-name { font-weight: 600; font-size: var(--fs-1); color: var(--text-1); }
+.tile-star { display: none; }
 .tile-site { font-size: var(--fs-0); color: var(--text-3); letter-spacing: 0.6px; }
 .tile-info .st { margin-left: auto; }
 .tile-actions:empty { display: none; }
@@ -582,8 +583,14 @@ input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), 
 .tile-recbtn, .tile-stopbtn { display: none; padding: 3px 10px; font-size: var(--fs-0); }
 .theater-active .tile-recbtn, .theater-active .tile-stopbtn { display: inline-block; }
 .theater-active .tile-recbtn { margin-left: auto; }
+
+/* Rank stars: shown in the Grid layout (own line right under the model
+   name) and on the single big theater tile; still hidden on the small
+   theater thumbnail strip. */
+.theater-active .tile-star { display: flex; align-items: center; }
 .theater-active .tile-info { position: relative; }
 .theater-active .tile-info .st { position: absolute; left: 50%; transform: translateX(-50%); margin-left: 0; }
+.player-grid .tile-star { display: flex; flex-basis: 100%; margin-top: -2px; }
 
 .playerpick-list { max-height: 320px; overflow-y: auto; margin-top: var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-sm); }
 .playerpick-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--line); }

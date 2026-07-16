@@ -144,7 +144,7 @@ def load_settings() -> AppSettings:
     s.preview_mode = main.get("preview_mode", s.preview_mode)
     s.preview_engine = main.get("preview_engine", s.preview_engine)
     s.preview_player_path = main.get("preview_player_path", s.preview_player_path)
-    s.max_player_tiles = max(1, min(20, int(main.get("max_player_tiles", s.max_player_tiles) or s.max_player_tiles)))
+    s.max_player_tiles = max(1, min(100, int(main.get("max_player_tiles", s.max_player_tiles) or s.max_player_tiles)))
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
     s.ranks = main.get("ranks", {}) or {}

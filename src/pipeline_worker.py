@@ -23,6 +23,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 
+TELEGRAM_MAX_BYTES = 3.8 * 1e9   # Telegram's hard per-file upload cap
+
+
 @dataclass
 class PipelineConfig:
     api_id: int = 0
@@ -37,7 +40,11 @@ class PipelineConfig:
     do_convert: bool = True         # stage 1: convert .ts → .mp4
     do_upload: bool = True          # stage 2: upload .mp4 to Telegram
     upload_workers: int = 2
-    max_bytes: float = 3.8 * 1e9    # Telegram file-size cap
+    # Caller should set this from the user's "Max File Size" setting,
+    # clamped to TELEGRAM_MAX_BYTES when do_upload is set — see
+    # _build_pipeline_config() in app_web.py / app.py. This default only
+    # applies if a caller forgets to set it explicitly.
+    max_bytes: float = TELEGRAM_MAX_BYTES
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
 
@@ -388,7 +395,10 @@ class PipelineWorker:
         outputs: list = []
 
         if size > self.cfg.max_bytes and duration > 0:
-            num_parts = max(1, math.ceil(size / self.cfg.max_bytes))
+            # Target 95% of the limit: part_dur is derived from the file's
+            # *average* bitrate, so a variable-bitrate stream can overshoot
+            # a target computed at exactly max_bytes.
+            num_parts = max(1, math.ceil(size / (self.cfg.max_bytes * 0.95)))
             part_dur = duration / num_parts
             for i in range(num_parts):
                 start = i * part_dur
@@ -400,6 +410,12 @@ class PipelineWorker:
                        *(["-t", str(part_dur)] if i < num_parts - 1 else []),
                        "-c", "copy", out, "-y"]
                 self._run_ffmpeg(cmd, part_dur, f"{base} ({i+1}/{num_parts})")
+                out_size = os.path.getsize(out) if os.path.exists(out) else 0
+                if out_size > self.cfg.max_bytes:
+                    self.on_log(f"⚠ {os.path.basename(out)} is "
+                                f"{out_size / 1e6:.0f}MB, over the "
+                                f"{self.cfg.max_bytes / 1e6:.0f}MB limit "
+                                f"(variable bitrate) — not re-split.")
                 outputs.append(out)
         else:
             out = os.path.join(self.cfg.output_folder, f"{base}.mp4")

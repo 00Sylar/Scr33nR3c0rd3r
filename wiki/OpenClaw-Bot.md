@@ -25,7 +25,7 @@ Three moving parts: the **API** (`app.py`, port 5200), the **control script**
 | "add her but don't record yet" | `record <link> --no-auto` | add + record now, AUTO off |
 | "stop her" / "stop `<name>`" | `stop <name>` | stop one recording |
 | **"stop everything"** | `stop-all` | stop all downloads + clear all AUTO |
-| **"clear the recorder"** | `clear` | stop monitor + all downloads, clear AUTO, remove every model (Saved kept) |
+| **"clear the recorder"** | `clear` | pause **both** monitors, force-stop all downloads, clear AUTO, remove every model (Saved list kept; scanner paused) |
 | **"dashboard status"** / "how many are live?" | `dashboard` | per‑site + totals: total / recording / online / offline |
 | "save her" / "add to saved" | `add-saved <link>` | add to Saved Models |
 | "save her and rank 5" | `add-saved <link> --rank 5` | add to Saved **and** set the star rank |

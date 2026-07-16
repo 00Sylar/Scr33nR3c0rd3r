@@ -10,6 +10,57 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Added
+- **Star ranks in the preview overlay, Player-tab grid, and Theater tile.**
+  The 1–5 star rank now shows (and is clickable, same as the tables) right
+  after the model's name in the embedded preview overlay, right below the
+  name on Player-tab **Grid** tiles, and right after the name in the big
+  Theater tile.
+- **Max Player tiles cap raised from 20 to 100.** Settings still defaults to
+  9, but you can now open up to 100 tiles in the **▶ Player** tab if your
+  bandwidth/CPU can take it.
+- **🧹 Clear Player button.** One click (plus a confirm) removes every tile
+  from the **▶ Player** tab. Only the Player empties — recordings, the
+  Recorder list, and Saved Models are untouched.
+
+### Changed
+- **Player tiles keep streaming while you're on other tabs.** Leaving the
+  **▶ Player** tab used to stop every tile, so hopping Recorder ⇄ Player
+  reloaded all streams from scratch. Tiles now start loading the moment a
+  model is sent to the Player and keep playing in the background, so the tab
+  is instantly live when you come back. (Streams still count against
+  bandwidth while backgrounded — use 🧹 Clear Player or close tiles to stop
+  them.)
+
+### Fixed
+- **🧹 Clear Recorder now actually stops the downloads it clears.** Previously
+  the button removed every model from the list while firing the "stop all"
+  off in a background thread that raced the removal, and it left the **Saved
+  scanner** running — so a model that was also Saved got re-recorded moments
+  after it was killed, and the download appeared to vanish from the list yet
+  kept writing to disk in the background. Clear now pauses **both** monitors,
+  force-stops every active download and **waits for the ffmpeg processes to
+  exit before** removing the models, so nothing survives the clear. Your Saved
+  list is kept, but the Saved scanner is left paused (its toggle reflects this)
+  so nothing resumes on its own.
+- **Player Grid now scrolls.** With more tiles than fit the window, the
+  bottom rows were simply cut off; the Grid (and Theater) area now scrolls
+  vertically.
+- **Recorder list occasionally rendering empty.** `_rows` (the set of
+  models the web UI tracks) was read on one thread and mutated on another
+  with no synchronization, which could intermittently raise an error mid-poll
+  and silently abort a state update — the more add/remove activity accumulated
+  over a session, the likelier it got. The read/write paths are now
+  lock-protected, JS errors that used to be swallowed silently are now logged
+  to the console, and the Recorder list self-corrects within one polling
+  cycle if it ever renders empty while it shouldn't.
+- **Telegram-pipeline `.mp4`s exceeding the configured Max File Size.** The
+  Convert stage split files against a hardcoded ~3.8 GB (Telegram's own
+  upload cap) instead of the user's **Max File Size** setting, so a 1000 MB
+  limit could still produce multi-GB `.mp4`s. The split now honors Max File
+  Size (capped at Telegram's limit only when the Upload stage is also on),
+  plus a small safety margin so variable-bitrate streams don't overshoot it.
+
 ---
 
 ## V2.1 — 2026-07-09

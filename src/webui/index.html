@@ -171,6 +171,7 @@
             <button class="btn mini" data-stripe="side">▥ Strip: Side</button>
           </div>
           <div class="spacer"></div>
+          <button class="btn" id="player-clear">🧹 Clear Player</button>
           <button class="btn" id="player-add">＋ Add Tile</button>
         </div>
         <div class="player-empty" id="player-empty">No tiles open. Click "＋ Add Tile" to pick a model from Recorder or Saved Models.</div>
@@ -300,7 +301,7 @@
             </div>
             <div class="field"><label>Player path (optional, mpv.exe / vlc.exe)</label>
               <input id="s-ppath" placeholder="auto-detect" spellcheck="false"></div>
-            <div class="field"><label>Max Player tiles open at once (1-20)</label>
+            <div class="field"><label>Max Player tiles open at once (1-100)</label>
               <input id="s-player-max" title="Caps how many tiles you can have open in the Player tab. Every open tile streams live (muted) at once, so raising this raises bandwidth/CPU use too — lower it if you're stretched thin."></div>
           </div>
           <div class="card">
@@ -413,6 +414,7 @@
   <div class="player-box">
     <div class="player-head">
       <span id="player-title">Preview</span>
+      <span class="stars" id="player-stars" data-stars="" data-rank="0"></span>
       <div class="spacer"></div>
       <button class="btn rec" id="player-rec">▶ REC</button>
       <button class="btn" id="player-stop">⏹ Stop</button>

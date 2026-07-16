@@ -20,7 +20,7 @@ While Scr33nX is running it serves a small HTTP API on
 | `POST /rank` | `{name, site, rank}` | set a model's 0–5 star rank (`0` clears); the model must already be in Saved Models or the Recorder |
 | `POST /remove` | `{name, site, target}` | remove from `recorder` or `saved` |
 | `POST /stop_all` | — | stop every active download + clear all AUTO |
-| `POST /clear` | — | stop monitor + all downloads, clear AUTO, remove every Recorder model (Saved kept) |
+| `POST /clear` | — | pause **both** monitors, force-stop all downloads, clear AUTO, remove every Recorder model (Saved list kept; scanner paused so nothing resumes) |
 | `POST /monitor` | `{target, enabled}` | start/stop the `recorder` monitor or `saved` scanner |
 | `POST /pipeline` | `{enabled}` | start/stop the Telegram upload pipeline (starts in stand‑by) |
 | `POST /pipeline/stage` | `{convert?, upload?}` | tick/untick the Convert and/or Upload stages; applies live if running, otherwise on next start |

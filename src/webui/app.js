@@ -67,7 +67,7 @@ async function tick() {
     const s = await API.state(logSeq, pipeSeq);
     S = s;
     render(s);
-  } catch (e) { /* bridge gone (closing) — skip */ }
+  } catch (e) { console.error("[tick] state()/render() failed:", e); }
   fetching = false;
 }
 
@@ -181,7 +181,15 @@ function renderRec(models) {
   const container = $("rows");
   const sig = [...bySite.entries()].map(([s, l]) =>
     s + (collapsed.rec.has(s) ? "!" : ":") + l.map(m => m.key).join(",")).join("|");
-  if (container.dataset.sig !== sig) {
+
+  // Invariant: with no active filter, a non-empty models[] must produce a
+  // non-empty view. If it doesn't, something upstream is inconsistent —
+  // warn (so a recurrence leaves a lead) and force the next tick to do a
+  // full rebuild instead of trusting a cached sig that may itself be stale.
+  if (models.length > 0 && bySite.size === 0 && !filter.rec && statusFilter.rec.size === 0) {
+    console.warn("[renderRec] empty view despite non-empty models[] and no active filter — forcing resync.");
+    container.dataset.sig = "__forced-resync__";
+  } else if (container.dataset.sig !== sig) {
     container.dataset.sig = sig;
     rowEls.clear();
     let html = "";
@@ -641,8 +649,10 @@ document.addEventListener("click", (e) => {
     const [tab, site] = tog.dataset.tog.split(":");
     if (collapsed[tab].has(site)) collapsed[tab].delete(site);
     else collapsed[tab].add(site);
-    if (tab === "rec") { $("rows").dataset.sig = ""; renderRec(S.models); }
-    else rebuildSavedDisplay();
+    if (tab === "rec") {
+      $("rows").dataset.sig = "";
+      try { renderRec(S.models); } catch (e) { console.error("[data-tog] renderRec failed:", e); }
+    } else rebuildSavedDisplay();
     return;
   }
 
@@ -862,8 +872,10 @@ function checkHelpers(tab) {
   ];
 }
 function retab(tab) {
-  if (tab === "rec") { $("rows").dataset.sig = ""; renderRec(S.models); }
-  else renderSavedWindow();
+  if (tab === "rec") {
+    $("rows").dataset.sig = "";
+    try { renderRec(S.models); } catch (e) { console.error("[retab] renderRec failed:", e); }
+  } else renderSavedWindow();
   updateSelLabel();
 }
 
@@ -1062,11 +1074,32 @@ function statusOfNameSite(name, site) {
   return statusOfTile({ key: `${site}:${name}`, name, site });
 }
 
-// Called from doPreview and every tick — keeps the overlay's status badge
-// and REC/Stop buttons in sync while it's open.
+// Resolve a model's rank + the key set_rank() should use, checking both the
+// Recorder engine (S.models) and Saved Models (savedCache.items) — same
+// dual-lookup idiom as statusOfTile, since a previewed/tiled model might
+// only be tracked in one of the two. Shared by the preview overlay and
+// theater tile star widgets.
+function rankInfoFor(name, site) {
+  const key = `${site}:${name}`;
+  const m = (S && S.models || []).find(x => x.key === key);
+  if (m) return { key, rank: m.rank };
+  const it = savedCache.items.find(x =>
+    x.site === site && x.name.toLowerCase() === name.toLowerCase());
+  return { key: `saved:${site}:${name.toLowerCase()}`, rank: it ? it.rank : 0 };
+}
+
+// Called from doPreview and every tick — keeps the overlay's status badge,
+// REC/Stop buttons, and rank stars in sync while it's open.
 function patchPreviewControls() {
   if (!previewModel) return;
   const st = statusOfNameSite(previewModel.name, previewModel.site);
+  const { key: rkey, rank } = rankInfoFor(previewModel.name, previewModel.site);
+  const starsEl = $("player-stars");
+  starsEl.dataset.stars = rkey;
+  if (starsEl.dataset.rank !== String(rank)) {
+    starsEl.dataset.rank = rank;
+    starsEl.innerHTML = starsHtml(rank);
+  }
   const badge = $("player-status");
   badge.hidden = false;
   badge.className = `st ${st}`;
@@ -1084,7 +1117,9 @@ $("player-stop").addEventListener("click", () => {
 /* ══ Player tab (grid + theater preview) ══
    Every open tile streams live (muted) at once, in either layout — up to
    playerMaxTiles concurrent HLS connections. That's the real bandwidth/CPU
-   cost of opening more tiles; the Settings cap exists to bound it. */
+   cost of opening more tiles; the Settings cap exists to bound it.
+   Tiles start streaming the moment they're added and KEEP streaming while
+   other tabs are in front, so switching back to the Player never reloads. */
 let playerTiles = [];           // [{id, key, name, site}], insertion order = grid order
 let playerHls = new Map();      // tileId -> Hls instance (or {destroy,media} stub)
 let playerLayout = "grid";      // "grid" | "theater"
@@ -1098,11 +1133,6 @@ let playerCooldownUntil = new Map(); // tileId -> ms timestamp; skip auto-retry 
 let playerTileErr = new Map();       // tileId -> short error text shown on the tile
 
 const PLAYER_RETRY_MS = 30000;  // wait between attempts for a tile that failed
-
-function playerTabActive() {
-  const p = document.querySelector('.panel[data-panel="player"]');
-  return !!(p && p.classList.contains("active"));
-}
 
 // Playback diagnostics land in the Activity Log ("[ui] …") — in-page media
 // failures are otherwise completely invisible from outside the WebView.
@@ -1158,6 +1188,7 @@ function loadPlayerTab() {
 function tileHtml(t) {
   const st = statusOfTile(t);
   const playing = playerHls.has(t.id);
+  const { key: rkey, rank } = rankInfoFor(t.name, t.site);
   return `
     <div class="tile" data-tile="${t.id}">
       <div class="tile-media">
@@ -1168,6 +1199,7 @@ function tileHtml(t) {
       </div>
       <div class="tile-info">
         <span class="tile-name">${esc(t.name)}</span>
+        <span class="tile-star stars" data-stars="${esc(rkey)}" data-rank="${rank}">${starsHtml(rank)}</span>
         <span class="tile-site">${SITE_LABEL[t.site] || t.site}</span>
         <button class="btn rec tile-recbtn" data-tile-rec="${t.id}"${st === "online" ? "" : " disabled"}>▶ REC</button>
         <button class="btn tile-stopbtn" data-tile-stop="${t.id}"${st === "recording" ? "" : " disabled"}>⏹ Stop</button>
@@ -1206,7 +1238,13 @@ function renderPlayerTab() {
   if (playerLayout === "grid") {
     $("player-grid").hidden = false;
     $("player-theater").hidden = true;
-    for (const t of playerTiles) $("player-grid").appendChild(ensureTileEl(t));
+    // appendChild on an element already in place still re-inserts it, which
+    // pauses its <video> — skip tiles that are already parented to the grid
+    // (tiles are only ever appended in insertion order, so order holds).
+    for (const t of playerTiles) {
+      const el = ensureTileEl(t);
+      if (el.parentElement !== $("player-grid")) $("player-grid").appendChild(el);
+    }
   } else {
     $("player-grid").hidden = true;
     $("player-theater").hidden = false;
@@ -1266,13 +1304,22 @@ function patchPlayerStatuses() {
     if (recBtn) recBtn.disabled = st !== "online";
     const stopBtn = document.querySelector(`[data-tile-stop="${t.id}"]`);
     if (stopBtn) stopBtn.disabled = st !== "recording";
+    const starEl = document.querySelector(`[data-tile="${t.id}"] .tile-star`);
+    if (starEl) {
+      const { key: rkey, rank } = rankInfoFor(t.name, t.site);
+      starEl.dataset.stars = rkey;
+      if (starEl.dataset.rank !== String(rank)) {
+        starEl.dataset.rank = rank;
+        starEl.innerHTML = starsHtml(rank);
+      }
+    }
     // "checking" is a transient recorder-poll state, not a real status change
     // — reacting to it stopped live playback every poll cycle.
     if (st === "checking") continue;
     const live = st === "online" || st === "recording";
-    // Only auto-start playback while the Player tab is in front — otherwise
-    // streams would silently restart in the background after leaving the tab.
-    if (live && !playerHls.has(t.id) && playerTabActive()) playTile(t.id, { silent: true });
+    // Auto-(re)start playback even while another tab is in front — tiles
+    // stream continuously so returning to the Player never reloads them.
+    if (live && !playerHls.has(t.id)) playTile(t.id, { silent: true });
     else if (!live && playerHls.has(t.id)) stopTilePlayback(t.id);
   }
 }
@@ -1494,6 +1541,26 @@ function renderPlayerPickerList(list) {
     : `<div class="playerpick-empty">No tracked models available — add one to Recorder or Saved Models first.</div>`;
 }
 
+// Empties the Player tab only — playback stops and every tile goes away,
+// but recordings, the Recorder list, and Saved Models are untouched.
+function clearPlayerTiles() {
+  stopAllPlayerPlayback();
+  playerTiles = [];
+  playerPending.clear();
+  playerCooldownUntil.clear();
+  playerTileErr.clear();
+  playerActiveId = null;
+  playerLayout = "grid";
+  setPlayerLayoutButtons();
+  renderPlayerTab();
+  toast("Player cleared.");
+}
+$("player-clear").addEventListener("click", () => {
+  if (!playerTiles.length) { toast("Player is already empty."); return; }
+  modal("Clear Player",
+        "Remove ALL tiles from the Player?\n\nOnly the Player empties — recordings, the Recorder, and Saved Models are untouched.",
+        "Clear", clearPlayerTiles);
+});
 $("player-add").addEventListener("click", openPlayerPicker);
 $("playerpick-cancel").addEventListener("click", () => { $("playerpick").hidden = true; });
 $("playerpick-filter").addEventListener("input", (e) => {
@@ -1566,7 +1633,7 @@ $("b-remoff").addEventListener("click", async () => {
 });
 $("b-addsaved").addEventListener("click", () => { const k = needSel("rec"); if (k) API.add_saved(k); });
 $("b-clear").addEventListener("click", () =>
-  modal("Clear recorder", "Stop everything and remove ALL models from the Recorder?\n\nThis stops the monitor, all active downloads, clears AUTO, and empties the Recorder list. Saved Models are kept.",
+  modal("Clear recorder", "Stop everything and remove ALL models from the Recorder?\n\nThis pauses both monitors, force-stops every active download, clears AUTO, and empties the Recorder list. Your Saved list is kept, but the Saved scanner is paused so nothing resumes in the background.",
         "Clear", () => { API.clear_recorder(); checked.rec.clear(); sel.rec.clear(); }));
 $("b-stopall").addEventListener("click", () =>
   modal("Stop all downloads", "Force-stop ALL active downloads and uncheck AUTO on every model?",
@@ -1700,7 +1767,8 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
     playerCooldownUntil.clear();   // fresh visit → retry failed tiles now
     patchPlayerStatuses();
   }
-  else stopAllPlayerPlayback();   // leaving Player tab: no background streams
+  // Leaving the Player tab keeps every tile streaming in the background —
+  // switching Recorder ⇄ Player must never restart the streams.
 }));
 
 /* ══ privacy mode (idle starfield cover) ══ */

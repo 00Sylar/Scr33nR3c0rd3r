@@ -159,6 +159,11 @@ class WebCore:
         self.recorder.gap_warnings_enabled = self.settings.gap_warnings_enabled
 
         self._rows: dict[str, bool] = {}
+        # _rows is read (snapshot/offline_count/etc.) on the pywebview JS-API
+        # thread while mutated both there and from Tk-thread callbacks
+        # (c.after) — without this, a mutation mid-iteration can raise
+        # "dictionary changed size during iteration" and abort a state() call.
+        self._rows_lock = threading.Lock()
         self._saved_data: dict[str, dict] = {}
         self._auto_rec: dict[str, bool] = {}
         self._model_q: dict[str, int] = {}
@@ -351,19 +356,22 @@ class WebCore:
     # ── Persistence (same schema as the classic app) ──────────────────────────
 
     def _persist_models(self):
+        with self._rows_lock:
+            row_keys = list(self._rows)
         self.settings.models = [
             {"name": k.split(":")[1], "site": k.split(":")[0],
              "auto_rec": self._auto_rec.get(k, False),
              "max_q": self._model_q.get(k, 0)}
-            for k in self._rows
+            for k in row_keys
         ]
         self.settings.saved_models = [
             {"name": d["name"], "site": d["site"]}
             for d in self._saved_data.values()
         ]
+        row_set = set(row_keys)
         self.settings.ranks = {
             k: v for k, v in self._ranks.items()
-            if v and (k in self._rows or f"saved:{k}" in self._saved_data)
+            if v and (k in row_set or f"saved:{k}" in self._saved_data)
         }
         save_settings(self.settings)
 
@@ -387,10 +395,11 @@ class WebCore:
 
     def _add_to_recorder(self, name: str, site: str):
         key = f"{site}:{name.lower()}"
-        if key in self._rows:
-            self._log_add(f"{name} ({site}) is already in the Recorder list.", "warn")
-            return
-        self._rows[key] = True
+        with self._rows_lock:
+            if key in self._rows:
+                self._log_add(f"{name} ({site}) is already in the Recorder list.", "warn")
+                return
+            self._rows[key] = True
         self._finish_add_recorder(name, site)
 
     def _finish_add_recorder(self, name: str, site: str):
@@ -425,7 +434,9 @@ class WebCore:
             return
         self._saved_data.pop(sid, None)
         _, site, name = sid.split(":", 2)
-        if f"{site}:{name}" not in self._rows:
+        with self._rows_lock:
+            still_tracked = f"{site}:{name}" in self._rows
+        if not still_tracked:
             self._ranks.pop(self._rank_key(name, site), None)
         self.recorder.remove_model(name, site, "saved")
         self._saved_version += 1
@@ -436,7 +447,8 @@ class WebCore:
     def _do_remove_from_recorder(self, name: str, site: str):
         key = f"{site}:{name.lower()}"
         self.recorder.remove_model(name, site, "recorder")
-        self._rows.pop(key, None)
+        with self._rows_lock:
+            self._rows.pop(key, None)
         self._auto_rec.pop(key, None)
         self._model_q.pop(key, None)
         self._size_cache.pop(key, None)
@@ -478,7 +490,9 @@ class WebCore:
                       f"(applies on next recording start)", "accent")
 
     def _api_stop_all(self):
-        for key in list(self._rows):
+        with self._rows_lock:
+            row_keys = list(self._rows)
+        for key in row_keys:
             self._auto_rec[key] = False
         self._persist_models()
         self._log_add("Stopping all downloads…", "warn")
@@ -486,17 +500,41 @@ class WebCore:
                          daemon=True, name="stop-all-dl").start()
 
     def _do_clear_recorder(self, via_api: bool = False):
+        # "Stop everything": halt BOTH monitors before we tear down. The saved
+        # scanner has to stop too — otherwise a model that is also Saved gets
+        # re-recorded moments after we kill it, so the download "keeps working
+        # in the background" after the list clears. It is left paused (its UI
+        # toggle reflects this) so nothing resumes; the Saved list is kept.
         if self._monitoring_recorder:
             self._toggle_monitor_recorder()
-        for key in list(self._rows):
+        if self._monitoring_saved:
+            self._toggle_monitor_saved()
+        with self._rows_lock:
+            row_keys = list(self._rows)
+        for key in row_keys:
             self._auto_rec[key] = False
-        threading.Thread(target=self.recorder.stop_all_recordings,
-                         daemon=True, name="clear-stop-all").start()
-        for key in list(self._rows):
-            site, name = key.split(":", 1)
-            self._do_remove_from_recorder(name, site)
-        self._log_add("Recorder cleared%s." % (" (via API)" if via_api else ""),
-                      "warn")
+        self._persist_models()
+        self._log_add("Clearing recorder — force-stopping all downloads…", "warn")
+
+        def _worker():
+            # Force-stop EVERY active download and wait for the processes to die
+            # BEFORE removing the models. Stopping first (instead of racing a
+            # fire-and-forget thread against the removal loop) guarantees no
+            # ffmpeg session is left recording once the list is empty.
+            stopped = self.recorder.stop_all_recordings()
+
+            def _finish():
+                for key in row_keys:
+                    site, name = key.split(":", 1)
+                    self._do_remove_from_recorder(name, site)
+                self._log_add(
+                    "Recorder cleared%s — %d download(s) stopped."
+                    % (" (via API)" if via_api else "", stopped), "warn")
+
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True,
+                         name="clear-recorder").start()
 
     def _toggle_monitor_recorder(self):
         if self._monitoring_recorder:
@@ -563,6 +601,12 @@ class WebCore:
         cfg.uploaded_log = os.path.join(cfg.tdlib_dir, "uploaded.txt")
         cfg.ffmpeg_path = self.recorder.ffmpeg_path or "ffmpeg"
         cfg.ffprobe_path = "ffprobe"
+        from pipeline_worker import TELEGRAM_MAX_BYTES
+        user_cap = (s.max_size_mb * 1024 * 1024) if s.max_size_mb else None
+        if s.pipeline_do_upload:
+            cfg.max_bytes = min(user_cap, TELEGRAM_MAX_BYTES) if user_cap else TELEGRAM_MAX_BYTES
+        else:
+            cfg.max_bytes = user_cap if user_cap else float("inf")
         return cfg
 
     def _toggle_pipeline(self, silent: bool = False):
@@ -1130,7 +1174,9 @@ class WebCore:
 
     def _dashboard_counts(self):
         tally = {s: [0, 0, 0, 0] for s, _l in _DASH_SITES}
-        for k in list(self._rows):
+        with self._rows_lock:
+            row_keys = list(self._rows)
+        for k in row_keys:
             t = tally.get(k.split(":", 1)[0])
             if t is None:
                 continue
@@ -1157,7 +1203,9 @@ class WebCore:
 
     def snapshot(self, log_after: int = 0, pipe_after: int = 0) -> dict:
         models = []
-        for key in sorted(self._rows):
+        with self._rows_lock:
+            row_keys = sorted(self._rows)
+        for key in row_keys:
             site, name = key.split(":", 1)
             cfg = self.recorder.models.get(key)
             status = _STATUS_STR.get(cfg.status, "offline") if cfg else "offline"
@@ -1276,11 +1324,12 @@ class Bridge:
         if not name:
             return {"ok": False, "error": "Could not extract a username from the input."}
         key = f"{site}:{name}"
-        if key in self._core._rows:
-            return {"ok": False, "error": f"{name} ({site}) is already in the list."}
-        # Write synchronously so a set_rank() call right behind this one
-        # doesn't race the deferred _finish_add_recorder — see _handle_add.
-        self._core._rows[key] = True
+        with self._core._rows_lock:
+            if key in self._core._rows:
+                return {"ok": False, "error": f"{name} ({site}) is already in the list."}
+            # Write synchronously so a set_rank() call right behind this one
+            # doesn't race the deferred _finish_add_recorder — see _handle_add.
+            self._core._rows[key] = True
         self._core.after(0, lambda: self._core._finish_add_recorder(name, site))
         return {"ok": True, "name": name, "site": site}
 
@@ -1311,14 +1360,18 @@ class Bridge:
 
     def set_auto(self, key, enabled):
         key = str(key or "")
-        if key not in self._core._rows:
+        with self._core._rows_lock:
+            in_rows = key in self._core._rows
+        if not in_rows:
             return {"ok": False, "error": "not in recorder"}
         self._core.after(0, lambda: self._core._set_auto(key, bool(enabled)))
         return {"ok": True}
 
     def toggle_auto(self, keys):
         c = self._core
-        ks = [k for k in (keys or []) if k in c._rows]
+        with c._rows_lock:
+            row_set = set(c._rows)
+        ks = [k for k in (keys or []) if k in row_set]
         # Same semantics as classic bulk toggle: flip each row individually.
         def _do():
             for k in ks:
@@ -1349,7 +1402,9 @@ class Bridge:
         c = self._core
         def _do():
             removed = 0
-            for key in list(c._rows):
+            with c._rows_lock:
+                row_keys = list(c._rows)
+            for key in row_keys:
                 cfg = c.recorder.models.get(key)
                 if cfg is None or cfg.status == ModelStatus.OFFLINE:
                     site, name = key.split(":", 1)
@@ -1361,8 +1416,10 @@ class Bridge:
 
     def offline_count(self):
         c = self._core
+        with c._rows_lock:
+            row_keys = list(c._rows)
         n = 0
-        for key in list(c._rows):
+        for key in row_keys:
             cfg = c.recorder.models.get(key)
             if cfg is None or cfg.status == ModelStatus.OFFLINE:
                 n += 1
@@ -1512,10 +1569,11 @@ class Bridge:
             for sid in list(sids or []):
                 _, site, name = str(sid).split(":", 2)
                 key = f"{site}:{name}"
-                if key in c._rows:
-                    continue
+                with c._rows_lock:
+                    if key in c._rows:
+                        continue
+                    c._rows[key] = True
                 c.recorder.add_model(name, site, "recorder", quiet=True)
-                c._rows[key] = True
                 c._auto_rec.setdefault(key, False)
                 added += 1
             if added:
@@ -1533,9 +1591,12 @@ class Bridge:
             for sid in list(sids or []):
                 _, site, name = str(sid).split(":", 2)
                 key = f"{site}:{name}"
-                if key not in c._rows:
+                with c._rows_lock:
+                    is_new = key not in c._rows
+                    if is_new:
+                        c._rows[key] = True
+                if is_new:
                     c.recorder.add_model(name, site, "recorder", quiet=True)
-                    c._rows[key] = True
                     c._auto_rec.setdefault(key, False)
                 c._launch_recording(name, site)
                 n += 1
@@ -1766,7 +1827,7 @@ class Bridge:
         s.preview_mode          = str(p.get("preview_mode", s.preview_mode))
         s.preview_engine        = str(p.get("preview_engine", s.preview_engine))
         s.preview_player_path   = str(p.get("preview_player_path", "")).strip()
-        s.max_player_tiles      = max(1, min(20, _int(p.get("max_player_tiles"), s.max_player_tiles) or s.max_player_tiles))
+        s.max_player_tiles      = max(1, min(100, _int(p.get("max_player_tiles"), s.max_player_tiles) or s.max_player_tiles))
         c.recorder.quality_global = s.max_quality
         c.recorder.auto_downgrade_enabled = s.auto_downgrade_enabled
         c.recorder.playwright_fallback_enabled = s.playwright_fallback_enabled

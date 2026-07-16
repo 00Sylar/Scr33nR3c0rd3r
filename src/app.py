@@ -1582,33 +1582,52 @@ class StreamRecorderApp(tk.Tk):
         if not messagebox.askyesno(
                 "Clear recorder",
                 "Stop everything and remove ALL models from the Recorder?\n\n"
-                "This stops the monitor, all active downloads, clears AUTO, and "
-                "empties the Recorder list. Saved Models are kept."):
+                "This pauses both monitors, force-stops every active download, "
+                "clears AUTO, and empties the Recorder list. Your Saved list is "
+                "kept, but the Saved scanner is paused so nothing resumes in the "
+                "background."):
             return
         self._do_clear_recorder()
 
     def _do_clear_recorder(self, via_api: bool = False):
         """Clean-slate the Recorder without a dialog. Shared by the button
-        (after confirm) and the bot API (/clear)."""
-        # Stop the recorder monitor so it can't re-add/restart anything
+        (after confirm) and the bot API (/clear). Force-stops every active
+        download and waits for the ffmpeg processes to die BEFORE removing the
+        models, so nothing is left recording in the background after the list
+        clears. Both monitors are paused — the saved scanner too, so a model
+        that is also Saved can't resume the instant its download is killed
+        (its toggle reflects this; the Saved list itself is kept)."""
+        # Stop both monitors so neither can restart a download mid-clear.
         if self._monitoring_recorder:
             self._toggle_monitor_recorder()
-        # Uncheck every AUTO, then force-stop all active downloads off-thread
-        for key in list(self._rows):
+        if self._monitoring_saved:
+            self._toggle_monitor_saved()
+        # Uncheck every AUTO now (the tree rows go away once stops complete).
+        row_keys = list(self._rows)
+        for key in row_keys:
             self._auto_rec[key] = False
             if self._tree.exists(key):
                 self._tree.set(key, "auto", "☐")
-        threading.Thread(target=self.recorder.stop_all_recordings,
-                         daemon=True, name="clear-stop-all").start()
-        # Remove every model from the Recorder (reuses the no-dialog remover,
-        # which handles tree rows, headers, persistence, and stats)
-        for key in list(self._rows):
-            site, name = key.split(":", 1)
-            self._do_remove_from_recorder(name, site)
-        self._uncheck_all("rec")
-        self._update_stats()
-        self._log_add("Recorder cleared%s." % (" (via API)" if via_api else ""),
-                      "warn")
+        self._log_add("Clearing recorder — force-stopping all downloads…", "warn")
+
+        def _worker():
+            # Force-stop EVERY active download (all sites/groups) and wait for
+            # the processes to exit, THEN remove the models on the Tk thread.
+            stopped = self.recorder.stop_all_recordings()
+
+            def _finish():
+                for key in row_keys:
+                    site, name = key.split(":", 1)
+                    self._do_remove_from_recorder(name, site)
+                self._uncheck_all("rec")
+                self._update_stats()
+                self._log_add(
+                    "Recorder cleared%s — %d download(s) stopped."
+                    % (" (via API)" if via_api else "", stopped), "warn")
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True,
+                         name="clear-recorder").start()
 
     # ── Extension/bot API actions (no modal dialogs) ─────────────────────────
     def _api_stop_all(self):
@@ -4118,6 +4137,12 @@ class StreamRecorderApp(tk.Tk):
         # ffmpeg bundled with the app
         cfg.ffmpeg_path = self.recorder.ffmpeg_path or "ffmpeg"
         cfg.ffprobe_path = "ffprobe"
+        from pipeline_worker import TELEGRAM_MAX_BYTES
+        user_cap = (s.max_size_mb * 1024 * 1024) if s.max_size_mb else None
+        if cfg.do_upload:
+            cfg.max_bytes = min(user_cap, TELEGRAM_MAX_BYTES) if user_cap else TELEGRAM_MAX_BYTES
+        else:
+            cfg.max_bytes = user_cap if user_cap else float("inf")
         return cfg
 
     def _toggle_pipeline(self, silent: bool = False):

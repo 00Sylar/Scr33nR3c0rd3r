@@ -10,7 +10,10 @@ the tab:
 
 - **① Convert .ts → .mp4** — converts (and size‑splits) finished recordings
   into `.mp4` files in the converted folder, and *keeps* them. Use alone for
-  `.mp4` files with no Telegram setup needed.
+  `.mp4` files with no Telegram setup needed. The split size follows the same
+  **Max File Size** setting as the recorder; if Upload (②) is also enabled,
+  it's additionally capped at Telegram's own ~3.8 GB per‑file upload limit,
+  whichever is smaller.
 - **② Upload .mp4 to Telegram** — uploads `.mp4` files from the converted
   folder. Use with ① for the full convert‑then‑upload flow, or alone to
   upload `.mp4`s you already have. As of V2.0, uploading no longer waits for

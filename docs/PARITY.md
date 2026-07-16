@@ -57,7 +57,7 @@ Sources: README, `src/app.py` control walk (2026-07-06, v1.6), `src/tray_win.py`
 ### Toolbar
 - [ ] `▶ REC`, `⏹ Stop`, `☑ Toggle AUTO`, `✕ Remove`, `✕ Remove Offline` (confirm first;
       only OFFLINE rows removed), `★ Add to Saved`
-- [ ] `🧹 CLEAR RECORDER` (stop monitor + downloads, clear AUTO, remove all; Saved kept)
+- [ ] `🧹 CLEAR RECORDER` (pause both monitors, force-stop downloads, clear AUTO, remove all; Saved list kept, scanner paused)
 - [ ] `⏹ STOP ALL DOWNLOADS`, `▶ START MONITOR` / `⏹ STOP MONITOR` (+ `● STOPPING…` state)
 ### Context menu (single row)
 - [ ] Start/Stop Recording, `☑/☐ Auto-Record`, `🎞 Max Quality (…)` per-model override submenu

@@ -50,9 +50,13 @@ See [[Recording Internals|Recording-Internals]] for how all of this works.
   **Grid** wall; click a tile for **Theater** mode (that tile large, with
   player controls and **▶ REC / ⏹ Stop**, the rest in a Bottom/Side thumbnail
   strip, still playing). Add tiles via **+ Add Tile** or right‑click an
-  online/recording model → **▶ Add to Player**. The open‑tile count is capped
-  by **Max Player tiles** in [[Settings]] (every tile is a live stream, so
-  it's also a bandwidth/CPU cap).
+  online/recording model → **▶ Add to Player**. Tiles start streaming the
+  moment they're added and keep streaming while other tabs are in front, so
+  returning to the Player never reloads them; the Grid scrolls when tiles
+  overflow the window, and **🧹 Clear Player** removes every tile in one
+  click (Player only — recordings and the other tabs are untouched). The
+  open‑tile count is capped by **Max Player tiles** in [[Settings]] (every
+  tile is a live stream, so it's also a bandwidth/CPU cap).
 - **Saved Models** tab — view‑only watchlist with online/offline status,
   import/export, and a background scanner.
 - **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab
