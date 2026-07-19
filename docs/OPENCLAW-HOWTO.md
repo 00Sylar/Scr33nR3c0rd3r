@@ -46,6 +46,12 @@ Just talk normally. The bot maps your intent to a command:
 | **"stop everything"** | `stop-all` | stop all downloads + clear all AUTO |
 | **"clear the recorder"** / "clean slate" | `clear` | pause **both** monitors, force-stop all downloads, clear AUTO, **remove every model** (Saved list kept; scanner paused) |
 | **"dashboard status"** / "how many are live?" | `dashboard` | per-site (CB/SC/CS/MFC) + totals: total / recording / online / offline |
+| **"who's recording?"** / "list what's being recorded" | `models --recording` | list the models recording right now (name, site, rank) |
+| **"who's live?"** / "which of my models are online?" | `models --online` | list tracked models that are live (online or recording); add `--min-rank 4` for "my best models", `--site stripchat` to narrow |
+| "list all my models" | `models` | every Recorder + Saved model with status/rank in one call |
+| **"alice on CB and bobby on stripchat are the same girl"** / "link them" | `link alice bobby --site-a chaturbate --site-b stripchat` | mark two tracked models as one person — ranks sync (highest wins), extension warns on duplicate recording |
+| "unlink her" | `unlink <name>` | remove a model from its identity group |
+| "show the links" / "which models are linked?" | `links` | list identity groups + same-username suggestions |
 | "save her" / "add to saved" | `add-saved <link>` | add to Saved Models |
 | **"save her and rank 5"** / "add to saved, 4 stars" | `add-saved <link> --rank 5` | add to Saved Models **and** set the star rank in one step |
 | **"rank her 4"** / "give `<name>` 3 stars" | `rank <name> 4` | set a 1–5 star rank (model must already be in Saved Models or the Recorder) |
@@ -96,13 +102,17 @@ python src/scr33nx_ctl.py <command> [args]
 | `stop-all` | `python scr33nx_ctl.py stop-all` |
 | `clear` | `python scr33nx_ctl.py clear` |
 | `dashboard` | `python scr33nx_ctl.py dashboard` |
+| `models [--site S] [--recording] [--online] [--min-rank N]` | `python scr33nx_ctl.py models --recording` |
+| `link <a> <b> [--site-a S] [--site-b S]` | `python scr33nx_ctl.py link "chaturbate.com/alice" "stripchat.com/bobby"` |
+| `unlink <model>` | `python scr33nx_ctl.py unlink alice --site chaturbate` |
+| `links` | `python scr33nx_ctl.py links` |
 | `monitor recorder|saved on|off` | `python scr33nx_ctl.py monitor recorder on` |
 | `pipeline on|off` | `python scr33nx_ctl.py pipeline on` |
 | `pipeline convert|upload on|off` | `python scr33nx_ctl.py pipeline upload off` |
 | `open` / `close` | `python scr33nx_ctl.py open` |
 
 Behind the scenes it talks to the **Local Control API** (documented in the README):
-`/status`, `/dashboard`, `/add`, `/record`, `/auto`, `/rank`, `/remove`,
+`/status`, `/models`, `/links`, `/link`, `/unlink`, `/dashboard`, `/add`, `/record`, `/auto`, `/rank`, `/remove`,
 `/stop_all`, `/clear`, `/monitor`, `/pipeline`, `/pipeline/stage`, `/quit`. `add-saved --rank` (and
 `add-recorder`/`record --rank`) call `/add` then `/rank`; a bare `rank` calls just
 `/rank`. `open` launches `Scr33nX.bat`
@@ -218,6 +228,12 @@ Then restart Scr33nX and send `/new`. That's the whole loop.
 | `C:\Users\luiis\.openclaw\workspace\AGENTS.md` | The bot's instructions / command map |
 | `C:\Users\luiis\.openclaw\openclaw.json` | OpenClaw config (model, auth, channel) |
 
-> Security note: the local API is loopback-only and unauthenticated — anything
-> on your PC can call it. Don't expose port 5200 to the network. The bot's reach
-> is limited to whatever `AGENTS.md` tells it and whatever the API exposes.
+> Security note: the local API is loopback-only and, by default, open —
+> anything on your PC can call it. Don't expose port 5200 to the network.
+> You can additionally set an **API token** in Scr33nX (⚙ Settings → Local
+> API): every request must then send it in the `X-Api-Token` header or gets
+> `401`. `scr33nx_ctl.py` picks the token up automatically from the app's
+> own config file (`~/.streamrecorder_config.json`), or from a
+> `SCR33NX_TOKEN` environment variable — so the bot keeps working with zero
+> extra setup on the same PC. The bot's reach is limited to whatever
+> `AGENTS.md` tells it and whatever the API exposes.

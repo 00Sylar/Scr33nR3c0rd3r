@@ -96,6 +96,18 @@
               <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
             </div>
           </div>
+          <div class="msf" id="rec-rankf" data-tab="rec">
+            <button class="btn msf-btn">Rank: All ▾</button>
+            <div class="msf-menu" hidden>
+              <label data-v="5"><span class="cb"></span>★★★★★</label>
+              <label data-v="4"><span class="cb"></span>★★★★ &amp; up</label>
+              <label data-v="3"><span class="cb"></span>★★★ &amp; up</label>
+              <label data-v="2"><span class="cb"></span>★★ &amp; up</label>
+              <label data-v="1"><span class="cb"></span>★ &amp; up (any rank)</label>
+              <label data-v="-1"><span class="cb"></span>Unranked only</label>
+              <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
+            </div>
+          </div>
           <div class="spacer"></div>
           <button class="btn" id="b-clear">🧹 Clear Recorder</button>
           <button class="btn danger" id="b-stopall">⏹ Stop All Downloads</button>
@@ -136,7 +148,20 @@
               <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
             </div>
           </div>
+          <div class="msf" id="saved-rankf" data-tab="saved">
+            <button class="btn msf-btn">Rank: All ▾</button>
+            <div class="msf-menu" hidden>
+              <label data-v="5"><span class="cb"></span>★★★★★</label>
+              <label data-v="4"><span class="cb"></span>★★★★ &amp; up</label>
+              <label data-v="3"><span class="cb"></span>★★★ &amp; up</label>
+              <label data-v="2"><span class="cb"></span>★★ &amp; up</label>
+              <label data-v="1"><span class="cb"></span>★ &amp; up (any rank)</label>
+              <label data-v="-1"><span class="cb"></span>Unranked only</label>
+              <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
+            </div>
+          </div>
           <div class="spacer"></div>
+          <button class="btn" id="b-links">🔗 Links</button>
           <button class="btn" id="b-export">📤 Export</button>
           <button class="btn" id="b-import">📥 Import</button>
           <button class="btn" id="b-savedadd">＋ Add Model to Saved</button>
@@ -171,6 +196,7 @@
             <button class="btn mini" data-stripe="side">▥ Strip: Side</button>
           </div>
           <div class="spacer"></div>
+          <button class="btn" id="player-fill" title="Fill the Player with your highest-ranked models that are online right now (up to the tile cap).">★ Fill Top Ranked</button>
           <button class="btn" id="player-clear">🧹 Clear Player</button>
           <button class="btn" id="player-add">＋ Add Tile</button>
         </div>
@@ -305,6 +331,17 @@
               <input id="s-player-max" title="Caps how many tiles you can have open in the Player tab. Every open tile streams live (muted) at once, so raising this raises bandwidth/CPU use too — lower it if you're stretched thin."></div>
           </div>
           <div class="card">
+            <h3>🔌 Local API</h3>
+            <div class="field"><label>API token (optional — empty = no authentication)</label>
+              <input id="s-api-token" spellcheck="false" placeholder="empty = any local app may control Scr33nX">
+            </div>
+            <div class="vip-hint">When set, every call to the local control API (port 5200)
+              must send this token in the <b>X-Api-Token</b> header — blocks other local
+              apps/webpages from controlling Scr33nX. The browser extension (⚙ API token
+              in its popup) and the OpenClaw bot must then be given the same token.
+              Applies immediately on Save.</div>
+          </div>
+          <div class="card">
             <h3>🔍 System Check</h3>
             <div id="syscheck"></div>
             <button class="btn" id="s-recheck" style="margin-top:10px">🔍 Re-check</button>
@@ -321,6 +358,51 @@
 
 <!-- context menu root -->
 <div class="ctx" id="ctx" hidden></div>
+
+<!-- linked identities (aka groups) -->
+<div class="modal-backdrop" id="linksdlg" hidden>
+  <div class="modal lnk-modal" style="width:540px;max-width:92vw">
+    <h3>🔗 Linked identities</h3>
+    <p style="color:var(--text-3);font-size:var(--fs-0);margin:4px 0 10px">
+      Link the accounts one model has on different sites — her rank stays the
+      same everywhere, and the extension warns when she's already being
+      recorded under another account.</p>
+    <div class="search" style="margin-bottom:8px">
+      <input id="links-filter" placeholder="Filter models…" spellcheck="false">
+    </div>
+    <div class="lnk-scroll">
+      <div id="links-groups"></div>
+      <div id="links-suggests"></div>
+    </div>
+    <div class="lnk-manual">
+      <span class="combo-wrap"><input id="links-a" placeholder="type to search…"
+        autocomplete="off" spellcheck="false"></span>
+      <span class="lnk-eq">=</span>
+      <span class="combo-wrap"><input id="links-b" placeholder="type to search…"
+        autocomplete="off" spellcheck="false"></span>
+      <button class="btn" id="links-add">Link</button>
+    </div>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="btn-primary" id="links-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- per-model link editor (right-click → Edit Links…) -->
+<div class="modal-backdrop" id="lnkedit" hidden>
+  <div class="modal" style="width:430px;max-width:92vw">
+    <h3 id="lnkedit-title">🔗 Edit links</h3>
+    <p style="color:var(--text-3);font-size:var(--fs-0);margin:4px 0 12px">
+      One person — her account on each site. Type to search your models;
+      an unknown name is added to Saved Models and linked in one step.
+      Clear a field to unlink that account.</p>
+    <div id="lnkedit-rows"></div>
+    <div class="modal-btns" style="margin-top:14px">
+      <button class="btn" id="lnkedit-cancel">Cancel</button>
+      <button class="btn-primary" id="lnkedit-save">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- generic confirm/info modal -->
 <div class="modal-backdrop" id="modal" hidden>

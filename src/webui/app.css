@@ -467,6 +467,55 @@ input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), 
 .vip-hint { font-size: var(--fs-0); color: var(--text-3); margin-top: 8px; }
 .vip-empty { font-size: var(--fs-0); color: var(--text-3); font-style: italic; }
 
+/* linked identities (🔗 aka groups) */
+/* The dialog caps at 82vh: header + manual row + Close stay pinned, only the
+   groups/suggestions list scrolls — a 1000-suggestion list can't push the
+   Close button off-screen. */
+.lnk-modal { display: flex; flex-direction: column; max-height: 82vh; }
+.lnk-scroll { overflow-y: auto; min-height: 0; flex: 1 1 auto;
+              overscroll-behavior: contain; padding-right: 4px; }
+.lnk-linkall { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.lnk-subhead { display: flex; align-items: center; gap: 8px; }
+
+/* type-ahead combo (links dialog + link editor) */
+.combo-wrap { position: relative; flex: 1; min-width: 0; display: block; }
+.combo-wrap input { width: 100%; background: var(--bg-1); color: var(--text-1);
+                    border: 1px solid var(--line); border-radius: var(--r-sm);
+                    padding: 6px 8px; font-size: var(--fs-1); }
+.combo-list { position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+              z-index: 60; background: var(--bg-1); border: 1px solid var(--line);
+              border-radius: var(--r-sm); max-height: 190px; overflow-y: auto;
+              box-shadow: 0 8px 22px rgba(0,0,0,.5); }
+.combo-it { padding: 6px 9px; cursor: pointer; font-size: var(--fs-0);
+            color: var(--text-2); white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; }
+.combo-it:hover { background: rgba(255,255,255,.07); color: var(--text-1); }
+.combo-new { color: var(--gold); }
+.combo-none { padding: 6px 9px; font-size: var(--fs-0); color: var(--text-3);
+              font-style: italic; }
+
+/* per-model link editor rows */
+.lnked-row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+.lnked-site { width: 38px; flex: none; font-size: var(--fs-0); color: var(--text-3);
+              text-transform: uppercase; letter-spacing: 1px; }
+.lnked-self { font-size: var(--fs-1); color: var(--text-1); }
+.lnked-self small { color: var(--text-3); }
+.row .lnk { cursor: pointer; }
+.row .lnk:hover { opacity: 1; }
+.row .lnk { font-style: normal; margin-left: 5px; font-size: 11px;
+            opacity: .75; cursor: default; }
+.lnk-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+             padding: 7px 0; border-bottom: 1px solid var(--line);
+             font-size: var(--fs-1); color: var(--text-2); }
+.lnk-eq { color: var(--text-3); }
+.lnk-subhead { font-size: var(--fs-0); letter-spacing: 1px; text-transform: uppercase;
+               color: var(--text-3); margin: 12px 0 4px; }
+.lnk-sugname { flex: 1; color: var(--text-1); }
+.lnk-sugname small { color: var(--text-3); }
+.lnk-empty { font-size: var(--fs-0); color: var(--text-3); font-style: italic;
+             padding: 6px 0; }
+.lnk-manual { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+
 .sys-row { display: flex; align-items: center; gap: 10px; padding: 5px 0;
            font-size: var(--fs-1); color: var(--text-2); }
 .sys-row .mark-ok { color: var(--go-bright); }

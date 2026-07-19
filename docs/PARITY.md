@@ -19,6 +19,19 @@ Sources: README, `src/app.py` control walk (2026-07-06, v1.6), `src/tray_win.py`
 > "＋ Add Current Recorder Model" button is renamed "＋ Add Model to Saved"
 > (same username/URL prompt behavior as classic, now with an explicit site
 > dropdown — see CHANGELOG V2.0).
+> Post-V2.1 web-only additions (never existed in classic, by design): the
+> **▶ Player tab** family (tiles, Theater, ★ Fill Top Ranked, 🧹 Clear
+> Player), the **Rank: All ▾** filter dropdowns, the **VIP list / VIP-only
+> notifications**, and the **⚙ Settings → Local API token field** (the token
+> itself is enforced by the shared API handler, so it protects both UIs;
+> classic simply has no field to edit it — use the web UI or edit
+> `~/.streamrecorder_config.json`). The **🔗 Links dialog** (linked
+> identities) is also web-only — the link data, cross-site rank sync, and
+> the `/link`,`/unlink`,`/links` API work identically under classic (shared
+> handler + shared `_set_rank_many` expansion), classic just has no dialog
+> to manage them. Both UIs share the config-backup
+> recovery, the model audit log, rank-change Activity-Log lines, and the
+> 24 h update re-check.
 
 ## 1. App shell & header
 - [ ] Window title `Scr33nX`, devil icon, red/black theme

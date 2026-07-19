@@ -11,6 +11,88 @@ grouped by date / milestone.
 ## [Unreleased]
 
 ### Added
+- **Linked identities (🔗 aka groups).** Link the accounts one model has on
+  different sites — same or different usernames — so Scr33nX knows they're
+  one person. Effects: her **star rank stays identical across all linked
+  accounts** (rating any of them re-rates the rest, highest rank wins when
+  first linking), and the browser extension shows an **amber REC** toolbar
+  and thumbnail badge plus an "⚠ Already recording on … as …" popup warning
+  when you're looking at an account whose linked twin is being recorded — so
+  you never double-record the same person by accident (recording is never
+  blocked, only flagged). Manage links from the web UI (**🔗 Links** button
+  on the Saved Models tab: current groups, one-click **same-username
+  suggestions**, manual pairing of any two tracked models), from the bot /
+  CLI (`link`, `unlink`, `links`), or the API (`POST /link`, `POST /unlink`,
+  `GET /links`; `/status` and `/models` now report `aka` +
+  `linked_recording`). Stored in the **new, additive** `model_links` config
+  key — existing models / saved models / ranks data is untouched, and links
+  survive Clear Recorder. Link/unlink events go to the audit log.
+- **Link editor + bulk linking.** Right-click any model (Recorder or Saved)
+  → **🔗 Edit Links…**, or click a row's 🔗 marker: a card shows her account
+  on each of the four sites with **type-ahead search** fields — type a few
+  letters, pick from your tracked models on that site, Save. Groups of 3–4
+  accounts are set up in one card; typing a username you don't track yet
+  offers "➕ add to Saved & link" in one step; clearing a field unlinks that
+  account. The Links dialog also gained a **filter box**, type-ahead inputs
+  instead of two giant dropdowns, and a **🔗 Link all N** button that
+  confirms every same-username suggestion in one click (ranks sync per
+  group, one confirm dialog).
+- **Extension: dynamic toolbar badge.** The extension icon now shows live
+  state for the tab you're on — **REC** (red) while that model is recording,
+  **ON** (green) when it's online in your Recorder, **OFF** (grey) when it's
+  in the Recorder but idle, **★** (blue) when it's only in Saved Models. On
+  every other tab the badge shows the number of active recordings, so a red
+  "3" means three recordings running. Updates on tab switch/navigation and
+  every 30 s in the background (both Chromium and Firefox).
+- **Extension: live status badges on browse pages.** While browsing
+  Chaturbate / Stripchat / Camsoda / MyFreeCams listings, thumbnails of
+  models you track get a small corner badge (pulsing **REC**, **ON**,
+  **OFF**, or **★**) — see who's already being recorded without opening
+  their page. Hover a badged card for details. Requires the new cam-site
+  permissions (Firefox: grant them in `about:addons` → Permissions).
+- **Extension: right-click add.** Right-click any model link or thumbnail →
+  **Add to Scr33nX Recorder** / **Add to Scr33nX Saved Models** — add
+  models without ever opening their tab.
+- **`GET /models` API endpoint + `models` bot command.** Bulk snapshot of
+  every Recorder + Saved model (same per-model fields as `/status`, plus a
+  global `recording` count) in one call — feeds the extension badges. The
+  `scr33nx_ctl.py` CLI (and so the OpenClaw bot) wraps it as
+  `models [--site S] [--recording] [--online] [--min-rank N]`, so asking the
+  bot "who's recording?" or "which of my 4★+ models are live?" is now one
+  call instead of a per-model loop.
+- **Config backups + corruption recovery — saved models/ranks can no longer
+  be wiped by a bad config file.** The settings file (the only store of your
+  model lists and star ranks) now keeps 3 rotating backups (`.bak`/`.bak2`/
+  `.bak3`). Previously, if `~/.streamrecorder_config.json` ever failed to
+  parse (truncated write, disk hiccup), the app silently started with empty
+  lists and the next save overwrote the file — permanently deleting every
+  saved model and rank. Now the newest readable backup is restored
+  automatically, the unreadable file is preserved as `.corrupt-<timestamp>`,
+  and a warning appears in the Activity Log.
+- **Model audit log.** Every membership/rank event — add/remove on Recorder
+  and Saved, rank changes (old → new), VIP changes, import/export summaries,
+  Clear Recorder — is appended as one JSON line to
+  `%LOCALAPPDATA%\Scr33nX\models_audit.log` (rotating, 2 MB × 3), tagged
+  with its source (`ui` / `api` / `import`), from both interfaces. Lets you
+  reconstruct later when a model appeared, vanished, or changed rank.
+- **Rank changes now show in the Activity Log** (`⭐ Rank ★★☆☆☆ → ★★★★☆:
+  name (site)`; bulk changes log one summary line). They were previously
+  completely silent.
+- **Rank filter.** A **Rank: All ▾** dropdown next to the status filter on
+  the Recorder and Saved Models tabs shows only models ranked ★N-and-up, or
+  only unranked ones; combines with the name/status filters.
+- **★ Fill Top Ranked (Player tab).** One click opens tiles for your
+  highest-ranked models that are online right now (Recorder + Saved, best
+  rank first) until the tile cap is reached.
+- **Optional API token for the local control API.** Set a token in
+  ⚙ Settings → Local API and every request to port 5200 must carry it in the
+  `X-Api-Token` header (or `?token=` on GETs) or it gets `401` — blocks
+  other local apps/webpages from controlling Scr33nX. Empty (the default)
+  keeps the API open exactly as before. Supported by the browser extension
+  (⚙ **API token…** link at the bottom of the popup — appears automatically
+  when the app starts rejecting it) and by `scr33nx_ctl.py` / the OpenClaw
+  bot (reads the app's config file automatically, or the `SCR33NX_TOKEN`
+  env var).
 - **Star ranks in the preview overlay, Player-tab grid, and Theater tile.**
   The 1–5 star rank now shows (and is clickable, same as the tables) right
   after the model's name in the embedded preview overlay, right below the
@@ -24,6 +106,15 @@ grouped by date / milestone.
   Recorder list, and Saved Models are untouched.
 
 ### Changed
+- **Update check re-polls every 24 h.** It used to run once at startup, so a
+  long-running app never learned that a new release shipped.
+- **Pipeline split is much faster on big files.** The Convert stage's
+  splitter now seeks the input (`-ss` before `-i`) instead of reading the
+  whole file up to each cut point — part N of a multi-GB recording no longer
+  re-reads everything before it. Cut points still land on keyframes exactly
+  as before (stream copy); please verify one split output plays fine.
+- **Windows toasts now identify as "Scr33nX"** instead of the old
+  "StreamRecorder" app name.
 - **Player tiles keep streaming while you're on other tabs.** Leaving the
   **▶ Player** tab used to stop every tile, so hopping Recorder ⇄ Player
   reloaded all streams from scratch. Tiles now start loading the moment a
@@ -33,6 +124,31 @@ grouped by date / milestone.
   them.)
 
 ### Fixed
+- **Esc on the Telegram login prompt no longer hangs the pipeline.** Pressing
+  Escape on the phone/OTP/2FA prompt used to hide the dialog without
+  answering it, leaving the upload worker blocked for up to 5 minutes. Esc
+  now cancels the prompt properly (same as the Cancel button). Esc also
+  closes the Player picker and the Setup Wizard now.
+- **Clicking a rank star on a Player grid tile no longer yanks you into
+  Theater mode.** The star click was also being treated as a tile click; now
+  it just rates the model.
+- **Convert stage no longer retries a broken `.ts` forever.** A file that
+  fails to convert is retried twice and then skipped until the pipeline is
+  restarted (same 3-attempt policy uploads already had) — previously it
+  re-converted on every scan pass, burning CPU endlessly.
+- **"Remember my choice" now works in "Open in Browser (choose…)".** The
+  checkbox was silently ignored when the picker was opened via the explicit
+  choose flow.
+- **Extension /add can no longer corrupt a state pass.** The API handler
+  wrote to the web UI's shared model dicts without taking the lock that
+  protects them (the same race family as the "Recorder list rendering
+  empty" fix in this release) — all shared-dict accesses (Recorder rows,
+  Saved list, ranks — including import/export and the /add path) are now
+  consistently lock-guarded.
+- **Removing Saved Models reports the real count** (it used to count
+  requested rows, including ones that no longer existed), and ranking a
+  Player tile whose model was just removed from both lists is now refused
+  with a note instead of storing a rank that silently vanished on restart.
 - **🧹 Clear Recorder now actually stops the downloads it clears.** Previously
   the button removed every model from the list while firing the "stop all"
   off in a background thread that raced the removal, and it left the **Saved

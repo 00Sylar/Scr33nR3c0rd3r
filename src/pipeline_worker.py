@@ -213,6 +213,7 @@ class PipelineWorker:
         files only — queuing for upload is the feeder's job — so a long
         conversion batch never blocks uploads. Gated on the live cfg flag, so
         toggling Convert takes effect on the next scanned file."""
+        attempts: dict = {}   # ts path → failed attempts this run
         while True:
             if self._shutdown:
                 return
@@ -249,11 +250,23 @@ class PipelineWorker:
                         if len(valid) != len(outputs):
                             self.on_log(f"[convert] ⚠ {f}: {len(outputs)-len(valid)} part(s) missing (ffmpeg error)")
                         self.on_log(f"[convert] ✓ {f} → {len(valid)} part(s)")
+                        attempts.pop(path, None)
                         # The .mp4s are on disk now; the feeder queues them for
                         # upload independently (convert-only just keeps them).
                     except Exception as e:
-                        self.on_log(f"[convert] ✗ {f}: {e}")
-                        processed.discard(path)
+                        # Same 3-attempt cap as uploads: a permanently broken
+                        # .ts must not re-convert (and burn CPU) forever on
+                        # every scan pass.
+                        n = attempts.get(path, 0) + 1
+                        attempts[path] = n
+                        if n < 3:
+                            self.on_log(f"[convert] ✗ {f}: {e} — will retry "
+                                        f"(attempt {n}/3)")
+                            processed.discard(path)
+                        else:
+                            self.on_log(f"[convert] ✗ {f}: {e} — giving up "
+                                        f"after 3 attempts; will retry when "
+                                        f"the pipeline is restarted.")
 
             for _ in range(50):
                 if self._shutdown:
@@ -404,9 +417,15 @@ class PipelineWorker:
                 start = i * part_dur
                 out = os.path.join(self.cfg.output_folder,
                                    f"{base}_part{i+1:03d}.mp4")
+                # -ss BEFORE -i = input seeking: ffmpeg jumps straight to the
+                # nearest keyframe instead of demux-discarding everything up
+                # to the cut point. With -ss after -i, part N re-read the file
+                # from byte 0 — splitting a big recording was several times
+                # slower for no accuracy gain (stream copy snaps to keyframes
+                # either way).
                 cmd = [self.cfg.ffmpeg_path,
-                       "-i", ts_path,
                        "-ss", str(start),
+                       "-i", ts_path,
                        *(["-t", str(part_dur)] if i < num_parts - 1 else []),
                        "-c", "copy", out, "-y"]
                 self._run_ffmpeg(cmd, part_dur, f"{base} ({i+1}/{num_parts})")

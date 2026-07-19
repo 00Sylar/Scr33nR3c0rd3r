@@ -144,11 +144,35 @@
     }
     .feedback.ok  { background: #10241a; color: #3ecf8e; }
     .feedback.err { background: #2a0c0f; color: #ff2b3d; }
+
+    /* linked identities (aka) */
+    .banner-warn {
+      font-size: 11px;
+      background: #2a1c07;
+      color: #ffa726;
+      border-radius: 3px;
+      padding: 5px 8px;
+      margin-bottom: 9px;
+      text-align: center;
+    }
+    .aka-row {
+      font-size: 11px;
+      color: #8a8a90;
+      line-height: 1.6;
+      margin: -4px 0 9px;
+    }
+    .aka-row b { color: #f2f2f4; font-weight: 600; }
+    .aka-st { text-transform: uppercase; font-size: 9px; letter-spacing: .5px; }
+    .aka-st.recording { color: #ff2b3d; }
+    .aka-st.online    { color: #3ecf8e; }
+    .aka-st.offline, .aka-st.none { color: #56565c; }
+    .aka-st.checking  { color: #ffc14d; }
   </style>
 </head>
 <body>
   <div class="header">
     <img class="dot" src="icons/devil32.png" width="18" height="18" alt="">
+
     <span class="title">Scr33nX</span>
   </div>
   <div class="body" id="root">

@@ -11,6 +11,7 @@ Run with:  python src/app_web.py        (add --debug for devtools)
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -33,8 +34,11 @@ from typing import Optional
 import app as classic
 from app import (_ApiHandler, APP_VERSION, GITHUB_REPO, _API_PORT,
                  QUALITY_OPTIONS, _quality_label, _detect_browsers)
+import audit
+import links as model_links
 import recorder as recorder_mod
 import cb_relay
+import settings as settings_mod
 from recorder import StreamRecorder, ModelStatus
 from settings import load_settings, save_settings, save_pipeline_settings
 from notifier import send_notification
@@ -159,16 +163,27 @@ class WebCore:
         self.recorder.gap_warnings_enabled = self.settings.gap_warnings_enabled
 
         self._rows: dict[str, bool] = {}
-        # _rows is read (snapshot/offline_count/etc.) on the pywebview JS-API
-        # thread while mutated both there and from Tk-thread callbacks
-        # (c.after) — without this, a mutation mid-iteration can raise
-        # "dictionary changed size during iteration" and abort a state() call.
+        # _rows_lock guards ALL the shared model collections — _rows,
+        # _saved_data and _ranks — which are read (snapshot/saved_list/
+        # persist) on the pywebview JS-API + task-queue threads while
+        # mutated there AND from the HTTP API thread. Without it, a
+        # mutation mid-iteration raises "dictionary changed size during
+        # iteration" and silently aborts a state()/persist pass. Rule:
+        # hold it only for the dict operation itself (copy-then-iterate),
+        # never across engine calls or _persist_models().
         self._rows_lock = threading.Lock()
         self._saved_data: dict[str, dict] = {}
         self._auto_rec: dict[str, bool] = {}
         self._model_q: dict[str, int] = {}
         self._ranks: dict[str, int] = {
             k: int(v) for k, v in (self.settings.ranks or {}).items() if v}
+        # Cross-site identity links (see links.py) — additive settings keys,
+        # guarded by _rows_lock like the other shared model collections.
+        self._links: list[list[str]] = model_links.sanitize(
+            self.settings.model_links)
+        self._link_ignores: list[list[str]] = [
+            sorted(x) for x in (self.settings.link_ignores or [])
+            if isinstance(x, (list, tuple))]
         self._vip: set = {k.lower() for k in (self.settings.vip_list or [])}
         self.recorder.quality_global = self.settings.max_quality
         self.recorder.quality_overrides = self._model_q
@@ -220,6 +235,11 @@ class WebCore:
 
         self._restore_models()
         self._start_api_server()
+        if settings_mod.LOAD_WARNING:
+            self._log_add(settings_mod.LOAD_WARNING, "error")
+        audit.log_event("startup", source="ui", app="web",
+                        version=APP_VERSION, recorder=len(self._rows),
+                        saved=len(self._saved_data), ranked=len(self._ranks))
         if classic._is_cloud_synced(self.settings.output_dir):
             self._log_add("⚠ Output folder is inside a cloud-synced directory "
                           "(OneDrive/Dropbox) — sync uploads compete with "
@@ -297,6 +317,11 @@ class WebCore:
                 self._vip.add(kl); changed = True
             elif not add and kl in self._vip:
                 self._vip.discard(kl); changed = True
+            else:
+                continue
+            site, _, name = kl.partition(":")
+            audit.log_event("vip_add" if add else "vip_remove",
+                            name=name, site=site, source="ui")
         if changed:
             self.settings.vip_list = sorted(self._vip)
             self._saved_version += 1     # refresh Saved rows' VIP flags
@@ -356,8 +381,15 @@ class WebCore:
     # ── Persistence (same schema as the classic app) ──────────────────────────
 
     def _persist_models(self):
+        # Snapshot every shared collection under the lock, then build the
+        # settings payload from the copies — the comprehensions execute
+        # Python per item and are interruptible, so iterating the live dicts
+        # here loses a race against the js_api / HTTP API threads.
         with self._rows_lock:
             row_keys = list(self._rows)
+            saved_items = [dict(d) for d in self._saved_data.values()]
+            saved_sids = set(self._saved_data)
+            ranks = dict(self._ranks)
         self.settings.models = [
             {"name": k.split(":")[1], "site": k.split(":")[0],
              "auto_rec": self._auto_rec.get(k, False),
@@ -366,13 +398,19 @@ class WebCore:
         ]
         self.settings.saved_models = [
             {"name": d["name"], "site": d["site"]}
-            for d in self._saved_data.values()
+            for d in saved_items
         ]
         row_set = set(row_keys)
         self.settings.ranks = {
-            k: v for k, v in self._ranks.items()
-            if v and (k in row_set or f"saved:{k}" in self._saved_data)
+            k: v for k, v in ranks.items()
+            if v and (k in row_set or f"saved:{k}" in saved_sids)
         }
+        # Links are deliberately NOT pruned to tracked models — a Clear
+        # Recorder (or a temporary remove) must never dissolve the user's
+        # hand-made identity groups.
+        with self._rows_lock:
+            self.settings.model_links = [list(g) for g in self._links]
+            self.settings.link_ignores = [list(p) for p in self._link_ignores]
         save_settings(self.settings)
 
     def _restore_models(self):
@@ -402,7 +440,7 @@ class WebCore:
             self._rows[key] = True
         self._finish_add_recorder(name, site)
 
-    def _finish_add_recorder(self, name: str, site: str):
+    def _finish_add_recorder(self, name: str, site: str, source: str = "ui"):
         """Engine/persist side of adding to Recorder. The API path
         (_handle_add) writes the _rows entry synchronously — before this runs
         on the task-queue thread — so a /rank call arriving right after /add
@@ -411,49 +449,67 @@ class WebCore:
         self.recorder.add_model(name, site, "recorder")
         self._auto_rec.setdefault(key, False)
         self._persist_models()
+        audit.log_event("recorder_add", name=name, site=site, source=source)
         self._log_add(f"Added to Recorder: {name} ({site})", "accent")
 
     def _add_to_saved(self, name: str, site: str):
         sid = self._saved_key(name, site)
-        if sid in self._saved_data:
+        with self._rows_lock:
+            if sid in self._saved_data:
+                already = True
+            else:
+                already = False
+                self._saved_data[sid] = {"name": name, "site": site}
+        if already:
             self._log_add(f"{name} ({site}) is already in Saved Models.", "warn")
             return
-        self._saved_data[sid] = {"name": name, "site": site}
         self._finish_add_saved(name, site)
 
-    def _finish_add_saved(self, name: str, site: str):
+    def _finish_add_saved(self, name: str, site: str, source: str = "ui"):
         """See _finish_add_recorder — same split, same reason."""
         if self._monitoring_saved:
             self.recorder.add_model(name, site, "saved")
         self._saved_version += 1
         self._persist_models()
+        audit.log_event("saved_add", name=name, site=site, source=source)
         self._log_add(f"⭐ Added to Saved Models: {name} ({site})", "accent")
 
-    def _remove_saved(self, sid: str, persist: bool = True):
-        if sid not in self._saved_data:
-            return
-        self._saved_data.pop(sid, None)
-        _, site, name = sid.split(":", 2)
+    def _remove_saved(self, sid: str, persist: bool = True,
+                      source: str = "ui") -> bool:
+        """Returns True when the sid was actually removed (so bulk callers
+        can report an accurate count)."""
+        try:
+            _, site, name = sid.split(":", 2)
+        except ValueError:
+            return False
         with self._rows_lock:
-            still_tracked = f"{site}:{name}" in self._rows
-        if not still_tracked:
-            self._ranks.pop(self._rank_key(name, site), None)
+            if sid not in self._saved_data:
+                return False
+            self._saved_data.pop(sid, None)
+            if f"{site}:{name}" not in self._rows:
+                self._ranks.pop(self._rank_key(name, site), None)
+        audit.log_event("saved_remove", name=name, site=site, source=source)
         self.recorder.remove_model(name, site, "saved")
         self._saved_version += 1
         if persist:
             self._persist_models()
             self._log_add(f"Removed from Saved Models: {name} ({site})", "warn")
+        return True
 
-    def _do_remove_from_recorder(self, name: str, site: str):
+    def _do_remove_from_recorder(self, name: str, site: str,
+                                 source: str = "ui", log_audit: bool = True):
         key = f"{site}:{name.lower()}"
+        if log_audit:
+            audit.log_event("recorder_remove", name=name, site=site,
+                            source=source)
         self.recorder.remove_model(name, site, "recorder")
         with self._rows_lock:
             self._rows.pop(key, None)
+            if self._saved_key(name, site) not in self._saved_data:
+                self._ranks.pop(self._rank_key(name, site), None)
         self._auto_rec.pop(key, None)
         self._model_q.pop(key, None)
         self._size_cache.pop(key, None)
-        if self._saved_key(name, site) not in self._saved_data:
-            self._ranks.pop(self._rank_key(name, site), None)
         self._persist_models()
         self._log_add(f"Removed model: {name} ({site})", "warn")
 
@@ -461,21 +517,203 @@ class WebCore:
         self._auto_rec[key] = val
         self._persist_models()
 
-    def _set_rank_many(self, items, rank: int) -> int:
+    @staticmethod
+    def _stars(rank: int) -> str:
+        r = max(0, min(5, int(rank or 0)))
+        return "★" * r + "☆" * (5 - r)
+
+    def _set_rank_many(self, items, rank: int, source: str = "ui") -> int:
         rank = max(0, min(5, int(rank)))
+        items = self._expand_linked(items)
         changed = 0
-        for name, site in items:
-            k = self._rank_key(name, site)
-            if int(self._ranks.get(k, 0) or 0) != rank:
-                changed += 1
-            if rank:
-                self._ranks[k] = rank
-            else:
-                self._ranks.pop(k, None)
+        skipped_untracked = 0
+        first_old = None
+        events = []   # audit lines are file I/O — emit them after the lock
+        with self._rows_lock:
+            for name, site in items:
+                k = self._rank_key(name, site)
+                # A rank must belong to a model that's on a list (same rule as
+                # the /rank API) — e.g. a Player tile whose model was just
+                # removed would otherwise store an orphan in-memory rank that
+                # silently vanishes on the next persist. Clearing is always OK.
+                if rank and k not in self._rows and \
+                        f"saved:{k}" not in self._saved_data:
+                    skipped_untracked += 1
+                    continue
+                old = int(self._ranks.get(k, 0) or 0)
+                if old != rank:
+                    changed += 1
+                    if first_old is None:
+                        first_old = old
+                    events.append((name, site, old))
+                if rank:
+                    self._ranks[k] = rank
+                else:
+                    self._ranks.pop(k, None)
+        for name, site, old in events:
+            audit.log_event("rank_change", name=name, site=site,
+                            source=source, old=old, new=rank)
         if changed:
+            if len(items) == 1:
+                n0, s0 = items[0]
+                self._log_add(f"⭐ Rank {self._stars(first_old)} → "
+                              f"{self._stars(rank)}: {n0} ({s0})", "accent")
+            else:
+                self._log_add(f"⭐ Rank → {self._stars(rank)} for {changed} "
+                              f"model(s)", "accent")
             self._saved_version += 1
             self._persist_models()
+        if skipped_untracked:
+            self._log_add(f"Rank not saved for {skipped_untracked} model(s) — "
+                          f"add them to Saved Models or the Recorder first.",
+                          "warn")
         return changed
+
+    # ── Cross-site identity links (aka groups) ────────────────────────────────
+    # Same semantics as the classic app: a group of "site:name" keys is one
+    # person; ranks stay per-model in storage, linking only makes rank changes
+    # propagate. All group reads/writes take _rows_lock (never call these
+    # while already holding it — the lock is not reentrant).
+
+    def _expand_linked(self, items):
+        """(name, site) list → same list plus every linked alias, deduped."""
+        with self._rows_lock:
+            links_copy = [list(g) for g in self._links]
+        out, seen = [], set()
+        for name, site in items:
+            key = model_links.norm_key(name, site)
+            for k in [key] + model_links.aka(links_copy, key):
+                if k not in seen:
+                    seen.add(k)
+                    n, s = model_links.split_key(k)
+                    out.append((n, s))
+        return out
+
+    def _link_aka(self, name: str, site: str) -> list:
+        key = model_links.norm_key(name, site)
+        with self._rows_lock:
+            return list(model_links.aka(self._links, key))
+
+    def _tracked_link_keys(self):
+        with self._rows_lock:
+            keys = set(k.lower() for k in self._rows)
+            keys.update(sid.split(":", 1)[1].lower() for sid in self._saved_data)
+        return keys
+
+    def _links_payload(self) -> dict:
+        tracked = self._tracked_link_keys()
+        with self._rows_lock:
+            groups = [list(g) for g in self._links]
+            ignores = [list(p) for p in self._link_ignores]
+        return {"ok": True, "links": groups,
+                "suggestions": model_links.suggestions(groups, tracked, ignores)}
+
+    def _finish_link(self, key_a: str, key_b: str, source: str = "api"):
+        """Post-link bookkeeping: highest rank in the group wins everywhere,
+        persist + audit + log. Membership was merged by the caller."""
+        with self._rows_lock:
+            group = list(model_links.find_group(self._links, key_a)
+                         or [key_a, key_b])
+        pairs = [model_links.split_key(k) for k in group]
+        top = max((self._get_rank(n, s) for n, s in pairs), default=0)
+        if top:
+            self._set_rank_many([pairs[0]], top, source=source)  # persists
+        else:
+            self._persist_models()
+        self._saved_version += 1        # aka markers in the tables changed
+        na, sa = model_links.split_key(key_a)
+        audit.log_event("link_add", name=na, site=sa, source=source,
+                        other=key_b, group=group)
+        self._log_add(f"🔗 Linked {key_a} ↔ {key_b}"
+                      f"{f' (rank ★{top} applied to all)' if top else ''}",
+                      "accent")
+
+    def _finish_unlink(self, key: str, source: str = "api"):
+        self._persist_models()
+        self._saved_version += 1
+        n, s = model_links.split_key(key)
+        audit.log_event("link_remove", name=n, site=s, source=source)
+        self._log_add(f"🔗 Unlinked {key}", "accent")
+
+    def _apply_link_edit(self, key: str, slots: dict, source: str = "ui") -> dict:
+        """Link-editor Save: `slots` maps each OTHER site → the alias username
+        on that site ("" = no account there). Computes the diff against the
+        current group, unlinks dropped aliases, links new ones (auto-adding
+        untracked names to Saved Models first), then does the usual finish
+        (highest rank wins, persist, audit) once."""
+        added, removed, auto_added = [], [], []
+        with self._rows_lock:
+            group = model_links.find_group(self._links, key) or [key]
+            cur_by_site: dict = {}
+            for k in group:
+                if k == key:
+                    continue
+                n, s = model_links.split_key(k)
+                cur_by_site.setdefault(s, []).append(k)
+            for s, want_name in slots.items():
+                want = model_links.norm_key(want_name, s) if want_name else None
+                for c in cur_by_site.get(s, []):
+                    if c != want:                     # dropped or replaced
+                        model_links.unlink(self._links, c)
+                        removed.append(c)
+                if want and want not in cur_by_site.get(s, []):
+                    if want != key:
+                        if (want not in self._rows
+                                and f"saved:{want}" not in self._saved_data):
+                            self._saved_data[f"saved:{want}"] = {
+                                "name": want_name, "site": s}
+                            auto_added.append((want_name, s))
+                        model_links.link(self._links, key, want)
+                        added.append(want)
+            final = list(model_links.find_group(self._links, key) or [key])
+
+        def _finish():
+            for n, s in auto_added:
+                self._finish_add_saved(n, s, source="link")
+            pairs = [model_links.split_key(k) for k in final]
+            top = max((self._get_rank(n, s) for n, s in pairs), default=0)
+            if top and len(final) > 1:
+                self._set_rank_many([pairs[0]], top, source=source)  # persists
+            else:
+                self._persist_models()
+            self._saved_version += 1
+            n0, s0 = model_links.split_key(key)
+            audit.log_event("link_edit", name=n0, site=s0, source=source,
+                            group=final, added=added, removed=removed)
+            self._log_add(f"🔗 Links updated for {key}: "
+                          f"{len(final)} account(s) in the group", "accent")
+        self.after(0, _finish)
+        return {"ok": True, "group": final,
+                "added": added, "removed": removed,
+                "auto_added": [f"{s}:{n}" for n, s in auto_added]}
+
+    def _finish_link_bulk(self, first_keys: list, source: str = "ui"):
+        """Post-bulk-link bookkeeping: per group, highest rank wins (written
+        directly — one persist at the end instead of one per group)."""
+        rank_events = []
+        with self._rows_lock:
+            for key in first_keys:
+                group = model_links.find_group(self._links, key)
+                if not group:
+                    continue
+                ranks = {k: int(self._ranks.get(k, 0) or 0) for k in group}
+                top = max(ranks.values(), default=0)
+                if not top:
+                    continue
+                for k, old in ranks.items():
+                    if old != top:
+                        self._ranks[k] = top
+                        n, s = model_links.split_key(k)
+                        rank_events.append((n, s, old, top))
+        for n, s, old, new in rank_events:
+            audit.log_event("rank_change", name=n, site=s, source="link",
+                            old=old, new=new)
+        audit.log_event("link_bulk", source=source, count=len(first_keys))
+        self._persist_models()
+        self._saved_version += 1
+        self._log_add(f"🔗 Linked {len(first_keys)} same-username group(s)"
+                      f"{f' · {len(rank_events)} rank(s) synced' if rank_events else ''}",
+                      "accent")
 
     def _set_quality(self, keys: list, height: int):
         for key in keys:
@@ -526,7 +764,11 @@ class WebCore:
             def _finish():
                 for key in row_keys:
                     site, name = key.split(":", 1)
-                    self._do_remove_from_recorder(name, site)
+                    self._do_remove_from_recorder(name, site, log_audit=False)
+                audit.log_event("clear_recorder",
+                                source="api" if via_api else "ui",
+                                count=len(row_keys), stopped=stopped,
+                                models=sorted(row_keys))
                 self._log_add(
                     "Recorder cleared%s — %d download(s) stopped."
                     % (" (via API)" if via_api else "", stopped), "warn")
@@ -554,7 +796,9 @@ class WebCore:
             self._monitoring_saved = False
             self._log_add("Saved scanner stopped.", "warn")
         else:
-            for d in self._saved_data.values():
+            with self._rows_lock:
+                saved_items = list(self._saved_data.values())
+            for d in saved_items:
                 self.recorder.add_model(d["name"], d["site"], "saved", quiet=True)
             if self.recorder.start_monitor("saved"):
                 self._monitoring_saved = True
@@ -1154,21 +1398,26 @@ class WebCore:
             time.sleep(2.0)
 
     def _check_for_updates(self):
+        """Re-checks every 24 h so a long-running app still learns about a
+        release (a single startup check never fires again)."""
         import urllib.request
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        try:
-            req = urllib.request.Request(
-                url, headers={"Accept": "application/vnd.github+json",
-                              "User-Agent": f"Scr33nX/{APP_VERSION}"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return
-        latest = str(data.get("tag_name") or "").strip()
-        cur = classic.StreamRecorderApp._parse_ver(APP_VERSION)
-        new = classic.StreamRecorderApp._parse_ver(latest)
-        if new and new > cur:
-            self._update_latest = latest
+        while True:
+            try:
+                req = urllib.request.Request(
+                    url, headers={"Accept": "application/vnd.github+json",
+                                  "User-Agent": f"Scr33nX/{APP_VERSION}"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                latest = str(data.get("tag_name") or "").strip()
+                cur = classic.StreamRecorderApp._parse_ver(APP_VERSION)
+                new = classic.StreamRecorderApp._parse_ver(latest)
+                if new and new > cur:
+                    self._update_latest = latest
+                    return   # pill is up — no need to keep polling
+            except Exception:
+                pass
+            time.sleep(86400)
 
     # ── Dashboard / snapshot ──────────────────────────────────────────────────
 
@@ -1205,6 +1454,7 @@ class WebCore:
         models = []
         with self._rows_lock:
             row_keys = sorted(self._rows)
+            links_copy = [list(g) for g in self._links]
         for key in row_keys:
             site, name = key.split(":", 1)
             cfg = self.recorder.models.get(key)
@@ -1227,10 +1477,13 @@ class WebCore:
                 "saved": self._saved_key(name, site) in self._saved_data,
                 "q": self._model_q.get(key, 0),
                 "vip": key.lower() in self._vip,
+                "aka": model_links.aka(links_copy, key.lower()),
             })
         # Saved statuses: only non-offline models are sent; absence = offline.
         saved_status = {}
-        for sid, d in list(self._saved_data.items()):
+        with self._rows_lock:
+            saved_snapshot = list(self._saved_data.items())
+        for sid, d in saved_snapshot:
             key = f"{d['site']}:{d['name'].lower()}"
             cfg = self.recorder.models.get(key)
             if not cfg or cfg.status == ModelStatus.OFFLINE:
@@ -1287,11 +1540,93 @@ class Bridge:
 
     def saved_list(self):
         c = self._core
+        with c._rows_lock:
+            snapshot = sorted(c._saved_data.items())
+            links_copy = [list(g) for g in c._links]
         items = [{"sid": sid, "name": d["name"], "site": d["site"],
                   "rank": c._get_rank(d["name"], d["site"]),
-                  "vip": f"{d['site']}:{d['name']}".lower() in c._vip}
-                 for sid, d in sorted(c._saved_data.items())]
+                  "vip": f"{d['site']}:{d['name']}".lower() in c._vip,
+                  "aka": model_links.aka(
+                      links_copy, f"{d['site']}:{d['name']}".lower())}
+                 for sid, d in snapshot]
         return {"version": c._saved_version, "items": items}
+
+    # ── Cross-site identity links ──
+    def links(self):
+        return self._core._links_payload()
+
+    def link_models(self, keys):
+        """Link 2+ tracked models ("site:name" or "saved:site:name" keys) into
+        one group — used by the Links dialog (manual pair or a same-name
+        suggestion's whole key set)."""
+        ks = [self._norm_key(k) for k in (keys or [])]
+        ks = list(dict.fromkeys(ks))          # dedupe, keep order
+        if len(ks) < 2:
+            return {"ok": False, "error": "pick at least two models"}
+        c = self._core
+        with c._rows_lock:
+            for a, b in zip(ks, ks[1:]):
+                model_links.link(c._links, a, b)
+        c.after(0, lambda: c._finish_link(ks[0], ks[1], source="ui"))
+        return {"ok": True, "group": ks}
+
+    def unlink_model(self, key):
+        k = self._norm_key(key)
+        c = self._core
+        with c._rows_lock:
+            found = model_links.unlink(c._links, k)
+        if not found:
+            return {"ok": False, "error": "model is not linked"}
+        c.after(0, lambda: c._finish_unlink(k, source="ui"))
+        return {"ok": True}
+
+    def link_ignore(self, keys):
+        """Dismiss a same-name suggestion (hidden until its members change)."""
+        ks = sorted({self._norm_key(k) for k in (keys or [])})
+        if len(ks) < 2:
+            return {"ok": False, "error": "nothing to ignore"}
+        c = self._core
+        with c._rows_lock:
+            if ks not in c._link_ignores:
+                c._link_ignores.append(ks)
+        c.after(0, c._persist_models)
+        return {"ok": True}
+
+    _LINK_SITES = ("chaturbate", "stripchat", "camsoda", "myfreecams")
+
+    def apply_link_editor(self, key, slots):
+        """Link-editor Save. `slots` = {site: username or ""} for the sites
+        other than the model's own; unknown usernames are auto-added to
+        Saved Models and linked in one step."""
+        k = self._norm_key(key)
+        name, site = k.split(":", 1)[1], k.split(":", 1)[0]
+        clean: dict = {}
+        for s, v in (slots or {}).items():
+            s = str(s).strip().lower()
+            if s not in self._LINK_SITES or s == site:
+                continue
+            v = str(v or "").strip().lower()
+            if v and not re.fullmatch(r"[a-z0-9_.-]+", v):
+                return {"ok": False, "error": f"invalid username: {v}"}
+            clean[s] = v
+        return self._core._apply_link_edit(k, clean, source="ui")
+
+    def link_all_suggestions(self):
+        """Bulk-link every same-username suggestion (the editor's 'Link all'
+        button). Returns how many groups were linked."""
+        c = self._core
+        payload = c._links_payload()
+        firsts = []
+        with c._rows_lock:
+            for sug in payload["suggestions"]:
+                ks = sug["keys"]
+                for a, b in zip(ks, ks[1:]):
+                    model_links.link(c._links, a, b)
+                firsts.append(ks[0])
+        if not firsts:
+            return {"ok": True, "linked": 0}
+        c.after(0, lambda: c._finish_link_bulk(firsts, source="ui"))
+        return {"ok": True, "linked": len(firsts)}
 
     @staticmethod
     def _norm_key(k):
@@ -1544,21 +1879,23 @@ class Bridge:
         if not name:
             return {"ok": False, "error": "Could not parse a username."}
         sid = self._core._saved_key(name, site)
-        if sid in self._core._saved_data:
-            return {"ok": False, "error": f"{name} ({site}) is already in Saved Models."}
-        # Write synchronously so a set_rank() call right behind this one
-        # doesn't race the deferred _finish_add_saved — see _handle_add.
-        self._core._saved_data[sid] = {"name": name, "site": site}
+        # Write synchronously (under the lock) so a set_rank() call right
+        # behind this one doesn't race the deferred _finish_add_saved — see
+        # _handle_add.
+        with self._core._rows_lock:
+            if sid in self._core._saved_data:
+                return {"ok": False, "error": f"{name} ({site}) is already in Saved Models."}
+            self._core._saved_data[sid] = {"name": name, "site": site}
         self._core.after(0, lambda: self._core._finish_add_saved(name, site))
         return {"ok": True, "name": name, "site": site}
 
     def saved_remove(self, sids):
         c = self._core
         def _do():
-            for sid in list(sids or []):
-                c._remove_saved(str(sid), persist=False)
+            removed = sum(1 for sid in list(sids or [])
+                          if c._remove_saved(str(sid), persist=False))
             c._persist_models()
-            c._log_add(f"Removed {len(sids)} model(s) from Saved Models", "warn")
+            c._log_add(f"Removed {removed} model(s) from Saved Models", "warn")
         c.after(0, _do)
         return {"ok": True}
 
@@ -1575,6 +1912,8 @@ class Bridge:
                     c._rows[key] = True
                 c.recorder.add_model(name, site, "recorder", quiet=True)
                 c._auto_rec.setdefault(key, False)
+                audit.log_event("recorder_add", name=name, site=site,
+                                source="ui")
                 added += 1
             if added:
                 c._persist_models()
@@ -1598,6 +1937,8 @@ class Bridge:
                 if is_new:
                     c.recorder.add_model(name, site, "recorder", quiet=True)
                     c._auto_rec.setdefault(key, False)
+                    audit.log_event("recorder_add", name=name, site=site,
+                                    source="ui")
                 c._launch_recording(name, site)
                 n += 1
             if n:
@@ -1637,7 +1978,9 @@ class Bridge:
             except Exception:
                 pass
         updated = 0
-        for d in c._saved_data.values():
+        with c._rows_lock:
+            saved_items = [dict(d) for d in c._saved_data.values()]
+        for d in saved_items:
             k = f"{d['site'].lower()}:{d['name'].lower()}"
             if k in merged:
                 updated += 1
@@ -1650,6 +1993,7 @@ class Bridge:
         except Exception as e:
             return {"ok": False, "error": str(e)}
         kept = existing - updated
+        audit.log_event("export", source="ui", count=len(items), path=path)
         c._log_add(f"Exported {len(items)} saved model(s) → {path}", "success")
         msg = f"Wrote {len(items)} model(s) to:\n{path}"
         if existing:
@@ -1685,22 +2029,35 @@ class Bridge:
             rank = max(0, min(5, int(m.get("rank", 0) or 0)))
             sid = c._saved_key(n, s)
             rkey = c._rank_key(n, s)
-            if sid in c._saved_data:
-                if rank and c._get_rank(n, s) == 0:
-                    c._ranks[rkey] = rank
-                    ranked += 1
+            with c._rows_lock:
+                if sid in c._saved_data:
+                    if rank and int(c._ranks.get(rkey, 0) or 0) == 0:
+                        c._ranks[rkey] = rank
+                        was = "ranked"
+                    else:
+                        was = "skipped"
                 else:
-                    skipped += 1
-                continue
-            c._saved_data[sid] = {"name": n, "site": s}
-            if rank:
-                c._ranks[rkey] = rank
-            if c._monitoring_saved:
-                c.recorder.add_model(n, s, "saved", quiet=True)
-            added += 1
+                    c._saved_data[sid] = {"name": n, "site": s}
+                    if rank:
+                        c._ranks[rkey] = rank
+                    was = "added"
+            if was == "ranked":
+                audit.log_event("rank_change", name=n, site=s,
+                                source="import", old=0, new=rank)
+                ranked += 1
+            elif was == "skipped":
+                skipped += 1
+            else:
+                audit.log_event("saved_add", name=n, site=s, source="import",
+                                rank=rank or None)
+                if c._monitoring_saved:
+                    c.recorder.add_model(n, s, "saved", quiet=True)
+                added += 1
         if added or ranked:
             c._saved_version += 1
             c._persist_models()
+        audit.log_event("import", source="ui", path=path, added=added,
+                        ranked=ranked, skipped=skipped, invalid=invalid)
         c._log_add(f"Import: added {added}, ranked {ranked}, "
                    f"skipped {skipped} duplicate(s)" +
                    (f", {invalid} invalid" if invalid else ""),
@@ -1780,6 +2137,7 @@ class Bridge:
             "preview_engine": s.preview_engine,
             "preview_player_path": s.preview_player_path,
             "max_player_tiles": s.max_player_tiles,
+            "api_token": s.api_token,
             "quality_options": [{"label": l, "height": h}
                                 for l, h in QUALITY_OPTIONS.items()],
         }
@@ -1828,6 +2186,7 @@ class Bridge:
         s.preview_engine        = str(p.get("preview_engine", s.preview_engine))
         s.preview_player_path   = str(p.get("preview_player_path", "")).strip()
         s.max_player_tiles      = max(1, min(100, _int(p.get("max_player_tiles"), s.max_player_tiles) or s.max_player_tiles))
+        s.api_token             = str(p.get("api_token", s.api_token)).strip()
         c.recorder.quality_global = s.max_quality
         c.recorder.auto_downgrade_enabled = s.auto_downgrade_enabled
         c.recorder.playwright_fallback_enabled = s.playwright_fallback_enabled

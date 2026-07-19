@@ -12,7 +12,7 @@ def _try_winotify(title: str, body: str, secs: int) -> bool:
         # winotify only exposes "short" (~5 s) / "long" (~25 s); Windows itself
         # controls the exact lifetime, so the numeric seconds are a hint.
         toast = Notification(
-            app_id="StreamRecorder",
+            app_id="Scr33nX",
             title=title,
             msg=body,
             duration="long" if secs >= 8 else "short",

@@ -21,15 +21,18 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 ### Monitoring & UI
 - ✅ Modern black & red UI — a native window (Windows WebView2, no browser involved) with smooth animations, shadows, drag-rectangle multi-select, and collapsible per-site groups. The previous Tk interface is still available (see *Two interfaces* below)
 - ✅ **Version number** shown in the header next to the logo (`v2.1`) so you always know which build you're running
-- ✅ **Update check** — on startup Scr33nX quietly asks GitHub for the latest release; if a newer one exists, a clickable `● Update available` indicator appears in the header and opens the releases page. Runs in the background and fails silently when offline
+- ✅ **Update check** — Scr33nX quietly asks GitHub for the latest release (on startup, then re-checks every 24 h while running); if a newer one exists, a clickable `● Update available` indicator appears in the header and opens the releases page. Runs in the background and fails silently when offline
 - ✅ **Live bandwidth meter** in the header (`↓ X.X Mbps` download / `↑` Telegram upload) showing Scr33nX's total traffic — your indicator for when you're approaching your internet connection's limit
 - ✅ **Beta log file** — everything (Activity Log, ffmpeg stderr, relay warnings, crash tracebacks) is also written to `%LOCALAPPDATA%\Scr33nX\streamrecorder.log` (rotating, 5 MB × 3)
 - ✅ **Dropped-segment warnings** — get notified when a stream is losing segments because bandwidth can't keep up (toggle in Settings)
 - ✅ **▶ Stream preview** — right-click a model → **Preview** to watch its live stream. Opens in a standalone **mpv / VLC / ffplay** window by default (own process, minimal impact on recording), or an optional **embedded in-app** player (mpv or VLC) with play/pause/mute/volume. Pick the engine in Settings; plays through the same local relay the recorder uses
-- ✅ **▶ Player tab** *(default UI only)* — open several models as tiles picked from Recorder/Saved. Every open tile streams live and **muted** at once in a **Grid** wall so you can monitor several cams visually without the noise; click a tile to switch to **Theater** mode (that tile large + a thumbnail strip, still all playing, toggle strip Bottom/Side). The big Theater tile has player controls plus **▶ REC / ⏹ Stop** buttons to start/stop recording the model you're watching (same buttons in the embedded preview overlay, next to a live status badge). Tiles start streaming the moment you add them and keep streaming while you're on other tabs, so switching back to the Player never reloads them; the Grid scrolls when tiles overflow the window, and **🧹 Clear Player** removes every tile in one click (recordings and the other tabs are untouched). More open tiles means more concurrent streams, so the count is capped in Settings (**Max Player tiles**, default 9)
+- ✅ **▶ Player tab** *(default UI only)* — open several models as tiles picked from Recorder/Saved. Every open tile streams live and **muted** at once in a **Grid** wall so you can monitor several cams visually without the noise; click a tile to switch to **Theater** mode (that tile large + a thumbnail strip, still all playing, toggle strip Bottom/Side). The big Theater tile has player controls plus **▶ REC / ⏹ Stop** buttons to start/stop recording the model you're watching (same buttons in the embedded preview overlay, next to a live status badge). Tiles start streaming the moment you add them and keep streaming while you're on other tabs, so switching back to the Player never reloads them; the Grid scrolls when tiles overflow the window, **★ Fill Top Ranked** opens tiles for your highest-ranked models that are online right now (best rank first, up to the cap), and **🧹 Clear Player** removes every tile in one click (recordings and the other tabs are untouched). More open tiles means more concurrent streams, so the count is capped in Settings (**Max Player tiles**, default 9)
 - ✅ **✕ Remove Offline** — one-click toolbar button that removes every model currently showing **OFFLINE** from the Recorder (asks first; recording/private/checking rows and Saved Models are untouched)
 - ✅ **Saved Models** tab — view-only watchlist with online/offline status
 - ✅ **⭐ 1–5 star ranks** — rate any model on the Recorder or Saved Models tab (click a star, click it again to clear; or right-click → **Set Rank** for one row or a whole selection at once). Sortable **RANK** column, shared per-model across both tabs, and saved between sessions. The rank also shows (and is clickable) next to the model's name in the embedded preview overlay, below the name on Player-tab grid tiles, and next to the name in the big Theater tile *(default UI only)*
+- ✅ **Rank filter** *(default UI only)* — a **Rank: All ▾** dropdown next to the status filter on both the Recorder and Saved Models tabs shows only models ranked ★N-and-up (or only unranked ones); combines with the name and status filters
+- ✅ **Model audit log** — every add/remove (Recorder and Saved), every rank change (old → new), VIP changes, imports/exports and Clear Recorder are appended as one JSON line each to `%LOCALAPPDATA%\Scr33nX\models_audit.log` (rotating, 2 MB × 3), tagged with the source (`ui` / `api` / `import`) — so you can always reconstruct when a model appeared, vanished, or changed rank. Rank changes now also show in the Activity Log
+- ✅ **Config backups** — the settings file (models, Saved list, ranks) keeps 3 rotating backups; if it's ever corrupt/unreadable at startup, Scr33nX restores the newest good backup automatically instead of starting empty (the broken file is kept beside it as `.corrupt-<timestamp>`)
 - ✅ Windows desktop notifications (recording started/stopped/split/dropped segments)
 - ✅ Minimize to system tray
 - ✅ **⛔ Force Quit / Terminate** — a header button (and tray-menu item) that hard-kills Scr33nX and all its child processes (ffmpeg, relay, Chromium) instantly, like Task Manager's *End Task*; confirms first only if a recording is active
@@ -38,7 +41,9 @@ Recordings are pulled through a local smart relay that prefetches HLS segments i
 - ✅ Settings saved between sessions (models, output folder, max size, etc.)
 
 ### Integrations
-- ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page, plus 1–5 star rating right from the popup (for models already in Saved Models or Recorder); local API, port 5200
+- ✅ Browser extension (Chromium **and** Firefox) — one-click add from a model's page, plus 1–5 star rating right from the popup (for models already in Saved Models or Recorder); local API, port 5200. Supports the optional API token (⚙ **API token…** link at the bottom of the popup)
+- ✅ Extension live badges — dynamic toolbar badge (REC / ON / OFF / ★ on model pages, active-recording count elsewhere), status badges on model thumbnails while browsing the cam sites, and a right-click **Add to Recorder / Saved Models** menu on model links
+- ✅ Linked identities — 🔗 link the accounts one model has on different sites (same or different usernames): her star rank stays identical everywhere, and the extension shows an **amber REC** badge + "already recording on …" warning when you open (or scroll past) her other account while one is recording — no more double-recording the same person. Managed in the web UI (**🔗 Links** on the Saved tab, with same-username suggestions), by the bot, or via the API
 - ✅ Telegram upload pipeline (optional) — converts finished recordings and uploads them to a Telegram group/topic
 - ✅ **Chat-bot / agent control (OpenClaw)** — drive Scr33nX from your phone over Telegram/WhatsApp: text a link to record, stop one or all, add/remove from Saved, toggle the monitors/scanner/pipeline, and even open or close the app. Everything runs through the same local API. Full setup: **[OPENCLAW-HOWTO.md](docs/OPENCLAW-HOWTO.md)**.
 
@@ -101,6 +106,13 @@ Only run **one instance at a time** — both share the same control port
 
 The extension adds models to Scr33nX with one click while you're on their page, and lets you set a 1–5 star rank from the popup once the model is in Saved Models or the Recorder. The app must be running (it listens on `http://localhost:5200`).
 
+It also shows live status without opening the popup:
+- **Dynamic toolbar badge** — on a model's page the icon shows **REC** (red, recording), **amber REC** (a linked account of this model is recording on another site), **ON** (green, online in your Recorder), **OFF** (grey, in Recorder but idle) or **★** (blue, in Saved Models). On every other tab it shows the **number of active recordings**. The popup lists the model's linked accounts with their live state and warns before you start a duplicate recording.
+- **Listing badges** — on Chaturbate / Stripchat / Camsoda / MFC browse pages, thumbnails of tracked models get a small corner badge (pulsing **REC** / **ON** / **OFF** / **★**), so you can see who's already being recorded while scrolling.
+- **Right-click add** — right-click any model link/thumbnail → **Add to Scr33nX Recorder** or **Add to Scr33nX Saved Models**, without opening the model's page.
+
+> **Firefox note:** MV3 host permissions are opt-in — after loading the add-on, open `about:addons` → Scr33nX → **Permissions** and grant access to the cam sites, or the listing badges won't appear.
+
 **Chromium browsers (Chrome / Brave / Opera / Edge):**
 1. Open `chrome://extensions` (or `brave://extensions`, `opera://extensions`, `edge://extensions`)
 2. Enable **Developer mode** (toggle in the corner)
@@ -125,7 +137,7 @@ The extension adds models to Scr33nX with one click while you're on their page, 
 4. When the model goes offline, the recording stops automatically
 5. If you set a **Max File Size**, the recording splits into numbered parts (`_part001`, `_part002`, …) automatically; a recording that never reaches the limit keeps a single, unsuffixed file
 6. Watch the **↓ Mbps** meter in the header while recording several models — if your streams start dropping segments you'll also get a warning notification
-7. **Rate models** — give any model 1–5 stars on the Recorder or Saved Models tab (click a star in the **RANK** column, or right-click → **Set Rank** to rate a whole selection), then click the `RANK` header to sort by it. You can also rate from the browser-extension popup. Ranks stay with the model across both tabs and persist between sessions
+7. **Rate models** — give any model 1–5 stars on the Recorder or Saved Models tab (click a star in the **RANK** column, or right-click → **Set Rank** to rate a whole selection), then click the `RANK` header to sort by it, or use the **Rank: All ▾** filter next to the status filter to show only ★N-and-up (or unranked) models. You can also rate from the browser-extension popup. Ranks stay with the model across both tabs and persist between sessions; every change is logged (Activity Log + `models_audit.log`)
 8. **Preview a stream** — right-click an **online (or recording)** model on the **Recorder or Saved Models** tab → **Preview** to watch it live. (Offline models are skipped with a note — a dead stream can crash an embedded player.) It opens in an external mpv/VLC/ffplay window by default; choose the engine (Auto/mpv/VLC) and switch to an embedded in-app player under **⚙ Settings → Stream preview**
 
 ### Settings (⚙ Settings tab)
@@ -150,6 +162,7 @@ The Settings tab also has a **🔍 System Check** panel that shows whether each 
 | Open links with | Which browser **Open in Browser** uses: *Ask each time*, *System default*, or a specific installed browser. You're prompted the first time (with a *Remember my choice* option); change or reset it here anytime. Right-click → **Open in Browser (choose…)** picks a one-off browser without changing this default |
 | Stream preview | How right-click → **Preview** plays a stream. **Mode:** *External window* (standalone player, lowest impact — default) or *Embedded (in-app)*. **Preview engine:** *Auto* / *mpv* / *VLC* (Auto uses whatever's installed; external also falls back to ffplay). Optional **Player path** points at a specific `mpv.exe`/`vlc.exe` |
 | Max Player tiles | *(default UI only)* Caps how many tiles you can have open at once in the **▶ Player** tab (1–100, default 9). Every open tile streams live (muted), so this is also a bandwidth/CPU cap — lower it if opening many tiles strains your connection |
+| API token (Local API) | *(default UI; optional, empty by default)* Shared secret for the port-5200 control API. When set, every request must send it in the `X-Api-Token` header or get **401** — blocks other local apps/webpages from controlling Scr33nX. Give the same token to the browser extension (**⚙ API token…** in its popup) and to the OpenClaw bot (`SCR33NX_TOKEN` env var; the bundled `scr33nx_ctl.py` also reads it from the config file automatically). Applies immediately on Save |
 
 ---
 
@@ -211,11 +224,15 @@ Settings (including the stage choices) are stored in `Pipeline/pipeline_settings
 
 ## Local Control API (port 5200)
 
-While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, used by the browser extensions **and** by external automation (e.g. the OpenClaw chat bot — see **[OPENCLAW-HOWTO.md](docs/OPENCLAW-HOWTO.md)**). It is loopback-only (no remote access) and unauthenticated.
+While Scr33nX is running it serves a small HTTP API on `http://127.0.0.1:5200`, used by the browser extensions **and** by external automation (e.g. the OpenClaw chat bot — see **[OPENCLAW-HOWTO.md](docs/OPENCLAW-HOWTO.md)**). It is loopback-only (no remote access) and open by default; set an **API token** in ⚙ Settings → Local API to require every request to carry it in the `X-Api-Token` header (or `?token=` on GETs) — anything without it gets `401 unauthorized`. The browser extension (⚙ **API token…** in its popup) and `scr33nx_ctl.py` (reads the config file, or the `SCR33NX_TOKEN` env var) both support it.
 
 | Method & path | Body | Action |
 |---|---|---|
 | `GET /status` | `?name=&site=` | model state: `in_recorder`, `in_saved`, `status`, `auto`, `rank` |
+| `GET /models` | — | bulk snapshot: every Recorder + Saved model with the same per-model fields as `/status`, plus per-model `aka`/`linked_recording` and a global `recording` count — one call for clients tracking many models (the extension badges use it) |
+| `GET /links` | — | identity groups (`links`) + same-username-on-another-site `suggestions` |
+| `POST /link` | `{a:{name,site}, b:{name,site}}` | mark two tracked models as the same person — ranks sync across the group (highest wins), `/status` & `/models` report the aliases |
+| `POST /unlink` | `{name, site}` | remove one model from its identity group |
 | `GET /dashboard` | — | aggregate snapshot: per-site (`CB`/`SC`/`CS`/`MFC`) + `all` totals of `total`/`recording`/`online`/`offline` |
 | `POST /add` | `{name, site, target}` | add to `recorder` or `saved` |
 | `POST /record` | `{name, site, action}` | `start` / `stop` recording one model |
@@ -255,6 +272,8 @@ A command-line helper, **`src/scr33nx_ctl.py`**, wraps all of these (plus `open`
 - The app polls each model every N seconds (configurable, default 30s)
 - If a model is in a private show or temporarily offline, the app keeps checking and resumes when they go public/online
 - All settings are saved automatically when you click "💾 Save Settings". Models, AUTO flags, Saved Models and **star ranks** are also saved to disk **immediately on every change** (including changes made from the browser extension), so an abrupt close doesn't lose them
+- The settings file keeps **3 rotating backups** (`.bak`/`.bak2`/`.bak3` next to `~/.streamrecorder_config.json`). If the file is ever unreadable at startup, Scr33nX restores the newest good backup automatically (the broken file is preserved as `.corrupt-<timestamp>`) — your Saved Models and ranks can no longer be lost to a corrupt config
+- Every model-list change (add/remove/rank/VIP/import/export/clear) is also appended to `%LOCALAPPDATA%\Scr33nX\models_audit.log` as one JSON line with a timestamp and source (`ui`/`api`/`import`) — check it when you want to know when/how a model appeared, vanished, or changed rank
 - **Run only one Scr33nX at a time.** Two instances share the same settings file and overwrite each other's models/ranks. If you launch a second one it now warns you at startup (the control port is taken) and offers to close itself — accept unless you really know what you're doing
 - Changing or clearing an **existing** star rank by clicking the RANK column asks for confirmation first (misclick guard, app only); rating an unranked model stays one-click, and the browser extension is never prompted
 - If many simultaneous recordings drop segments (watch for ⚠ warnings), your total internet bandwidth is the limit. Each 1080p stream needs roughly 5–6 Mbps sustained. In order of preference: set a global **Max Quality** cap (720p roughly halves usage vs. unlimited), enable **⬇ Auto-Downgrade** so only struggling streams lose quality, or record fewer models at once.

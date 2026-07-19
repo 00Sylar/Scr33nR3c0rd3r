@@ -10,12 +10,14 @@ GITHUB_REPO = "00Sylar/Scr33nX"   # owner/repo, used for the update check
 
 import os
 import sys
+import hmac
 import json
 import time
 import math
 import random
 import subprocess
 import threading
+import contextlib
 import tkinter as tk
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -25,8 +27,11 @@ from typing import Optional
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import audit
+import links as model_links
 import recorder
 import cb_relay
+import settings as settings_mod
 from recorder import StreamRecorder, ModelStatus
 from settings import AppSettings, load_settings, save_settings, save_pipeline_settings
 from notifier import send_notification
@@ -201,16 +206,59 @@ _API_PORT = 5200  # v2 (TEST) uses 5200 to coexist with v1's 5199
 class _ApiHandler(BaseHTTPRequestHandler):
     _app: "StreamRecorderApp" = None  # set after App() is built
 
+    # ModelStatus → wire string, shared by /status and /models
+    _STATUS_STR = {
+        ModelStatus.OFFLINE:   "offline",
+        ModelStatus.ONLINE:    "online",
+        ModelStatus.RECORDING: "recording",
+        ModelStatus.CHECKING:  "checking",
+        ModelStatus.ERROR:     "error",
+        ModelStatus.PRIVATE:   "private",
+    }
+
+    def _auth_ok(self) -> bool:
+        """When Settings has an API token, every request must present it in
+        the X-Api-Token header (or ?token= for GET). Empty token (the
+        default) keeps the API open exactly as before."""
+        token = (getattr(getattr(self._app, "settings", None),
+                         "api_token", "") or "").strip()
+        if not token:
+            return True
+        sent = self.headers.get("X-Api-Token", "") or ""
+        if not sent:
+            qs = parse_qs(urlparse(self.path).query)
+            sent = qs.get("token", [""])[0]
+        return hmac.compare_digest(sent, token)
+
+    def _rows_guard(self):
+        """The web UI guards its shared dicts with _rows_lock; honor it here
+        so an /add landing mid-iteration can't corrupt a state pass. The
+        classic app has no lock — fall back to a no-op context."""
+        return getattr(self._app, "_rows_lock", None) or contextlib.nullcontext()
+
     def do_OPTIONS(self):
         self._cors(200)
         self.end_headers()
 
     def do_GET(self):
+        if not self._auth_ok():
+            self._json({"ok": False, "error": "unauthorized — set the API "
+                        "token from Scr33nX Settings in this client"}, 401)
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/dashboard":
             # Aggregate per-site + totals snapshot (read-only — safe off the
             # Tk thread, same as the /status reads below).
             self._json(self._app._api_dashboard())
+            return
+        if parsed.path == "/models":
+            # Bulk snapshot of every Recorder + Saved model — one call for
+            # clients that track many models at once (extension badges).
+            self._handle_models()
+            return
+        if parsed.path == "/links":
+            # Identity groups + same-name suggestions (read-only snapshot).
+            self._json(self._app._links_payload())
             return
         if parsed.path != "/status":
             self._json({"error": "not found"}, 404)
@@ -225,25 +273,89 @@ class _ApiHandler(BaseHTTPRequestHandler):
         key = f"{site}:{name}"
         sid = f"saved:{key}"
         cfg = app.recorder.models.get(key)
-        status_str = None
-        if cfg:
-            status_str = {
-                ModelStatus.OFFLINE:   "offline",
-                ModelStatus.ONLINE:    "online",
-                ModelStatus.RECORDING: "recording",
-                ModelStatus.CHECKING:  "checking",
-                ModelStatus.ERROR:     "error",
-                ModelStatus.PRIVATE:   "private",
-            }.get(cfg.status, "offline")
+        status_str = self._STATUS_STR.get(cfg.status, "offline") if cfg else None
+        # Linked identities: every alias with its own live state, plus a
+        # shortcut for "the same person is already recording elsewhere".
+        aka, linked_rec = [], None
+        for k2 in app._link_aka(name, site):
+            n2, s2 = model_links.split_key(k2)
+            cfg2 = app.recorder.models.get(k2)
+            st2 = self._STATUS_STR.get(cfg2.status, "offline") if cfg2 else None
+            aka.append({"name": n2, "site": s2, "status": st2,
+                        "in_recorder": k2 in app._rows,
+                        "in_saved": f"saved:{k2}" in app._saved_data,
+                        "rank": app._get_rank(n2, s2)})
+            if st2 == "recording" and linked_rec is None:
+                linked_rec = {"name": n2, "site": s2}
         self._json({
             "in_recorder": key in app._rows,
             "in_saved":    sid in app._saved_data,
             "status":      status_str,
             "auto":        app._auto_rec.get(key, False),
             "rank":        app._get_rank(name, site),
+            "aka":         aka,
+            "linked_recording": linked_rec,
         })
 
+    def _handle_models(self):
+        """GET /models — every Recorder + Saved model in one response, with the
+        same per-model fields as /status. Read-only snapshot (copy-then-read
+        under the rows guard), so it's safe off the Tk thread."""
+        app = self._app
+        with self._rows_guard():
+            rec_keys   = list(app._rows)
+            saved_keys = list(app._saved_data)
+            links_copy = [list(g) for g in app._links]
+        entries: dict = {}
+        for key in rec_keys:                      # "site:name"
+            site, _, name = key.partition(":")
+            entries[(site, name)] = {"in_recorder": True, "in_saved": False}
+        for sid in saved_keys:                    # "saved:site:name"
+            parts = sid.split(":", 2)
+            if len(parts) != 3:
+                continue
+            _, site, name = parts
+            e = entries.setdefault((site, name),
+                                   {"in_recorder": False, "in_saved": False})
+            e["in_saved"] = True
+        models, recording = [], 0
+        for (site, name), e in sorted(entries.items()):
+            key = f"{site}:{name}"
+            cfg = app.recorder.models.get(key)
+            status = self._STATUS_STR.get(cfg.status, "offline") if cfg else None
+            if status == "recording":
+                recording += 1
+            models.append({
+                "name": name, "site": site, "status": status,
+                "in_recorder": e["in_recorder"], "in_saved": e["in_saved"],
+                "auto": app._auto_rec.get(key, False),
+                "rank": app._get_rank(name, site),
+            })
+        # Second pass: linked identities. Statuses were just computed, so an
+        # alias look-up is a dict hit, not another engine read.
+        status_by_key = {f"{m['site']}:{m['name']}": m["status"] for m in models}
+        for m in models:
+            aka = model_links.aka(links_copy, f"{m['site']}:{m['name']}")
+            m["aka"] = aka
+            lr = None
+            for k2 in aka:
+                st2 = status_by_key.get(k2)
+                if st2 is None:                 # alias not tracked → ask engine
+                    cfg2 = app.recorder.models.get(k2)
+                    st2 = (self._STATUS_STR.get(cfg2.status, "offline")
+                           if cfg2 else None)
+                if st2 == "recording":
+                    n2, s2 = model_links.split_key(k2)
+                    lr = {"name": n2, "site": s2}
+                    break
+            m["linked_recording"] = lr
+        self._json({"ok": True, "recording": recording, "models": models})
+
     def do_POST(self):
+        if not self._auth_ok():
+            self._json({"ok": False, "error": "unauthorized — set the API "
+                        "token from Scr33nX Settings in this client"}, 401)
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/add":
             self._handle_add()
@@ -255,6 +367,10 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._handle_auto()
         elif parsed.path == "/rank":
             self._handle_rank()
+        elif parsed.path == "/link":
+            self._handle_link()
+        elif parsed.path == "/unlink":
+            self._handle_unlink()
         elif parsed.path == "/stop_all":
             self._handle_stop_all()
         elif parsed.path == "/clear":
@@ -304,11 +420,15 @@ class _ApiHandler(BaseHTTPRequestHandler):
         # rejected even though the client just got {"ok": true} — the star
         # rating silently doesn't save.
         if target == "saved":
-            app._saved_data[sid] = {"name": name, "site": site}
-            app.after(0, lambda n=name, s=site: app._finish_add_saved(n, s))
+            with self._rows_guard():
+                app._saved_data[sid] = {"name": name, "site": site}
+            app.after(0, lambda n=name, s=site:
+                      app._finish_add_saved(n, s, source="api"))
         else:
-            app._rows[key] = True
-            app.after(0, lambda n=name, s=site: app._finish_add_recorder(n, s))
+            with self._rows_guard():
+                app._rows[key] = True
+            app.after(0, lambda n=name, s=site:
+                      app._finish_add_recorder(n, s, source="api"))
         self._json({"ok": True})
 
     def _handle_record(self):
@@ -368,7 +488,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
             if sid not in app._saved_data:
                 self._json({"ok": False, "error": "Model is not in Saved Models"})
                 return
-            app.after(0, lambda s=sid: app._remove_saved(s))
+            app.after(0, lambda s=sid: app._remove_saved(s, source="api"))
             self._json({"ok": True})
             return
         if target != "recorder":
@@ -383,7 +503,8 @@ class _ApiHandler(BaseHTTPRequestHandler):
             self._json({"ok": False,
                         "error": "Stop the recording before removing"})
             return
-        app.after(0, lambda n=name, s=site: app._do_remove_from_recorder(n, s))
+        app.after(0, lambda n=name, s=site:
+                  app._do_remove_from_recorder(n, s, source="api"))
         self._json({"ok": True})
 
     def _handle_auto(self):
@@ -438,8 +559,74 @@ class _ApiHandler(BaseHTTPRequestHandler):
                                  "before ranking"})
             return
         app.after(0, lambda n=name, s=site, r=rank:
-                  app._set_rank_many([(n, s)], r))
+                  app._set_rank_many([(n, s)], r, source="api"))
         self._json({"ok": True, "rank": rank})
+
+    def _handle_link(self):
+        """POST /link {a:{name,site}, b:{name,site}} — mark two tracked models
+        as the same person. Group membership is merged synchronously (so an
+        immediate /status sees it); rank reconciliation + persist run on the
+        main thread like every other mutation."""
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+        pair = []
+        for side in ("a", "b"):
+            d = body.get(side) or {}
+            name = str(d.get("name", "")).strip().lower()
+            site = str(d.get("site", "")).strip().lower()
+            if not name or not site:
+                self._json({"ok": False,
+                            "error": f"missing name or site for '{side}'"}, 400)
+                return
+            if site not in ("chaturbate", "stripchat", "camsoda", "myfreecams"):
+                self._json({"ok": False,
+                            "error": f"unsupported site: {site}"}, 400)
+                return
+            pair.append(model_links.norm_key(name, site))
+        key_a, key_b = pair
+        if key_a == key_b:
+            self._json({"ok": False, "error": "cannot link a model to itself"})
+            return
+        app = self._app
+        # Both sides must be tracked — a link is metadata about models you
+        # keep, not a free-floating note.
+        for k in pair:
+            if k not in app._rows and f"saved:{k}" not in app._saved_data:
+                self._json({"ok": False,
+                            "error": f"{k} is not in Saved Models or the "
+                                     f"Recorder — add it first"})
+                return
+        with self._rows_guard():
+            group = list(model_links.link(app._links, key_a, key_b))
+        app.after(0, lambda: app._finish_link(key_a, key_b, source="api"))
+        self._json({"ok": True, "group": group})
+
+    def _handle_unlink(self):
+        """POST /unlink {name, site} — remove one model from its group."""
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._json({"ok": False, "error": "invalid JSON"}, 400)
+            return
+        name = str(body.get("name", "")).strip().lower()
+        site = str(body.get("site", "")).strip().lower()
+        if not name or not site:
+            self._json({"ok": False, "error": "missing name or site"}, 400)
+            return
+        app = self._app
+        key = model_links.norm_key(name, site)
+        with self._rows_guard():
+            found = model_links.unlink(app._links, key)
+        if not found:
+            self._json({"ok": False, "error": "model is not linked"})
+            return
+        app.after(0, lambda: app._finish_unlink(key, source="api"))
+        self._json({"ok": True})
 
     def _handle_stop_all(self):
         """Force-stop every active download and clear AUTO (no confirm dialog)."""
@@ -512,7 +699,7 @@ class _ApiHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Access-Control-Allow-Origin",  "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Api-Token")
 
     def _json(self, data, code=200):
         body = json.dumps(data).encode()
@@ -617,6 +804,14 @@ class StreamRecorderApp(tk.Tk):
             k: int(v) for k, v in (getattr(self.settings, "ranks", None) or {}).items()
             if v
         }
+        # Cross-site identity links: groups of "site:name" keys that are the
+        # same person (see links.py). Additive settings key — never touches
+        # models/saved_models/ranks.
+        self._links: list[list[str]] = model_links.sanitize(
+            getattr(self.settings, "model_links", None))
+        self._link_ignores: list[list[str]] = [
+            sorted(x) for x in (getattr(self.settings, "link_ignores", None) or [])
+            if isinstance(x, (list, tuple))]
         self._saved_built = False
         self._filter_jobs: dict[str, Optional[str]] = {"rec": None, "saved": None}
         # Last applied column sort per tree ("_site_"/"_ssite_" → (col, reverse)),
@@ -635,6 +830,11 @@ class StreamRecorderApp(tk.Tk):
         self._restore_models()
         self._start_api_server()
         self._privacy_init()
+        if settings_mod.LOAD_WARNING:
+            self._log_add(settings_mod.LOAD_WARNING, "error")
+        audit.log_event("startup", source="ui", app="classic",
+                        version=APP_VERSION, recorder=len(self._rows),
+                        saved=len(self._saved_data), ranked=len(self._ranks))
         if _is_cloud_synced(self.settings.output_dir):
             self._log_add("⚠ Output folder is inside a cloud-synced directory "
                           "(OneDrive/Dropbox) — sync uploads compete with "
@@ -673,24 +873,28 @@ class StreamRecorderApp(tk.Tk):
 
     def _check_for_updates(self):
         """Background: ask GitHub for the latest release and, if it's newer
-        than APP_VERSION, reveal the header update indicator. Runs off the Tk
-        thread; fails silently when offline. Never pops a modal (would freeze
-        the event loop) — see CLAUDE.md."""
+        than APP_VERSION, reveal the header update indicator. Re-checks every
+        24 h so a long-running app still learns about a release. Runs off the
+        Tk thread; fails silently when offline. Never pops a modal (would
+        freeze the event loop) — see CLAUDE.md."""
         import urllib.request
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        try:
-            req = urllib.request.Request(
-                url, headers={"Accept": "application/vnd.github+json",
-                              "User-Agent": f"Scr33nX/{APP_VERSION}"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return   # offline / rate-limited / no releases — stay quiet
-        latest = str(data.get("tag_name") or "").strip()
-        cur, new = self._parse_ver(APP_VERSION), self._parse_ver(latest)
-        if new and new > cur:
-            self.after(0, lambda: self._lbl_update.config(
-                text=f"● Update available ({latest})"))
+        while True:
+            try:
+                req = urllib.request.Request(
+                    url, headers={"Accept": "application/vnd.github+json",
+                                  "User-Agent": f"Scr33nX/{APP_VERSION}"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                latest = str(data.get("tag_name") or "").strip()
+                cur, new = self._parse_ver(APP_VERSION), self._parse_ver(latest)
+                if new and new > cur:
+                    self.after(0, lambda l=latest: self._lbl_update.config(
+                        text=f"● Update available ({l})"))
+                    return   # found one — the pill stays up; stop polling
+            except Exception:
+                pass   # offline / rate-limited / no releases — stay quiet
+            time.sleep(86400)
 
     # ── App icon ──────────────────────────────────────────────────────────────
 
@@ -1618,7 +1822,11 @@ class StreamRecorderApp(tk.Tk):
             def _finish():
                 for key in row_keys:
                     site, name = key.split(":", 1)
-                    self._do_remove_from_recorder(name, site)
+                    self._do_remove_from_recorder(name, site, log_audit=False)
+                audit.log_event("clear_recorder",
+                                source="api" if via_api else "ui",
+                                count=len(row_keys), stopped=stopped,
+                                models=sorted(row_keys))
                 self._uncheck_all("rec")
                 self._update_stats()
                 self._log_add(
@@ -1876,10 +2084,16 @@ class StreamRecorderApp(tk.Tk):
                 or self._status_filter_set("rec") is not None):
             self._schedule_filter("rec")  # respect an active filter
 
-    def _do_remove_from_recorder(self, name: str, site: str):
+    def _do_remove_from_recorder(self, name: str, site: str,
+                                 source: str = "ui", log_audit: bool = True):
         """Remove a model from the Recorder tab without a confirm dialog.
-        Shared by the right-click flow (after confirm) and the extension API."""
+        Shared by the right-click flow (after confirm) and the extension API.
+        `log_audit=False` is used by bulk clears, which write ONE summary
+        audit event instead of hundreds of per-model lines."""
         key = f"{site}:{name}"
+        if log_audit:
+            audit.log_event("recorder_remove", name=name, site=site,
+                            source=source)
         self.recorder.remove_model(name, site, "recorder")
         if self._tree.exists(key):
             self._tree.delete(key)
@@ -1915,6 +2129,7 @@ class StreamRecorderApp(tk.Tk):
             return
         for key in keys:
             site, name = key.split(":", 1)
+            audit.log_event("recorder_remove", name=name, site=site, source="ui")
             self.recorder.remove_model(name, site, "recorder")
             if self._tree.exists(key):
                 self._tree.delete(key)
@@ -3377,18 +3592,26 @@ class StreamRecorderApp(tk.Tk):
                    f"{self._rank_stars(cur)}  →  {self._rank_stars(new)}")
         return messagebox.askyesno("Change rank", msg, parent=self)
 
-    def _set_rank_many(self, items, rank: int) -> int:
+    def _set_rank_many(self, items, rank: int, source: str = "ui") -> int:
         """Set the 0-5 star rank on a list of (name, site) models — the single
         place ranks change. Updates the shared store, refreshes the matching
-        rows in BOTH trees (whichever exist), and persists once. Returns the
-        number of models whose rank actually changed."""
+        rows in BOTH trees (whichever exist), persists once, and logs the
+        change (Activity Log + audit trail). Returns the number of models
+        whose rank actually changed."""
         rank = max(0, min(5, int(rank)))
         stars = self._rank_stars(rank)
+        items = self._expand_linked(items)
         changed = 0
+        first_old = None
         for name, site in items:
             k = self._rank_key(name, site)
-            if int(self._ranks.get(k, 0) or 0) != rank:
+            old = int(self._ranks.get(k, 0) or 0)
+            if old != rank:
                 changed += 1
+                if first_old is None:
+                    first_old = old
+                audit.log_event("rank_change", name=name, site=site,
+                                source=source, old=old, new=rank)
             if rank:
                 self._ranks[k] = rank
             else:
@@ -3400,8 +3623,78 @@ class StreamRecorderApp(tk.Tk):
             if self._stree.exists(sid):
                 self._stree.set(sid, "rank", stars)
         if changed:
+            if len(items) == 1:
+                n0, s0 = items[0]
+                self._log_add(f"⭐ Rank {self._rank_stars(first_old)} → {stars}: "
+                              f"{n0} ({s0})", "accent")
+            else:
+                self._log_add(f"⭐ Rank → {stars} for {changed} model(s)",
+                              "accent")
             self._persist_models()
         return changed
+
+    # ── Cross-site identity links (aka groups) ────────────────────────────────
+    # A group of "site:name" keys = one person with accounts on several sites
+    # (see links.py). Ranks stay stored per-model exactly as before; linking
+    # only makes rank changes propagate to every member.
+
+    def _expand_linked(self, items):
+        """(name, site) list → same list plus every linked alias, deduped.
+        Applied inside _set_rank_many so one person keeps one rank across all
+        of her accounts, no matter which one you rated."""
+        out, seen = [], set()
+        for name, site in items:
+            key = model_links.norm_key(name, site)
+            for k in [key] + model_links.aka(self._links, key):
+                if k not in seen:
+                    seen.add(k)
+                    n, s = model_links.split_key(k)
+                    out.append((n, s))
+        return out
+
+    def _link_aka(self, name: str, site: str) -> list:
+        return model_links.aka(self._links,
+                               model_links.norm_key(name, site))
+
+    def _tracked_link_keys(self):
+        with (getattr(self, "_rows_lock", None) or contextlib.nullcontext()):
+            keys = set(k.lower() for k in self._rows)
+            keys.update(sid.split(":", 1)[1].lower() for sid in self._saved_data)
+        return keys
+
+    def _links_payload(self) -> dict:
+        """Groups + same-name suggestions (read-only, safe off-thread)."""
+        return {
+            "ok": True,
+            "links": [list(g) for g in self._links],
+            "suggestions": model_links.suggestions(
+                self._links, self._tracked_link_keys(), self._link_ignores),
+        }
+
+    def _finish_link(self, key_a: str, key_b: str, source: str = "api"):
+        """Post-link bookkeeping (main thread): highest rank in the group wins
+        everywhere, then persist + audit + Activity Log. The group membership
+        itself was already merged synchronously by the caller."""
+        group = model_links.find_group(self._links, key_a) or [key_a, key_b]
+        pairs = [model_links.split_key(k) for k in group]
+        top = max((self._get_rank(n, s) for n, s in pairs), default=0)
+        if top:
+            # _set_rank_many expands to the whole group and persists once.
+            self._set_rank_many([pairs[0]], top, source=source)
+        else:
+            self._persist_models()
+        na, sa = model_links.split_key(key_a)
+        audit.log_event("link_add", name=na, site=sa, source=source,
+                        other=key_b, group=list(group))
+        self._log_add(f"🔗 Linked {key_a} ↔ {key_b}"
+                      f"{f' (rank ★{top} applied to all)' if top else ''}",
+                      "accent")
+
+    def _finish_unlink(self, key: str, source: str = "api"):
+        self._persist_models()
+        n, s = model_links.split_key(key)
+        audit.log_event("link_remove", name=n, site=s, source=source)
+        self._log_add(f"🔗 Unlinked {key}", "accent")
 
     def _saved_rank(self, sid: str) -> int:
         _, site, name = sid.split(":", 2)
@@ -3460,7 +3753,7 @@ class StreamRecorderApp(tk.Tk):
         self._saved_data[sid] = {"name": name, "site": site}
         self._finish_add_saved(name, site)
 
-    def _finish_add_saved(self, name: str, site: str):
+    def _finish_add_saved(self, name: str, site: str, source: str = "ui"):
         """Widget/engine side of adding to Saved Models. The API path
         (_handle_add) writes the _saved_data entry synchronously — before this
         runs on the Tk thread — so a /rank call arriving right after /add sees
@@ -3474,6 +3767,7 @@ class StreamRecorderApp(tk.Tk):
         self._insert_saved_model(name, site)
         self._update_saved_count()
         self._persist_models()
+        audit.log_event("saved_add", name=name, site=site, source=source)
         self._log_add(f"⭐  Added to Saved Models: {name} ({site})", "accent")
         key = f"{site}:{name.lower()}"
         if self._tree.exists(key):
@@ -3489,21 +3783,23 @@ class StreamRecorderApp(tk.Tk):
         self._rows[key] = True
         self._finish_add_recorder(name, site)
 
-    def _finish_add_recorder(self, name: str, site: str):
+    def _finish_add_recorder(self, name: str, site: str, source: str = "ui"):
         """Widget/engine side of adding to Recorder — see _finish_add_saved
         for why this is split from the dict write."""
         self.recorder.add_model(name, site, "recorder")
         self._insert_model(name, site)
         self._persist_models()
         self._update_stats()
+        audit.log_event("recorder_add", name=name, site=site, source=source)
         self._log_add(f"Added to Recorder: {name} ({site})", "accent")
 
-    def _remove_saved(self, sid: str, persist: bool = True):
+    def _remove_saved(self, sid: str, persist: bool = True, source: str = "ui"):
         # The row may not exist yet (lazy tab) — the data entry is what counts
         if sid not in self._saved_data and not self._stree.exists(sid):
             return
         self._saved_data.pop(sid, None)
         _, site, name = sid.split(":", 2)
+        audit.log_event("saved_remove", name=name, site=site, source=source)
         # Drop the rank if the model is now on neither list (no orphans).
         if f"{site}:{name}" not in self._rows:
             self._ranks.pop(self._rank_key(name, site), None)
@@ -3720,6 +4016,7 @@ class StreamRecorderApp(tk.Tk):
             messagebox.showerror("Export failed", str(e))
             return
         kept = existing - updated  # file-only entries left untouched
+        audit.log_event("export", source="ui", count=len(items), path=path)
         self._log_add(f"Exported {len(items)} saved model(s) → {path}", "success")
         messagebox.showinfo(
             "Export complete",
@@ -3765,6 +4062,8 @@ class StreamRecorderApp(tk.Tk):
                     self._ranks[rkey] = rank
                     if self._stree.exists(sid):
                         self._stree.set(sid, "rank", self._rank_stars(rank))
+                    audit.log_event("rank_change", name=n, site=s,
+                                    source="import", old=0, new=rank)
                     ranked += 1
                 else:
                     skipped += 1
@@ -3775,10 +4074,14 @@ class StreamRecorderApp(tk.Tk):
             if self._monitoring_saved:
                 self.recorder.add_model(n, s, "saved", quiet=True)
             self._insert_saved_model(n, s)
+            audit.log_event("saved_add", name=n, site=s, source="import",
+                            rank=rank or None)
             added += 1
         if added or ranked:
             self._update_saved_count()
             self._persist_models()
+        audit.log_event("import", source="ui", path=path, added=added,
+                        ranked=ranked, skipped=skipped, invalid=invalid)
         self._log_add(
             f"Import: added {added}, ranked {ranked}, "
             f"skipped {skipped} duplicate(s)" +
@@ -4607,6 +4910,11 @@ class StreamRecorderApp(tk.Tk):
             k: v for k, v in self._ranks.items()
             if v and (k in self._rows or f"saved:{k}" in self._saved_data)
         }
+        # Links are deliberately NOT pruned to tracked models — a Clear
+        # Recorder (or a temporary remove) must never dissolve the user's
+        # hand-made identity groups.
+        self.settings.model_links = [list(g) for g in self._links]
+        self.settings.link_ignores = [list(p) for p in self._link_ignores]
         save_settings(self.settings)
 
     def _restore_models(self):

@@ -27,6 +27,11 @@ Three moving parts: the **API** (`app.py`, port 5200), the **control script**
 | **"stop everything"** | `stop-all` | stop all downloads + clear all AUTO |
 | **"clear the recorder"** | `clear` | pause **both** monitors, force-stop all downloads, clear AUTO, remove every model (Saved list kept; scanner paused) |
 | **"dashboard status"** / "how many are live?" | `dashboard` | per‑site + totals: total / recording / online / offline |
+| **"who's recording?"** | `models --recording` | list the models recording right now (name, site, rank) |
+| **"who's live?"** / "which of my 4★+ models are online?" | `models --online [--min-rank 4]` | list tracked models that are live; `--site` narrows to one site |
+| "list all my models" | `models` | every Recorder + Saved model with status/rank in one call |
+| **"these two are the same girl"** | `link <a> <b>` | mark two tracked models as one person — ranks sync, extension warns on duplicate recording |
+| "unlink her" / "show the links" | `unlink <name>` / `links` | manage identity groups |
 | "save her" / "add to saved" | `add-saved <link>` | add to Saved Models |
 | "save her and rank 5" | `add-saved <link> --rank 5` | add to Saved **and** set the star rank |
 | "rank her 4" / "give `<name>` 3 stars" | `rank <name> 4` | set a 1–5 star rank (must already be on a list) |
@@ -53,6 +58,10 @@ username.
 while it's closed, the bot replies *"Is the app running?"* — say *"open Scr33nX"*
 and retry. `close` stops all recording, so the bot checks with you first if
 anything is actively recording.
+
+> Using an **API token** (⚙ Settings → Local API)? Nothing to configure here —
+> the bot's `scr33nx_ctl.py` reads the token from the app's own config file
+> automatically (or from a `SCR33NX_TOKEN` env var).
 
 ## After changes
 

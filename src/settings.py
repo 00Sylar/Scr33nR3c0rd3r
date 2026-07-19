@@ -3,15 +3,29 @@ settings.py — Persist user configuration to JSON
 
 Main config (models, output dir, etc.):  ~/.streamrecorder_config.json
 Pipeline/Telegram config:                <project>/Pipeline/pipeline_settings.json
+
+Corruption guard: the main config is the ONLY store of the user's model
+lists and star ranks, so load_settings() keeps 3 rotating backups
+(.bak/.bak2/.bak3) and, if the file ever fails to parse, restores from the
+newest readable backup instead of silently starting empty (which the next
+save would then persist — wiping every saved model).
 """
 
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional, List
 
+logger = logging.getLogger(__name__)
 
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".streamrecorder_config.json")
+
+# Set by load_settings() when it had to recover (or failed to recover) the
+# main config; the app surfaces it in the Activity Log after startup.
+LOAD_WARNING = ""
 
 # Pipeline settings live alongside the standalone pipeline.py so the app UI
 # and the standalone script share one source of truth.
@@ -58,9 +72,14 @@ class AppSettings:
     preview_engine: str = "auto"               # "auto" | "mpv" | "vlc"
     preview_player_path: str = ""              # optional override path to mpv.exe/vlc.exe (empty = auto-detect)
     max_player_tiles: int = 9                  # Player tab: cap on simultaneously open (and streaming) tiles
+    api_token: str = ""                        # local API shared secret ("" = no auth, default)
     models: List[dict] = None                  # [{name, site, auto_rec, max_q}, ...]
     saved_models: List[dict] = None            # [{name, site}, ...]  view-only list
     ranks: dict = None                         # "site:name" → 0-5 star rank
+    # Cross-site identity links — additive keys; never touch the structures
+    # above (older configs load unchanged, links default to none).
+    model_links: List[list] = None             # [["site:name", ...], ...] aka groups
+    link_ignores: List[list] = None            # dismissed same-name suggestions
     # Pipeline / Telegram upload — persisted to PIPELINE_CONFIG_FILE
     pipeline_enabled: bool = False
     pipeline_do_convert: bool = True           # stage 1: .ts → .mp4
@@ -81,6 +100,10 @@ class AppSettings:
             self.ranks = {}
         if self.vip_list is None:
             self.vip_list = []
+        if self.model_links is None:
+            self.model_links = []
+        if self.link_ignores is None:
+            self.link_ignores = []
 
 
 def _load_pipeline_file() -> dict:
@@ -96,26 +119,108 @@ def _load_pipeline_file() -> dict:
 def _save_json(path: str, data: dict):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
+    payload = json.dumps(data, indent=2)
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)
+            f.write(payload)
+        # os.replace can fail transiently on Windows (AV/sync holding a
+        # handle) — retry briefly before falling back to a direct write.
+        for attempt in range(3):
+            try:
+                os.replace(tmp, path)
+                return
+            except OSError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.2)
     except Exception:
+        # Last resort: non-atomic write. A crash mid-write here can corrupt
+        # the file — which is exactly what the .bak rotation in
+        # load_settings() exists to recover from.
         try:
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                f.write(payload)
         except Exception:
-            pass
+            logger.exception("could not save %s", path)
+
+
+_BACKUP_SUFFIXES = (".bak", ".bak2", ".bak3")
+
+
+def _read_config(path: str) -> Optional[dict]:
+    """Parse a config JSON file; None when unreadable/invalid."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _rotate_backups():
+    """Keep 3 generations of the main config (.bak newest). Skipped when
+    .bak already matches the current file byte-for-byte, so repeated loads
+    (e.g. the control CLI) don't collapse all generations into one copy."""
+    bak = CONFIG_FILE + ".bak"
+    try:
+        with open(CONFIG_FILE, "rb") as f:
+            cur = f.read()
+    except OSError:
+        return
+    try:
+        with open(bak, "rb") as f:
+            if f.read() == cur:
+                return
+    except OSError:
+        pass
+    try:
+        for src, dst in ((CONFIG_FILE + ".bak2", CONFIG_FILE + ".bak3"),
+                         (bak, CONFIG_FILE + ".bak2")):
+            if os.path.exists(src):
+                os.replace(src, dst)
+        with open(bak, "wb") as f:
+            f.write(cur)
+    except OSError:
+        pass  # backups are best-effort; never block startup on them
 
 
 def load_settings() -> AppSettings:
+    global LOAD_WARNING
+    LOAD_WARNING = ""
     main = {}
     if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                main = json.load(f) or {}
-        except Exception:
-            main = {}
+        parsed = _read_config(CONFIG_FILE)
+        if parsed is not None:
+            main = parsed
+            _rotate_backups()
+        else:
+            # Corrupt config. Preserve the broken file, then restore from the
+            # newest readable backup — NEVER continue with empty lists, or the
+            # next save would overwrite the config and wipe every saved
+            # model/rank for good.
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            corrupt = f"{CONFIG_FILE}.corrupt-{stamp}"
+            try:
+                os.replace(CONFIG_FILE, corrupt)
+            except OSError:
+                corrupt = CONFIG_FILE  # couldn't move it; recover in place
+            for suffix in _BACKUP_SUFFIXES:
+                data = _read_config(CONFIG_FILE + suffix)
+                if data is not None:
+                    main = data
+                    LOAD_WARNING = (
+                        f"⚠ Config file was corrupt — restored from the "
+                        f"{suffix} backup ({len(data.get('saved_models') or [])} "
+                        f"saved models, {len(data.get('models') or [])} recorder "
+                        f"models). The unreadable file was kept at {corrupt}.")
+                    _save_json(CONFIG_FILE, data)  # write the restore back (atomic)
+                    break
+            else:
+                LOAD_WARNING = (
+                    f"⚠ Config file was corrupt and no readable backup exists — "
+                    f"starting with EMPTY model lists. The unreadable file was "
+                    f"kept at {corrupt} for manual recovery.")
+            logger.warning(LOAD_WARNING)
 
     s = AppSettings()
     s.output_dir = main.get("output_dir", s.output_dir)
@@ -145,9 +250,12 @@ def load_settings() -> AppSettings:
     s.preview_engine = main.get("preview_engine", s.preview_engine)
     s.preview_player_path = main.get("preview_player_path", s.preview_player_path)
     s.max_player_tiles = max(1, min(100, int(main.get("max_player_tiles", s.max_player_tiles) or s.max_player_tiles)))
+    s.api_token = str(main.get("api_token", "") or "")
     s.models = main.get("models", [])
     s.saved_models = main.get("saved_models", [])
     s.ranks = main.get("ranks", {}) or {}
+    s.model_links = main.get("model_links", []) or []
+    s.link_ignores = main.get("link_ignores", []) or []
 
     # Pipeline config: prefer Pipeline/pipeline_settings.json; migrate legacy
     # fields from the main config file on first load if present.
@@ -200,9 +308,12 @@ def save_settings(s: AppSettings):
         "preview_engine": s.preview_engine,
         "preview_player_path": s.preview_player_path,
         "max_player_tiles": s.max_player_tiles,
+        "api_token": s.api_token,
         "models": s.models,
         "saved_models": s.saved_models,
         "ranks": s.ranks,
+        "model_links": s.model_links,
+        "link_ignores": s.link_ignores,
     }
     _save_json(CONFIG_FILE, data)
     save_pipeline_settings(s)

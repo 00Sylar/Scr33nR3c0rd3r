@@ -18,8 +18,11 @@
    streams start dropping segments you'll also get a warning notification.
 7. **Rate models** — give any model 1–5 stars on the Recorder or Saved Models
    tab (click a star in the **RANK** column, or right‑click → **Set Rank** to
-   rate a whole selection), then click the `RANK` header to sort. Ranks stay
-   with the model across both tabs and persist between sessions.
+   rate a whole selection), then click the `RANK` header to sort, or use the
+   **Rank: All ▾** filter next to the status filter to show only ★N‑and‑up
+   (or unranked) models. Ranks stay with the model across both tabs and
+   persist between sessions; every change is logged (Activity Log +
+   `models_audit.log`).
 8. **Preview a stream** — right‑click an **online (or recording)** model →
    **Preview** to watch it live (offline models are skipped with a note).
    Choose external or embedded, and the preferred engine, under **Settings →
@@ -31,9 +34,10 @@
    mode (large player with controls and its own REC/Stop, the rest in a
    thumbnail strip). Add tiles with **+ Add Tile** or right‑click an online
    model → **▶ Add to Player**. Tiles keep streaming while you're on other
-   tabs (no reload when you come back); **🧹 Clear Player** empties the tab
-   in one click. Tile count is capped by **Max Player tiles** in Settings,
-   since every open tile is a live stream.
+   tabs (no reload when you come back); **★ Fill Top Ranked** opens tiles
+   for your highest‑ranked models that are online right now, and **🧹 Clear
+   Player** empties the tab in one click. Tile count is capped by **Max
+   Player tiles** in Settings, since every open tile is a live stream.
 
 ---
 

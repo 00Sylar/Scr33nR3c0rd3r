@@ -13,7 +13,10 @@ the tab:
   `.mp4` files with no Telegram setup needed. The split size follows the same
   **Max File Size** setting as the recorder; if Upload (②) is also enabled,
   it's additionally capped at Telegram's own ~3.8 GB per‑file upload limit,
-  whichever is smaller.
+  whichever is smaller. Splitting seeks the input directly (fast even on
+  multi‑GB files), and a `.ts` that repeatedly fails to convert is skipped
+  after 3 attempts (until the pipeline is restarted) instead of retrying
+  forever.
 - **② Upload .mp4 to Telegram** — uploads `.mp4` files from the converted
   folder. Use with ① for the full convert‑then‑upload flow, or alone to
   upload `.mp4`s you already have. As of V2.0, uploading no longer waits for

@@ -1,5 +1,39 @@
 const API = 'http://localhost:5200';  // v2 (TEST) port
 
+// ── Optional API token ─────────────────────────────────────────────────────────
+// Shared secret for the local API (Scr33nX Settings → Local API). Stored in
+// extension storage and sent as X-Api-Token on every call. When the app
+// replies 401, the popup swaps to a token form; the ⚙ link opens it any time.
+let TOKEN = '';
+let needToken = false;
+
+function authHeaders(base) {
+  const h = Object.assign({}, base || {});
+  if (TOKEN) h['X-Api-Token'] = TOKEN;
+  return h;
+}
+
+function renderTokenForm(info) {
+  const root = document.getElementById('root');
+  root.innerHTML = `
+    ${info ? `<div class="model-name">${info.name}</div>
+    <div class="site-label">${info.site}</div>` : ''}
+    <div class="feedback err" style="margin-bottom:9px">
+      API token ${needToken ? 'required' : ''}<br>(Scr33nX Settings → Local API)</div>
+    <input id="token-input" type="password" placeholder="paste the API token — empty = none"
+      style="width:100%;padding:6px 8px;margin-bottom:6px;border:1px solid #272729;border-radius:4px;background:#17171a;color:#f2f2f4;font-size:12px;font-family:inherit">
+    <button class="btn btn-rec" id="token-save">Save token</button>`;
+  const inp = document.getElementById('token-input');
+  inp.value = TOKEN;
+  document.getElementById('token-save').addEventListener('click', async () => {
+    TOKEN = inp.value.trim();
+    try { await browser.storage.local.set({ apiToken: TOKEN }); } catch {}
+    needToken = false;
+    lastSig = null;   // force the next render to redraw from fresh state
+    render();
+  });
+}
+
 // ── Live-update state ──────────────────────────────────────────────────────────
 // The popup keeps polling the backend while it is open, so the UI reflects status
 // changes (e.g. a Start that takes a few seconds to fetch the URL + spawn ffmpeg)
@@ -13,7 +47,7 @@ let resyncTimer = null;   // fallback re-render after a Start/Stop action
 
 function stateSig(appData) {
   return appData
-    ? `${appData.in_recorder}|${appData.in_saved}|${appData.status}|${appData.auto}|${appData.rank}`
+    ? `${appData.in_recorder}|${appData.in_saved}|${appData.status}|${appData.auto}|${appData.rank}|${JSON.stringify(appData.aka || [])}`
     : 'down';
 }
 
@@ -68,48 +102,63 @@ async function fetchStatus(name, site) {
   try {
     const r = await fetch(
       `${API}/status?name=${encodeURIComponent(name)}&site=${encodeURIComponent(site)}`,
-      { signal: AbortSignal.timeout(1500) }
+      { signal: AbortSignal.timeout(1500), headers: authHeaders() }
     );
-    return r.ok ? r.json() : null;
+    if (r.status === 401) { needToken = true; return null; }
+    if (!r.ok) return null;
+    needToken = false;
+    return r.json();
   } catch {
     return null;
   }
 }
 
+// Tell the background worker to resync toolbar/listing badges right away
+// after an action, instead of waiting for its next poll.
+function pingBackground() {
+  try { browser.runtime.sendMessage({ type: 'refresh' }).catch(() => {}); } catch {}
+}
+
 async function postAdd(name, site, target) {
   const r = await fetch(`${API}/add`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ name, site, target }),
     signal:  AbortSignal.timeout(3000),
   });
-  return r.json();
+  const j = await r.json();
+  if (j.ok) pingBackground();
+  return j;
 }
 
 async function postRecord(name, site, action) {
   const r = await fetch(`${API}/record`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ name, site, action }),
     signal:  AbortSignal.timeout(3000),
   });
-  return r.json();
+  const j = await r.json();
+  if (j.ok) pingBackground();
+  return j;
 }
 
 async function postRemove(name, site, target) {
   const r = await fetch(`${API}/remove`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ name, site, target }),
     signal:  AbortSignal.timeout(3000),
   });
-  return r.json();
+  const j = await r.json();
+  if (j.ok) pingBackground();
+  return j;
 }
 
 async function postAuto(name, site, enabled) {
   const r = await fetch(`${API}/auto`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ name, site, enabled }),
     signal:  AbortSignal.timeout(3000),
   });
@@ -119,7 +168,7 @@ async function postAuto(name, site, enabled) {
 async function postRank(name, site, rank) {
   const r = await fetch(`${API}/rank`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body:    JSON.stringify({ name, site, rank }),
     signal:  AbortSignal.timeout(3000),
   });
@@ -138,6 +187,26 @@ function statusBadgeHTML(s) {
     error:     '⚠  ERROR',
   };
   return `<div class="status-badge ${s}">${labels[s] || s.toUpperCase()}</div>`;
+}
+
+// ── Linked identities (aka) ─────────────────────────────────────────────────────
+
+const SITE_NICE = { chaturbate: 'Chaturbate', stripchat: 'Stripchat',
+                    camsoda: 'Camsoda', myfreecams: 'MyFreeCams' };
+
+function akaHTML(aka) {
+  if (!aka || !aka.length) return '';
+  return `<div class="aka-row">${aka.map((a) =>
+    `🔗 <b>${a.name}</b> @ ${SITE_NICE[a.site] || a.site} — ` +
+    `<span class="aka-st ${a.status || 'none'}">${a.status || 'not tracked'}</span>`
+  ).join('<br>')}</div>`;
+}
+
+function linkedBannerHTML(appData) {
+  const lr = appData?.linked_recording;
+  if (!lr || appData?.status === 'recording') return '';
+  return `<div class="banner-warn">⚠ Already recording on ` +
+         `${SITE_NICE[lr.site] || lr.site} as <b>${lr.name}</b></div>`;
 }
 
 // ── Rank stars ──────────────────────────────────────────────────────────────────
@@ -191,6 +260,10 @@ async function render(appData) {
   if (appData === undefined) appData = await fetchStatus(info.name, info.site);
   lastSig = stateSig(appData);
 
+  // The app answered 401 — a token is set in Scr33nX but this extension
+  // doesn't have it (or has the wrong one). Show the token form.
+  if (needToken) { renderTokenForm(info); return; }
+
   const appUp     = appData !== null;
   const inRec     = appData?.in_recorder ?? false;
   const inSaved   = appData?.in_saved    ?? false;
@@ -209,6 +282,8 @@ async function render(appData) {
     <div class="model-name">${info.name}</div>
     <div class="site-label">${siteLabel}</div>
     ${statusBadgeHTML(curStatus)}
+    ${linkedBannerHTML(appData)}
+    ${akaHTML(appData?.aka)}
     ${appUp ? rankRowHTML((inSaved || inRec) ? curRank : 0, inSaved || inRec) : ''}
     ${recorderButtonHTML(inRec, curStatus, appUp)}
     ${inRec ? `<label class="auto-row">
@@ -223,9 +298,15 @@ async function render(appData) {
     ${canRemoveRec
       ? '<button class="btn btn-remove" id="btn-remove-rec">✕  Remove from Recorder</button>'
       : ''}
-    ${!appUp ? '<div class="feedback err">StreamRecorder is not running</div>' : ''}
+    ${!appUp ? '<div class="feedback err">Scr33nX is not running</div>' : ''}
     <div id="fb"></div>
+    <div id="token-link" style="margin-top:9px;text-align:center;font-size:10px;color:#3a3a3e;cursor:pointer">⚙ API token…</div>
   `;
+
+  // Wired before the app-down early-return: the token link must work even
+  // when the API is unreachable (a wrong token looks "down" to a user).
+  document.getElementById('token-link')
+    .addEventListener('click', () => renderTokenForm(info));
 
   if (!appUp) return;
 
@@ -450,6 +531,10 @@ async function poll() {
 }
 
 async function init() {
+  try {
+    const st = await browser.storage.local.get('apiToken');
+    TOKEN = (st && st.apiToken) || '';
+  } catch { TOKEN = ''; }
   pageInfo = await getPageModel();   // resolved once; the popup is tied to one tab
   await render();
   // Keep the popup in sync with the backend for as long as it stays open.

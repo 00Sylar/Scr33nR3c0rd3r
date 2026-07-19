@@ -10,6 +10,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const SITE_LABEL = { chaturbate: "CHATURBATE", stripchat: "STRIPCHAT",
                      camsoda: "CAMSODA", myfreecams: "MYFREECAMS" };
+const SITE_SHORT = { chaturbate: "CB", stripchat: "SC",
+                     camsoda: "CS", myfreecams: "MFC" };
 const STATUS_TXT = { recording: "RECORDING", online: "ONLINE", offline: "OFFLINE",
                      private: "PRIVATE / TICKET", checking: "CHECKING…", error: "ERROR" };
 const STATUS_W = { recording: 0, online: 1, private: 2, checking: 3, error: 4, offline: 5 };
@@ -26,6 +28,16 @@ function starsHtml(rank) {
     h += `<i data-i="${i}" class="${i <= rank ? "f" : ""}">${i <= rank ? "★" : "☆"}</i>`;
   return h;
 }
+/* "site:name" → "name · SITE" (links dialog / tooltips) */
+function lnkLabel(k) {
+  const i = k.indexOf(":");
+  return `${k.slice(i + 1)} · ${SITE_LABEL[k.slice(0, i)] || k.slice(0, i)}`;
+}
+/* 🔗 marker for a row whose model has linked aliases */
+function lnkHtml(aka) {
+  if (!aka || !aka.length) return "";
+  return `<i class="lnk" title="Linked: ${esc(aka.map(lnkLabel).join(", "))}">🔗</i>`;
+}
 
 /* ══ global state ══ */
 let API = null;
@@ -40,6 +52,11 @@ const anchor = { rec: null, saved: null };
 const sort = { rec: { col: "name", dir: 1 }, saved: { col: "name", dir: 1 } };
 const filter = { rec: "", saved: "" };
 const statusFilter = { rec: new Set(), saved: new Set() };   // empty = all
+const rankFilter = { rec: 0, saved: 0 };   // 0 = all, 1-5 = "rank ≥ N", -1 = unranked only
+
+function rankMatch(rank, rf) {
+  return !rf || (rf === -1 ? !rank : rank >= rf);
+}
 let savedCache = { version: -1, items: [] };
 let savedDisplay = [];              // flattened (headers + rows) for virtualization
 let recVisible = [];                // ordered visible keys (for shift ranges)
@@ -147,8 +164,10 @@ function cmpModels(a, b, col, dir) {
 function computeRecView(models) {
   const f = filter.rec.toLowerCase();
   const sf = statusFilter.rec;
+  const rf = rankFilter.rec;
   const list = models.filter(m =>
-    (!f || m.name.includes(f)) && (sf.size === 0 || sf.has(m.status)));
+    (!f || m.name.includes(f)) && (sf.size === 0 || sf.has(m.status))
+    && rankMatch(m.rank, rf));
   const bySite = new Map();
   for (const m of list) {
     if (!bySite.has(m.site)) bySite.set(m.site, []);
@@ -162,7 +181,7 @@ function computeRecView(models) {
 function recRowHtml(m) {
   return `
     <span class="cb" data-cb="${esc(m.key)}"></span>
-    <span class="name">${esc(m.name)}</span>
+    <span class="name">${esc(m.name)}${lnkHtml(m.aka)}</span>
     <span class="stars" data-stars="${esc(m.key)}" data-rank="${m.rank}">${starsHtml(m.rank)}</span>
     <span class="st ${m.status}"><span class="dot"></span><span class="st-txt">${STATUS_TXT[m.status]}</span></span>
     <span class="file">${esc(m.file || "—")}</span>
@@ -186,7 +205,8 @@ function renderRec(models) {
   // non-empty view. If it doesn't, something upstream is inconsistent —
   // warn (so a recurrence leaves a lead) and force the next tick to do a
   // full rebuild instead of trusting a cached sig that may itself be stale.
-  if (models.length > 0 && bySite.size === 0 && !filter.rec && statusFilter.rec.size === 0) {
+  if (models.length > 0 && bySite.size === 0 && !filter.rec
+      && statusFilter.rec.size === 0 && rankFilter.rec === 0) {
     console.warn("[renderRec] empty view despite non-empty models[] and no active filter — forcing resync.");
     container.dataset.sig = "__forced-resync__";
   } else if (container.dataset.sig !== sig) {
@@ -224,6 +244,12 @@ function renderRec(models) {
       stars.dataset.rank = m.rank;
       stars.innerHTML = starsHtml(m.rank);
     }
+    // 🔗 marker follows link changes without waiting for a full rebuild
+    const nameEl = el.querySelector(".name");
+    const wantLnk = lnkHtml(m.aka);
+    const curLnk = nameEl.querySelector(".lnk");
+    if ((curLnk ? curLnk.outerHTML : "") !== wantLnk)
+      nameEl.innerHTML = `${esc(m.name)}${wantLnk}`;
     const sc = el.querySelector(".saved-check");
     sc.classList.toggle("no", !m.saved);
     sc.textContent = m.saved ? "✓" : "—";
@@ -265,11 +291,13 @@ function rebuildSavedDisplay() {
   const sf = statusFilter.saved;
   const stMap = (S && S.saved_status) || {};
   const items = [];
+  const rf = rankFilter.saved;
   for (const it of savedCache.items) {
     const stat = stMap[it.sid];
     const status = stat ? stat[0] : "offline";
     if (f && !it.name.toLowerCase().includes(f)) continue;
     if (sf.size && !sf.has(status)) continue;
+    if (!rankMatch(it.rank, rf)) continue;
     items.push({ ...it, status, file: stat ? stat[1] : "", size: stat ? stat[2] : "" });
   }
   const bySite = new Map();
@@ -298,7 +326,7 @@ function savedRowHtml(it, top) {
       ${sel.saved.has(it.sid) ? "selected" : ""}" style="top:${top}px"
       data-key="${esc(it.sid)}" data-tab="saved">
     <span class="cb ${checked.saved.has(it.sid) ? "on" : ""}" data-cb="${esc(it.sid)}"></span>
-    <span class="name">${esc(it.name)}</span>
+    <span class="name">${esc(it.name)}${lnkHtml(it.aka)}</span>
     <span class="stars" data-stars="${esc(it.sid)}" data-rank="${it.rank}">${starsHtml(it.rank)}</span>
     <span class="st ${it.status}"><span class="dot"></span><span class="st-txt">${STATUS_TXT[it.status]}</span></span>
     <span class="file">${esc(it.file || "—")}</span>
@@ -531,6 +559,7 @@ async function loadSettings() {
   $("s-pengine").value = s.preview_engine;
   $("s-ppath").value = s.preview_player_path;
   $("s-player-max").value = s.max_player_tiles;
+  $("s-api-token").value = s.api_token || "";
   playerMaxTiles = s.max_player_tiles;
   runSystemCheck();
   loadVip();
@@ -597,6 +626,7 @@ $("s-save").addEventListener("click", async () => {
     preview_engine: $("s-pengine").value,
     preview_player_path: $("s-ppath").value,
     max_player_tiles: $("s-player-max").value,
+    api_token: $("s-api-token").value,
   });
   playerMaxTiles = Number($("s-player-max").value) || playerMaxTiles;
   renderPlayerTab();
@@ -836,9 +866,17 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeCtx();
     $("modal").hidden = true;
-    $("prompt").hidden = true;
+    // The prompt may have Python blocked on an answer (Telegram OTP/2FA
+    // waits up to 5 min) — Escape must CANCEL it, not just hide it, or the
+    // pipeline hangs until the timeout. Route through the Cancel handler.
+    if (!$("prompt").hidden) {
+      const cancel = $("prompt-cancel");
+      if (cancel.onclick) cancel.onclick(); else $("prompt").hidden = true;
+    }
     $("bpick").hidden = true;
     $("addsaved").hidden = true;
+    $("playerpick").hidden = true;
+    $("wizard").hidden = true;
   }
 });
 window.addEventListener("blur", closeCtx);
@@ -874,7 +912,7 @@ function checkHelpers(tab) {
 function retab(tab) {
   if (tab === "rec") {
     $("rows").dataset.sig = "";
-    try { renderRec(S.models); } catch (e) { console.error("[retab] renderRec failed:", e); }
+    try { if (S) renderRec(S.models); } catch (e) { console.error("[retab] renderRec failed:", e); }
   } else renderSavedWindow();
   updateSelLabel();
 }
@@ -912,6 +950,7 @@ document.addEventListener("contextmenu", (e) => {
       (m.status === "online" || m.status === "recording")
         ? { label: "▶  Add to Player", action: () => addPlayerTile(m.name, m.site) } : null,
       { label: "⭐  Set Rank", sub: rankSub(keys, false) },
+      { label: "🔗  Edit Links…", action: () => openLinkEditor(k0) },
       m.vip ? { label: "🌟  Remove from VIP List", action: () => vipRefresh(() => API.vip_remove(keys)) }
             : { label: "🌟  Add to VIP List", action: () => vipRefresh(() => API.vip_add(keys)) },
       "hr",
@@ -962,6 +1001,7 @@ document.addEventListener("contextmenu", (e) => {
       { label: "🌐  Open in Browser", action: () => openBrowser(keys, true, false) },
       { label: "🌐  Open in Browser (choose…)", action: () => openBrowser(keys, true, true) },
       { label: "⭐  Set Rank", sub: rankSub(keys, true) },
+      { label: "🔗  Edit Links…", action: () => openLinkEditor(k0) },
       it.vip ? { label: "🌟  Remove from VIP List", action: () => vipRefresh(() => API.vip_remove(keys)) }
              : { label: "🌟  Add to VIP List", action: () => vipRefresh(() => API.vip_add(keys)) },
       "hr",
@@ -1018,7 +1058,9 @@ async function openBrowser2(keys, saved, forceChoose) {
     const target = document.querySelector('input[name="bp"]:checked').value;
     const remember = $("bpick-remember").classList.contains("on");
     $("bpick").hidden = true;
-    API.open_browser(keys, saved, target, remember && !forceChoose);
+    // "Remember my choice" is honored in BOTH flows — it used to be
+    // silently ignored when the picker was opened via "(choose…)".
+    API.open_browser(keys, saved, target, remember);
   };
   $("bpick-cancel").onclick = () => { $("bpick").hidden = true; };
 }
@@ -1561,6 +1603,37 @@ $("player-clear").addEventListener("click", () => {
         "Remove ALL tiles from the Player?\n\nOnly the Player empties — recordings, the Recorder, and Saved Models are untouched.",
         "Clear", clearPlayerTiles);
 });
+
+// ★ Fill Top Ranked — open tiles for the highest-ranked models that are
+// online right now (Recorder + Saved), best rank first, up to the tile cap.
+function fillTopRanked() {
+  const seen = new Set(playerTiles.map(t => t.key));
+  const cands = [];
+  for (const m of (S && S.models) || []) {
+    if (seen.has(m.key) || !m.rank) continue;
+    if (m.status !== "online" && m.status !== "recording") continue;
+    seen.add(m.key);
+    cands.push({ name: m.name, site: m.site, rank: m.rank });
+  }
+  const stMap = (S && S.saved_status) || {};
+  for (const it of savedCache.items || []) {
+    const key = tileKey(it.name, it.site);
+    if (seen.has(key) || !it.rank) continue;
+    const st = stMap[it.sid];
+    if (!st || (st[0] !== "online" && st[0] !== "recording")) continue;
+    seen.add(key);
+    cands.push({ name: it.name, site: it.site, rank: it.rank });
+  }
+  if (!cands.length) {
+    toast("No ranked models are online right now (or they already have tiles).");
+    return;
+  }
+  const room = playerMaxTiles - playerTiles.length;
+  if (room <= 0) { toast(PLAYER_CAP_MSG, true); return; }
+  cands.sort((a, b) => b.rank - a.rank || (a.name < b.name ? -1 : 1));
+  addPlayerTilesBulk(cands.slice(0, room));
+}
+$("player-fill").addEventListener("click", fillTopRanked);
 $("player-add").addEventListener("click", openPlayerPicker);
 $("playerpick-cancel").addEventListener("click", () => { $("playerpick").hidden = true; });
 $("playerpick-filter").addEventListener("input", (e) => {
@@ -1605,6 +1678,10 @@ $("player-stage").addEventListener("click", (e) => {
     if (t) recControl(t.name, t.site, false);
     return;
   }
+  // Rank-star clicks are handled by the global click handler — they must
+  // not ALSO count as a tile click, which would yank the layout into
+  // Theater mode mid-rating.
+  if (e.target.closest(".stars")) return;
   const tileEl = e.target.closest("[data-tile]");
   if (!tileEl) return;
   const tileId = Number(tileEl.dataset.tile);
@@ -1675,6 +1752,226 @@ async function doAddSaved() {
   toast(r.ok ? `⭐ Added ${r.name} (${r.site}) to Saved Models` : r.error, !r.ok);
 }
 
+/* ══ linked identities dialog ══ */
+async function trackedLinkKeys() {
+  // Every tracked model as "site:name" — Recorder (from the live snapshot)
+  // plus Saved (from the bridge, so it works before the tab was ever opened).
+  const seen = new Set();
+  for (const m of (S && S.models) || []) seen.add(`${m.site}:${m.name}`.toLowerCase());
+  try {
+    const r = await API.saved_list();
+    for (const it of r.items) seen.add(`${it.site}:${it.name}`.toLowerCase());
+  } catch {}
+  return [...seen].sort();
+}
+
+/* type-ahead cache: [{key: "site:name", label: "name · SITE"}] */
+let linkOpts = [];
+async function refreshLinkOpts() {
+  linkOpts = (await trackedLinkKeys()).map(k => ({ key: k, label: lnkLabel(k) }));
+}
+
+/* Attach a type-ahead dropdown to an input. getOpts() → filtered linkOpts
+   subset; allowNew adds a "➕ add & link" row for unknown usernames. Picking
+   a row stores the model key in input.dataset.key; typing clears it. */
+function comboAttach(input, getOpts, allowNew) {
+  const list = document.createElement("div");
+  list.className = "combo-list";
+  list.hidden = true;
+  input.parentElement.appendChild(list);
+  input.addEventListener("input", () => {
+    input.dataset.key = "";
+    const q = input.value.trim().toLowerCase();
+    if (!q) { list.hidden = true; return; }
+    const matches = getOpts().filter(o => o.label.toLowerCase().includes(q)).slice(0, 40);
+    let html = matches.map(o =>
+      `<div class="combo-it" data-k="${esc(o.key)}">${esc(o.label)}</div>`).join("");
+    if (allowNew && /^[a-z0-9_.-]+$/.test(q)
+        && !matches.some(o => o.key.split(":").slice(1).join(":") === q))
+      html += `<div class="combo-it combo-new" data-new="${esc(q)}">➕ add “${esc(q)}” to Saved &amp; link</div>`;
+    list.innerHTML = html || `<div class="combo-none">no match</div>`;
+    list.hidden = false;
+  });
+  list.addEventListener("mousedown", (e) => {
+    const it = e.target.closest(".combo-it");
+    if (!it) return;
+    e.preventDefault();
+    if (it.dataset.k) { input.value = it.textContent; input.dataset.key = it.dataset.k; }
+    else if (it.dataset.new !== undefined) { input.value = it.dataset.new; input.dataset.key = "__new__"; }
+    list.hidden = true;
+  });
+  input.addEventListener("blur", () => setTimeout(() => { list.hidden = true; }, 150));
+}
+
+function applyLinksFilter() {
+  const q = $("links-filter").value.trim().toLowerCase();
+  for (const row of document.querySelectorAll("#links-groups .lnk-group, #links-suggests .lnk-group"))
+    row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? "" : "none";
+}
+
+async function renderLinksDlg() {
+  const data = await API.links();
+  const groups = $("links-groups");
+  groups.innerHTML = data.links.length
+    ? data.links.map(g => `<div class="lnk-group">${g.map(k =>
+        `<span class="vip-chip">${esc(lnkLabel(k))}
+           <button data-unlink="${esc(k)}" title="Unlink this account">✕</button></span>`)
+        .join('<span class="lnk-eq">=</span>')}</div>`).join("")
+    : `<div class="lnk-empty">No linked models yet — link two accounts below.</div>`;
+  const sug = $("links-suggests");
+  const n = data.suggestions.length;
+  sug.innerHTML = n
+    ? `<div class="lnk-subhead">Same username on several sites — same person?
+         <button class="btn lnk-linkall" id="links-linkall" data-n="${n}">🔗 Link all ${n}</button></div>` +
+      data.suggestions.map(s => `<div class="lnk-group">
+          <span class="lnk-sugname">${esc(s.name)}<small> · ${
+            s.keys.map(k => SITE_SHORT[k.split(":")[0]] || "?").join(" + ")
+          }</small></span>
+          <button class="btn" data-sug-link="${esc(s.keys.join("|"))}">🔗 Link</button>
+          <button class="btn" data-sug-ign="${esc(s.keys.join("|"))}">Ignore</button>
+        </div>`).join("")
+    : "";
+  await refreshLinkOpts();
+  applyLinksFilter();
+}
+
+function linksChanged() {
+  savedCache.version = -1;            // refresh 🔗 markers in the saved table
+  renderLinksDlg();
+}
+
+$("b-links").addEventListener("click", () => {
+  $("linksdlg").hidden = false;
+  renderLinksDlg();
+});
+$("links-close").addEventListener("click", () => { $("linksdlg").hidden = true; });
+/* the list can be long — also close on Esc or a click on the backdrop */
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("lnkedit").hidden) { $("lnkedit").hidden = true; return; }
+  if (!$("linksdlg").hidden) $("linksdlg").hidden = true;
+});
+$("linksdlg").addEventListener("mousedown", (e) => {
+  if (e.target === $("linksdlg")) $("linksdlg").hidden = true;
+});
+$("links-filter").addEventListener("input", applyLinksFilter);
+comboAttach($("links-a"), () => linkOpts, false);
+comboAttach($("links-b"), () => linkOpts, false);
+$("links-add").addEventListener("click", async () => {
+  const a = $("links-a").dataset.key, b = $("links-b").dataset.key;
+  if (!a || !b) { toast("Type and pick two models to link.", true); return; }
+  if (a === b) { toast("Pick two different models.", true); return; }
+  const r = await API.link_models([a, b]);
+  toast(r.ok ? `🔗 Linked ${lnkLabel(a)} = ${lnkLabel(b)}` : r.error, !r.ok);
+  if (r.ok) {
+    $("links-a").value = ""; $("links-a").dataset.key = "";
+    $("links-b").value = ""; $("links-b").dataset.key = "";
+    linksChanged();
+  }
+});
+$("linksdlg").addEventListener("click", async (e) => {
+  const un = e.target.closest("[data-unlink]");
+  if (un) {
+    const r = await API.unlink_model(un.dataset.unlink);
+    toast(r.ok ? `Unlinked ${lnkLabel(un.dataset.unlink)}` : r.error, !r.ok);
+    if (r.ok) linksChanged();
+    return;
+  }
+  const sl = e.target.closest("[data-sug-link]");
+  if (sl) {
+    const r = await API.link_models(sl.dataset.sugLink.split("|"));
+    toast(r.ok ? "🔗 Linked" : r.error, !r.ok);
+    if (r.ok) linksChanged();
+    return;
+  }
+  const si = e.target.closest("[data-sug-ign]");
+  if (si) {
+    await API.link_ignore(si.dataset.sugIgn.split("|"));
+    renderLinksDlg();
+    return;
+  }
+  const la = e.target.closest("#links-linkall");
+  if (la) {
+    const n = la.dataset.n;
+    modal("Link all suggestions",
+          `Link all ${n} same-username groups as one person each? ` +
+          `Ranks sync within each group (highest wins). You can unlink ` +
+          `any mistake afterwards.`,
+          "Link all", async () => {
+      const r = await API.link_all_suggestions();
+      toast(r.ok ? `🔗 Linked ${r.linked} group(s)` : (r.error || "Failed"), !r.ok);
+      if (r.ok) linksChanged();
+    });
+  }
+});
+
+/* ══ per-model link editor (right-click → Edit Links…) ══ */
+const LINK_SITES = ["chaturbate", "stripchat", "camsoda", "myfreecams"];
+let lnkeditKey = null;
+
+async function openLinkEditor(rawKey) {
+  let k = String(rawKey);
+  if (k.startsWith("saved:")) k = k.slice(6);
+  k = k.toLowerCase();
+  lnkeditKey = k;
+  const site = k.split(":")[0];
+  const name = k.split(":").slice(1).join(":");
+  $("lnkedit-title").textContent = `🔗 ${name} — linked accounts`;
+  await refreshLinkOpts();
+  let group = [k];
+  try {
+    const data = await API.links();
+    group = data.links.find(g => g.includes(k)) || [k];
+  } catch {}
+  let html = "";
+  for (const s of LINK_SITES) {
+    if (s === site) {
+      html += `<div class="lnked-row"><span class="lnked-site">${SITE_SHORT[s]}</span>
+        <span class="lnked-self">${esc(name)} <small>(this model)</small></span></div>`;
+    } else {
+      const alias = group.find(g2 => g2.startsWith(s + ":")) || "";
+      html += `<div class="lnked-row"><span class="lnked-site">${SITE_SHORT[s]}</span>
+        <span class="combo-wrap"><input data-site="${s}"
+          value="${esc(alias ? lnkLabel(alias) : "")}" data-key="${esc(alias)}"
+          placeholder="type to search…" autocomplete="off" spellcheck="false"></span></div>`;
+    }
+  }
+  $("lnkedit-rows").innerHTML = html;
+  $("lnkedit-rows").querySelectorAll("input[data-site]").forEach(inp =>
+    comboAttach(inp, () => linkOpts.filter(o => o.key.startsWith(inp.dataset.site + ":")), true));
+  $("lnkedit").hidden = false;
+}
+
+$("lnkedit-cancel").addEventListener("click", () => { $("lnkedit").hidden = true; });
+$("lnkedit").addEventListener("mousedown", (e) => {
+  if (e.target === $("lnkedit")) $("lnkedit").hidden = true;
+});
+$("lnkedit-save").addEventListener("click", async () => {
+  const slots = {};
+  for (const inp of $("lnkedit-rows").querySelectorAll("input[data-site]")) {
+    let v;
+    if (inp.dataset.key && inp.dataset.key !== "__new__")
+      v = inp.dataset.key.split(":").slice(1).join(":");
+    else
+      v = inp.value.split("·")[0].trim().toLowerCase();  // raw name → auto-add
+    slots[inp.dataset.site] = v;
+  }
+  const r = await API.apply_link_editor(lnkeditKey, slots);
+  if (r.ok) {
+    toast(`🔗 Links updated — ${r.group.length} account(s) in the group`);
+    $("lnkedit").hidden = true;
+    savedCache.version = -1;
+  } else toast(r.error || "Failed", true);
+});
+
+/* clicking a row's 🔗 marker opens the editor for that model */
+document.addEventListener("click", (e) => {
+  const l = e.target.closest(".row .lnk");
+  if (!l) return;
+  const row = l.closest(".row[data-key]");
+  if (row) { e.stopPropagation(); openLinkEditor(row.dataset.key); }
+});
+
 /* filters + sorting */
 $("rec-filter").addEventListener("input", (e) => { filter.rec = e.target.value.trim(); retab("rec"); });
 $("saved-filter").addEventListener("input", (e) => { filter.saved = e.target.value.trim(); rebuildSavedDisplay(); });
@@ -1715,6 +2012,42 @@ for (const tab of ["rec", "saved"]) {
     if (tab === "rec") retab("rec"); else rebuildSavedDisplay();
   });
 }
+/* Rank filter (single-select): show only rows ranked ≥ N stars, or unranked. */
+function updateRankfLabel(tab) {
+  const rf = rankFilter[tab];
+  const root = $(`${tab}-rankf`);
+  const btn = root.querySelector(".msf-btn");
+  btn.classList.toggle("active", rf !== 0);
+  btn.textContent = (rf === 0 ? "Rank: All"
+    : rf === -1 ? "Rank: Unranked"
+    : rf === 5 ? "Rank: ★5"
+    : `Rank: ★${rf}+`) + " ▾";
+  root.querySelectorAll(".msf-menu label[data-v]").forEach(l => {
+    const cb = l.querySelector(".cb");
+    if (cb) cb.classList.toggle("on", Number(l.dataset.v) === rf);
+  });
+}
+for (const tab of ["rec", "saved"]) {
+  const root = $(`${tab}-rankf`);
+  const menu = root.querySelector(".msf-menu");
+  root.querySelector(".msf-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const wasOpen = !menu.hidden;
+    document.querySelectorAll(".msf-menu").forEach(m => m.hidden = true);
+    menu.hidden = wasOpen;
+  });
+  menu.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const lab = e.target.closest("label[data-v]");
+    if (!lab) return;
+    const v = lab.dataset.v === "__clear" ? 0 : Number(lab.dataset.v);
+    rankFilter[tab] = (rankFilter[tab] === v) ? 0 : v;   // re-click clears
+    menu.hidden = true;
+    updateRankfLabel(tab);
+    if (tab === "rec") retab("rec"); else rebuildSavedDisplay();
+  });
+}
+
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".msf"))
     document.querySelectorAll(".msf-menu").forEach(m => m.hidden = true);

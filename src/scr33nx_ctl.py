@@ -20,6 +20,16 @@ COMMANDS
   stop-all                                    stop ALL downloads + clear AUTO
   clear                                        stop everything + REMOVE all models
   dashboard                                    per-site + totals status snapshot
+  models        [--site S] [--recording] [--online] [--min-rank N]
+                                              list every tracked model with its
+                                              status/rank (one bulk call)
+  link          <a> <b> [--site-a S] [--site-b S]
+                                              mark two models as the same person
+                                              (rank syncs; extension warns on
+                                              duplicate recording)
+  unlink        <link|name> [--site S]        remove a model from its group
+  links                                        list identity groups + same-name
+                                              suggestions
   monitor       recorder|saved on|off         start/stop a monitor/scanner
   pipeline      on|off                         start/stop the pipeline (stand-by)
   pipeline      convert|upload on|off          tick/untick a stage (any time)
@@ -38,6 +48,12 @@ EXAMPLES
   python scr33nx_ctl.py stop-all
   python scr33nx_ctl.py clear
   python scr33nx_ctl.py dashboard
+  python scr33nx_ctl.py models --recording
+  python scr33nx_ctl.py models --online --min-rank 4
+  python scr33nx_ctl.py link "chaturbate.com/alice" "stripchat.com/alicexx"
+  python scr33nx_ctl.py link alice bobby --site-a chaturbate --site-b stripchat
+  python scr33nx_ctl.py unlink alice --site chaturbate
+  python scr33nx_ctl.py links
   python scr33nx_ctl.py monitor recorder on
   python scr33nx_ctl.py pipeline on
   python scr33nx_ctl.py pipeline convert on
@@ -54,6 +70,25 @@ import urllib.error
 
 API = "http://127.0.0.1:5200"
 SITES = ("chaturbate", "stripchat", "camsoda", "myfreecams")
+
+
+def _api_token() -> str:
+    """Optional shared secret for the local API (Settings → Local API).
+    Sources, in order: SCR33NX_TOKEN env var, then api_token in the app's
+    own config file — so the CLI keeps working with zero setup when the
+    user sets a token in the app."""
+    tok = os.environ.get("SCR33NX_TOKEN", "").strip()
+    if tok:
+        return tok
+    cfg = os.path.join(os.path.expanduser("~"), ".streamrecorder_config.json")
+    try:
+        with open(cfg, "r", encoding="utf-8") as f:
+            return str(json.load(f).get("api_token", "") or "").strip()
+    except Exception:
+        return ""
+
+
+_TOKEN = _api_token()
 
 
 def parse_model_input(raw: str, default_site: str = "") -> tuple[str, str]:
@@ -85,6 +120,8 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
     req = urllib.request.Request(url, data=data, method=method)
     if data is not None:
         req.add_header("Content-Type", "application/json")
+    if _TOKEN:
+        req.add_header("X-Api-Token", _TOKEN)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return json.loads(r.read() or b"{}")
@@ -253,6 +290,47 @@ def cmd_dashboard(a):
     return _request("GET", "/dashboard")
 
 
+def cmd_models(a):
+    """One bulk /models call, filtered locally — lets the bot answer
+    "who's recording?" / "which of my 4★+ models are live?" in one shot."""
+    res = _request("GET", "/models")
+    if not res.get("ok"):
+        return res
+    ms = res.get("models", [])
+    if a.site:
+        ms = [m for m in ms if m.get("site") == a.site]
+    if a.recording:
+        ms = [m for m in ms if m.get("status") == "recording"]
+    elif a.online:   # "online" = live right now, so recording counts too
+        ms = [m for m in ms if m.get("status") in ("online", "recording")]
+    if a.min_rank:
+        ms = [m for m in ms if int(m.get("rank") or 0) >= a.min_rank]
+    return {"ok": True, "recording": res.get("recording", 0),
+            "count": len(ms), "models": ms}
+
+
+def cmd_link(a):
+    na, sa, err = _resolve(a.target_a, a.site_a)
+    if err:
+        return err
+    nb, sb, err = _resolve(a.target_b, a.site_b)
+    if err:
+        return err
+    return _request("POST", "/link", {"a": {"name": na, "site": sa},
+                                      "b": {"name": nb, "site": sb}})
+
+
+def cmd_unlink(a):
+    name, site, err = _resolve(a.target, a.site)
+    if err:
+        return err
+    return _request("POST", "/unlink", {"name": name, "site": site})
+
+
+def cmd_links(a):
+    return _request("GET", "/links")
+
+
 def cmd_monitor(a):
     return _request("POST", "/monitor",
                     {"target": a.which, "enabled": a.state == "on"})
@@ -356,6 +434,26 @@ def main() -> int:
     s = sub.add_parser("stop-all");      s.set_defaults(fn=cmd_stop_all)
     s = sub.add_parser("clear");         s.set_defaults(fn=cmd_clear)
     s = sub.add_parser("dashboard");     s.set_defaults(fn=cmd_dashboard)
+    s = sub.add_parser("models")
+    s.add_argument("--site", default="", choices=("",) + SITES,
+                   help="only models on one site")
+    s.add_argument("--recording", action="store_true",
+                   help="only models recording right now")
+    s.add_argument("--online", action="store_true",
+                   help="only live models (online or recording)")
+    s.add_argument("--min-rank", type=_rank_arg, default=0,
+                   help="only models ranked N+ stars")
+    s.set_defaults(fn=cmd_models)
+    s = sub.add_parser("link")
+    s.add_argument("target_a", help="first model (URL or username)")
+    s.add_argument("target_b", help="second model (URL or username)")
+    s.add_argument("--site-a", default="", choices=("",) + SITES,
+                   help="site for a bare first username")
+    s.add_argument("--site-b", default="", choices=("",) + SITES,
+                   help="site for a bare second username")
+    s.set_defaults(fn=cmd_link)
+    s = sub.add_parser("unlink");        add_target(s); s.set_defaults(fn=cmd_unlink)
+    s = sub.add_parser("links");         s.set_defaults(fn=cmd_links)
     s = sub.add_parser("monitor")
     s.add_argument("which", choices=("recorder", "saved"))
     s.add_argument("state", choices=("on", "off"))

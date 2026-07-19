@@ -4,15 +4,23 @@ While Scr33nX is running it serves a small HTTP API on
 `http://127.0.0.1:5200`, used by the [[Browser Extension|Browser-Extension]]
 **and** by external automation (e.g. the [[OpenClaw Bot|OpenClaw-Bot]]).
 
-> **Security:** the API is **loopback‑only** (no remote access) and
-> **unauthenticated** — anything running on your PC can call it. Don't expose
-> port 5200 to the network.
+> **Security:** the API is **loopback‑only** (no remote access) and **open by
+> default** — anything running on your PC can call it. Don't expose port 5200
+> to the network. Optionally set an **API token** in ⚙ Settings → Local API:
+> every request must then carry it in the `X-Api-Token` header (or `?token=`
+> on GETs) or it gets `401 unauthorized`. The browser extension (⚙ **API
+> token…** in its popup) and `scr33nx_ctl.py` (reads the app's config file,
+> or the `SCR33NX_TOKEN` env var) both support it.
 
 ## Endpoints
 
 | Method & path | Body | Action |
 |---|---|---|
 | `GET /status` | `?name=&site=` | model state: `in_recorder`, `in_saved`, `status`, `auto`, `rank` |
+| `GET /models` | — | bulk snapshot: every Recorder + Saved model with the same per‑model fields as `/status`, plus per‑model `aka`/`linked_recording` and a global `recording` count — one call for clients tracking many models (the extension badges use it) |
+| `GET /links` | — | identity groups (`links`) + same‑username‑on‑another‑site `suggestions` |
+| `POST /link` | `{a:{name,site}, b:{name,site}}` | mark two tracked models as the same person — ranks sync across the group (highest wins); `/status` & `/models` report the aliases |
+| `POST /unlink` | `{name, site}` | remove one model from its identity group |
 | `GET /dashboard` | — | aggregate snapshot: per‑site (`CB`/`SC`/`CS`/`MFC`) + `all` totals of `total`/`recording`/`online`/`offline` |
 | `POST /add` | `{name, site, target}` | add to `recorder` or `saved` |
 | `POST /record` | `{name, site, action}` | `start` / `stop` recording one model |

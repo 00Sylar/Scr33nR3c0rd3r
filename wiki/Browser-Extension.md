@@ -5,8 +5,8 @@ page, and lets you set a **1–5 star rank** from the popup once the model is in
 Saved Models or the Recorder. Scr33nX must be running — the extension talks to
 the app's local API at `http://localhost:5200`.
 
-> The Chromium and Firefox popups are functionally identical; they differ only
-> in `chrome.` vs `browser.` API calls.
+> The Chromium and Firefox versions are functionally identical; they differ
+> only in `chrome.` vs `browser.` API calls.
 
 ## Install — Chromium (Chrome / Brave / Opera / Edge)
 
@@ -23,6 +23,11 @@ the app's local API at `http://localhost:5200`.
 > Firefox removes temporary add‑ons on restart — reload it after restarting, or
 > package it as a signed add‑on for a permanent install.
 
+> **Firefox permissions:** MV3 host permissions are opt‑in. After loading the
+> add‑on, open `about:addons` → Scr33nX → **Permissions** and grant access to
+> the cam sites — without it the listing badges (below) won't appear and the
+> background badge can't read tab URLs.
+
 ## What the popup does
 
 - **Add** the current model's page to the Recorder or Saved Models in one click
@@ -32,7 +37,55 @@ the app's local API at `http://localhost:5200`.
   "orphan" ranks).
 - **Live status** — while the popup is open it keeps polling the backend, so the
   model's status, rank, and list membership update in place.
+- **API token** — if you set a token in Scr33nX (⚙ Settings → Local API), the
+  popup automatically switches to a token form the first time the app rejects
+  it; paste the token once and it's stored in the extension. Change it later
+  via the small **⚙ API token…** link at the bottom of the popup.
 
-Under the hood the popup calls the [[Local Control API|Local-Control-API]]
-(`/status`, `/add`, `/rank`, …). If clicks do nothing, confirm Scr33nX is
-running and only **one** instance is open (see [[Troubleshooting]]).
+## Dynamic toolbar badge
+
+The extension icon carries a live badge, updated on every tab switch /
+navigation and every 30 s in the background:
+
+| Badge | Meaning |
+|---|---|
+| **REC** (red, on a model's page) | that model is **recording right now** |
+| **REC** (amber) | a **linked account** of this model is recording on another site (see [[linked identities\|Features#linked-identities]]) — starting here would double‑record the same person |
+| **ON** (green) | in your Recorder and online, not recording |
+| **OFF** (grey) | in your Recorder, offline / idle |
+| **★** (blue) | in Saved Models only |
+| **number** (red, any other tab) | count of active recordings across the app |
+
+Hovering the icon on a model's page shows the model name + state as a tooltip.
+No badge at all means the app isn't running (or the model isn't tracked and
+nothing is recording).
+
+When the model has **linked accounts** on other sites, the popup lists each
+alias with its live state (`🔗 bobby @ Stripchat — RECORDING`) and shows an
+amber "⚠ Already recording on … as …" banner above the Start button when one
+of them is being recorded. Starting is never blocked — the warning just stops
+you from double‑recording the same person by accident. The amber **REC**
+variant also appears on listing‑page thumbnails.
+
+## Listing badges (browse pages)
+
+On Chaturbate / Stripchat / Camsoda / MyFreeCams **browse/listing pages**,
+thumbnails of models you already track get a small corner badge: a pulsing red
+**REC**, green **ON**, grey **OFF**, or blue **★** — same meanings as the
+toolbar badge. You can tell at a glance who is already being recorded without
+opening their room. Hover a badged card for the model's name and state. Badges
+refresh every ~10 s (and as new cards load while you scroll); untracked models
+get no badge. Everything is fed by **one** cached `/models` call, so a page
+with 100 thumbnails costs the same as one status check.
+
+## Right‑click add
+
+Right‑click any model link or thumbnail on the cam sites →
+**Add to Scr33nX Recorder** or **Add to Scr33nX Saved Models** — adds the
+model without opening their page. The listing badge appears on the card a few
+seconds later as confirmation.
+
+Under the hood the extension calls the [[Local Control API|Local-Control-API]]
+(`/status`, `/models`, `/add`, `/rank`, …). If clicks do nothing, confirm
+Scr33nX is running and only **one** instance is open (see
+[[Troubleshooting]]).
