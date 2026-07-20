@@ -6,6 +6,52 @@ in the repository, and each version is also a
 
 ---
 
+## V2.2 — 2026‑07‑20
+
+**Linked identities.** Scr33nX now understands when the same model has
+accounts on multiple sites — link them once and her star rank stays in sync
+everywhere, with a warning (never a block) if you're about to double‑record
+her under a different username.
+
+**Added**
+- **🔗 Linked identities (aka groups)** — link a model's accounts across
+  sites from the web UI, the bot/CLI (`link`/`unlink`/`links`), or the API
+  (`POST /link`, `POST /unlink`, `GET /links`). Ranks sync across the group;
+  the extension warns (never blocks) if a linked account is already
+  recording elsewhere. A link editor supports bulk linking and
+  same‑username suggestions.
+- **Browser extension: dynamic badges** — the toolbar icon shows live REC/
+  ON/OFF/★ state for the current tab (or an active‑recording count
+  elsewhere); browse pages get the same badges on thumbnails of tracked
+  models. Right‑click any model link/thumbnail to add it without opening
+  the page.
+- **`GET /models` API** — bulk snapshot of every tracked model in one call
+  (feeds the extension badges); wrapped by `scr33nx_ctl.py` / the bot as
+  `models [--site] [--recording] [--online] [--min-rank]`.
+- **Config backups + corruption recovery** — the settings file keeps 3
+  rotating backups; a corrupt config now restores the newest good backup
+  automatically instead of silently wiping your models and ranks.
+- **Model audit log** (`models_audit.log`) — every add/remove/rank/VIP/
+  import/export/Clear Recorder event, timestamped and source‑tagged.
+- **Optional local‑API token** — lock down port 5200 with a token
+  (Settings → Local API); supported by the extension and `scr33nx_ctl.py`.
+- **Rank filter**, **★ Fill Top Ranked** (Player tab), star ranks visible in
+  the preview/Player/Theater tiles, Max Player tiles raised to 100, and a
+  **🧹 Clear Player** button.
+
+**Fixed**
+- **Low‑disk guard could leave orphaned ffmpeg processes running and
+  downloading** even after the UI reported 0 active recordings — caused by
+  a race between the Recorder and Saved monitor loops when a model was
+  tracked in both. Session start/split/restart is now serialized per model,
+  and the guard's "stop everything" sweep now force‑kills every recorder
+  process ever launched, not just the ones currently tracked.
+- Telegram-pipeline splits now honor **Max File Size** instead of a
+  hardcoded ~3.8 GB cap; Esc no longer hangs the Telegram login prompt;
+  Convert no longer retries a broken `.ts` forever; Clear Recorder now
+  waits for every ffmpeg process to actually exit before clearing the list;
+  a Recorder-list race that could intermittently render it empty is fixed.
+
 ## V2.1 — 2026‑07‑09
 
 **The ▶ Player tab.** Watch several live models at once inside the app, and

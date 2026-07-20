@@ -10,6 +10,20 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+---
+
+## V2.2 — 2026-07-20
+
+**Linked identities.** Scr33nX now understands when the same model has
+accounts on multiple sites — link them once and her star rank stays in sync
+everywhere, with a warning (never a block) if you're about to double-record
+her under a different username. Plus a big round of browser-extension
+upgrades (dynamic badges, right-click add), config-corruption recovery, a
+full model audit log, an optional local-API token, several Player tab
+refinements, and a fix for a low-disk-guard bug that could leave ffmpeg
+processes running — and downloading — long after the app reported 0 active
+recordings.
+
 ### Added
 - **Linked identities (🔗 aka groups).** Link the accounts one model has on
   different sites — same or different usernames — so Scr33nX knows they're
@@ -124,6 +138,20 @@ grouped by date / milestone.
   them.)
 
 ### Fixed
+- **Low-disk guard (and Stop All / Clear Recorder) could leave orphaned ffmpeg
+  processes running, still downloading and writing to disk, even though the
+  UI showed 0 active recordings.** A model that's in both the Recorder list
+  and Saved Models list has its split/stall housekeeping polled by two
+  independent monitor loops; with no lock between them, both could act on the
+  same session at a split point and each launch a replacement ffmpeg process
+  — only one wins the tracked session reference, so the other kept running
+  forever, invisible to Stop All, Clear Recorder, and the low-disk guard
+  (which showed "⛔ LOW DISK — recording blocked" while the orphan kept
+  eating bandwidth and disk space). Session start/split/restart is now
+  serialized per model (`ModelConfig.session_lock`), and `stop_all_recordings`
+  additionally sweeps every process this app has ever launched — not just the
+  one a model currently references — so a bookkeeping mismatch can no longer
+  leave a process behind.
 - **Esc on the Telegram login prompt no longer hangs the pipeline.** Pressing
   Escape on the phone/OTP/2FA prompt used to hide the dialog without
   answering it, leaving the upload worker blocked for up to 5 minutes. Esc

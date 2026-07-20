@@ -81,6 +81,15 @@ class ModelConfig:
     # True after an explicit user stop (stop button / stop monitor) — blocks
     # the delayed auto-restart from resurrecting a recording the user ended.
     stop_requested: bool = False
+    # Serialises split/stall/exit handling for this model. A model can be in
+    # BOTH the "recorder" and "saved" groups, each polled by its own monitor
+    # thread on its own timer — without this lock both threads could run
+    # _session_housekeeping for the same session at once, each see the split
+    # threshold crossed, and each launch a replacement ffmpeg process. Only
+    # the last one to run wins cfg.session, orphaning the other: it keeps
+    # downloading/writing forever, invisible to Stop All / Clear Recorder /
+    # the low-disk guard (they only ever kill what's referenced by cfg.session).
+    session_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 # ── Chaturbate ────────────────────────────────────────────────────────────────
@@ -630,6 +639,15 @@ class StreamRecorder:
         # monitor is off (e.g. user clicked REC without starting monitoring).
         self._session_watcher_started = False
 
+        # Every ffmpeg/recorder process ever launched, independent of which
+        # one (if any) a ModelConfig currently references. stop_all_recordings
+        # kills from this list rather than trusting cfg.session bookkeeping
+        # alone, so a model whose tracked session got out of sync with reality
+        # (e.g. a bug that let two processes get launched for one split) can't
+        # leave an orphan running and consuming bandwidth/disk after "stop all".
+        self._all_procs: list[subprocess.Popen] = []
+        self._all_procs_lock = threading.Lock()
+
     def _on_relay_gap(self, label: str, missed: int, seconds: float):
         """Relay callback (prefetch thread): segments expired unfetched."""
         self._log(f"⚠ {label}: {missed} segment(s) (~{seconds:.0f}s) lost — "
@@ -895,10 +913,13 @@ class StreamRecorder:
         the monitor threads. Returns how many sessions were stopped."""
         with self._lock:
             victims = []
+            tracked_procs = set()
             for cfg in self.models.values():
                 if not cfg.session:
                     continue
                 victims.append(cfg.session)
+                if cfg.session.process:
+                    tracked_procs.add(cfg.session.process)
                 cfg.session = None
                 cfg.stop_requested = True
                 # OFFLINE so the GUI doesn't immediately auto-rec it again
@@ -914,8 +935,34 @@ class StreamRecorder:
             t.start()
         for t in threads:
             t.join(timeout=20)
-        self._log(f"Stopped all downloads ({len(victims)} active).")
-        return len(victims)
+
+        # Safety net: kill any launched process that's still alive but NOT
+        # referenced by any cfg.session — an orphan left over from a bug that
+        # let two processes get launched for the same split/restart (only the
+        # last writer wins cfg.session; the loser used to run forever, immune
+        # to this function, invisible to the low-disk guard). Sweeping the
+        # full launch history instead of trusting the per-model bookkeeping
+        # means "stop everything" really means everything.
+        with self._all_procs_lock:
+            live = [p for p in self._all_procs if p.poll() is None]
+            self._all_procs = live
+            orphans = [p for p in live if p not in tracked_procs]
+        if orphans:
+            self._log(f"⚠ Found {len(orphans)} orphaned recorder process(es) "
+                      f"not tracked by any model — force-killing.")
+            orphan_threads = [
+                threading.Thread(target=graceful_stop, args=(p,),
+                                 kwargs={"timeout": 5}, daemon=True)
+                for p in orphans
+            ]
+            for t in orphan_threads:
+                t.start()
+            for t in orphan_threads:
+                t.join(timeout=15)
+
+        self._log(f"Stopped all downloads ({len(victims)} active"
+                  f"{f', {len(orphans)} orphaned' if orphans else ''}).")
+        return len(victims) + len(orphans)
 
     # ── Low-disk guard ────────────────────────────────────────────────────────
 
@@ -1037,15 +1084,23 @@ class StreamRecorder:
                 pool.shutdown(wait=False, cancel_futures=True)
 
     def _session_housekeeping(self, cfg: ModelConfig):
-        """Split/stall/exit handling for an active session (fast, no network)."""
+        """Split/stall/exit handling for an active session (fast, no network).
+        Locked per-model: a model in both the "recorder" and "saved" groups
+        gets ticked by two monitor threads, and this path launches replacement
+        ffmpeg processes (split/restart) — without the lock both threads can
+        race past the same split/exit check and each launch one, orphaning
+        whichever loses the cfg.session assignment (see ModelConfig.session_lock)."""
         if not cfg.session:
             return
-        self._check_split(cfg)
-        if cfg.session and cfg.session.process:
-            if cfg.session.process.poll() is not None:
-                self._handle_ffmpeg_exit(cfg)
-            else:
-                self._check_stall(cfg)
+        with cfg.session_lock:
+            if not cfg.session:
+                return
+            self._check_split(cfg)
+            if cfg.session and cfg.session.process:
+                if cfg.session.process.poll() is not None:
+                    self._handle_ffmpeg_exit(cfg)
+                else:
+                    self._check_stall(cfg)
 
     def _check_online_safe(self, cfg: ModelConfig):
         try:
@@ -1118,6 +1173,12 @@ class StreamRecorder:
                                      site=cfg.site,
                                      label=f"{cfg.site}:{cfg.name}")
         self._drain_stderr(proc, cfg.name)
+        if proc is not None:
+            with self._all_procs_lock:
+                # Prune exited processes here (rather than a separate timer)
+                # so the list can't grow unbounded over a long-running session.
+                self._all_procs = [p for p in self._all_procs if p.poll() is None]
+                self._all_procs.append(proc)
         return proc
 
     def _saved_monitor_loop(self):
@@ -1300,6 +1361,17 @@ class StreamRecorder:
                 self._set_status(cfg, new, "")
 
     def _begin_recording(self, cfg: ModelConfig, stream_url: str):
+        # Serialised with _session_housekeeping (same per-model lock): manual
+        # REC, auto-rec, and the delayed auto-restart can all reach this, and
+        # without the lock two callers racing here would both pass the
+        # `cfg.session` check below and each launch an ffmpeg process —
+        # exactly the orphaned-process bug this lock exists to prevent.
+        with cfg.session_lock:
+            self._begin_recording_locked(cfg, stream_url)
+
+    def _begin_recording_locked(self, cfg: ModelConfig, stream_url: str):
+        if cfg.session:
+            return   # another thread already started a session for this model
         # Low-disk guard: refuse every start (manual REC, auto-rec, restart)
         # while the output drive is below the threshold.
         free = self.low_disk_blocked()

@@ -41,7 +41,13 @@ ffmpeg never talks to the CDN directly. All HLS traffic goes through a relay on
   online; if not, it stops right away instead of waiting for the full 60 s
   stall timeout.
 - **Low‑disk guard** (optional) — stops every active recording and blocks new
-  ones while the output drive has under 20 GB free; recovers automatically.
+  ones while the output drive is below your configured **Stop below** free‑space
+  threshold; recovers automatically once free space climbs back to **Resume
+  at**. As of V2.2, the stop sweep force‑kills every recorder process the app
+  has ever launched — not just the one each model currently tracks — closing
+  a bug where a model in both the Recorder and Saved lists could end up with
+  an untracked, orphaned ffmpeg process that kept downloading/writing forever,
+  invisible to the guard.
 - **Single‑instance lock** — a second Scr33nX can't bind the API port, so it
   can't silently corrupt the first instance's models/ranks on save.
 

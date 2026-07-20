@@ -203,6 +203,15 @@ ffmpeg -hide_banner -loglevel error
     seconds (default 30), with a 5 s base tick for session housekeeping.
   - The `saved` loop uses a **bulk scanner** because per-model polling doesn't
     scale to hundreds of watchlist entries (see §3 Chaturbate).
+  - Because a model can be in both groups, session housekeeping
+    (`_session_housekeeping` → split/stall/exit handling, and `_begin_recording`)
+    is serialized per model via `ModelConfig.session_lock`. Without it, both
+    monitor threads could act on the same session at a split point at the same
+    time and each launch a replacement ffmpeg process — only one wins the
+    `cfg.session` reference, so the other ran forever, invisible to Stop All /
+    Clear Recorder / the low-disk guard (all of which only ever act on what
+    `cfg.session` currently points to). Fixed — see the [Unreleased] entry in
+    CHANGELOG.md.
 - **Auto start/stop** — when a resolver returns a URL the model is `ONLINE`;
   recording begins automatically. When she goes offline ffmpeg exits and status
   returns to `OFFLINE`.
@@ -241,7 +250,11 @@ ffmpeg -hide_banner -loglevel error
   status `ERROR: Low disk`; `_check_split` also refuses to open the next part.
   A probe failure never blocks (`_disk_free_gb` returns `None` → not blocked).
   One toast on trip, one log line on recovery; refused-start log lines are
-  throttled to one per minute.
+  throttled to one per minute. `stop_all_recordings` (which the trip calls)
+  also sweeps every process ever launched via `_launch_proc` — not just the
+  ones a `cfg.session` currently references — and force-kills any that are
+  still alive but untracked, so a bookkeeping mismatch elsewhere can't leave
+  a process running (and downloading/writing) past the guard tripping.
 - **Session watcher** — an always-on background loop handles split/stall/exit
   even when the monitor is off (e.g. user clicked REC manually). It idles while
   any monitor is running to avoid double-handling.
