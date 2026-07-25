@@ -6,6 +6,31 @@ in the repository, and each version is also a
 
 ---
 
+## V2.3 — 2026‑07‑25
+
+**Cross-site recording warnings, now in the app itself.** V2.2 taught the
+browser extension to flag when a linked model is already being recorded
+elsewhere; V2.3 brings that same protection into the app and turns it from
+a passive warning into an active confirmation before a recording starts —
+plus a Player tab refinement.
+
+**Added**
+- **In‑app cross‑site warnings** — the 🔗 marker on Recorder / Saved rows
+  and Player tiles escalates live: amber **🔗⧉** (same person also in the
+  Recorder on another site), red **REC·SITE** (a linked account is
+  recording now), or **REC ×2** (both are). Hover for the exact accounts.
+- **"Record anyway?" confirmation** — starting a recording on a model whose
+  linked account is already being recorded now asks first, in both the app
+  (a confirm dialog) and the browser extension (an inline **Yes, record /
+  Cancel** swap on the Start button). Recording is still never silently
+  blocked — just gated behind one click. Adding without starting still just
+  shows a heads‑up toast, logged to the Activity Log.
+- **AUTO toggle on the Player's Theater tile** — flip Auto‑Record for the
+  model you're watching without leaving the Player; dimmed until the model
+  is in the Recorder. Theater tile only.
+
+---
+
 ## V2.2 — 2026‑07‑20
 
 **Linked identities.** Scr33nX now understands when the same model has

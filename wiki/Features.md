@@ -48,7 +48,10 @@ See [[Recording Internals|Recording-Internals]] for how all of this works.
 - **▶ Player tab** *(default UI only)* — open several models as live tiles
   picked from Recorder/Saved Models. All tiles stream **muted** at once in a
   **Grid** wall; click a tile for **Theater** mode (that tile large, with
-  player controls and **▶ REC / ⏹ Stop**, the rest in a Bottom/Side thumbnail
+  player controls, **▶ REC / ⏹ Stop**, and an **AUTO** toggle to flip
+  Auto‑Record without leaving the Player (dimmed until the model is in the
+  Recorder, since Auto‑Record only applies there; Theater tile only, grid
+  tiles stay clean), the rest in a Bottom/Side thumbnail
   strip, still playing). Add tiles via **+ Add Tile** or right‑click an
   online/recording model → **▶ Add to Player**. Tiles start streaming the
   moment they're added and keep streaming while other tabs are in front, so
@@ -106,10 +109,19 @@ those accounts as one person:
 - **Rank sync** — rating any linked account re‑rates all of them, so the same
   person carries the same stars everywhere (when you first link two accounts
   with different ranks, the higher one wins).
-- **Duplicate‑recording warning** — the browser extension shows an **amber
-  REC** badge (toolbar + listing thumbnails) and an "already recording on …"
-  popup warning when a linked account is being recorded on another site.
-  Recording is never blocked, only flagged.
+- **Duplicate‑recording warnings, in the app and the extension.** The web
+  UI's 🔗 marker (Recorder rows, Saved rows, Player tiles) escalates with
+  live state: amber **🔗⧉** when the same person is also in the Recorder on
+  another site, a red **REC·SITE** chip when a linked account is being
+  recorded right now, and **REC ×2** when both are recording at once — hover
+  it for the exact accounts. **Starting** a recording (row menu, Saved,
+  Player tile, or preview REC) on a model whose linked account is already
+  recording asks **"Record anyway?"** first — Cancel aborts, nothing starts
+  behind your back. The browser extension asks the same question: its
+  **⏺ Start Recording** button swaps to an inline **✔ Yes, record / ✕ Cancel**
+  confirm, and the toolbar/listing‑thumbnail badge still shows the amber
+  **REC** variant. Just *adding* (without starting) only shows a heads‑up
+  toast — recording is the only action that's gated.
 - **Link editor** — right‑click any model → **🔗 Edit Links…** (or click a
   row's 🔗 marker): one card with her account on each of the four sites,
   filled via type‑ahead search over your tracked models. A username you

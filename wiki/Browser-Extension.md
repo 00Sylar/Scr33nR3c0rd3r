@@ -62,10 +62,14 @@ nothing is recording).
 
 When the model has **linked accounts** on other sites, the popup lists each
 alias with its live state (`🔗 bobby @ Stripchat — RECORDING`) and shows an
-amber "⚠ Already recording on … as …" banner above the Start button when one
-of them is being recorded. Starting is never blocked — the warning just stops
-you from double‑recording the same person by accident. The amber **REC**
-variant also appears on listing‑page thumbnails.
+amber "⚠ Already recording on … as …" banner when one of them is being
+recorded. The amber **REC** variant also appears on listing‑page thumbnails.
+
+If you click **⏺ Start Recording** while a linked account is already
+recording, the button swaps to an inline confirm — **✔ Yes, record** /
+**✕ Cancel** — instead of starting immediately. Recording is never blocked
+outright; the confirm just stops an accidental double‑record. Cancel returns
+you to the normal popup with nothing started.
 
 ## Listing badges (browse pages)
 

@@ -377,12 +377,15 @@ async function render(appData) {
   }
 
   // ── Start Recording ────────────────────────────────────────────────────────
+  // When a linked account of this person is already being recorded on another
+  // site, the first click swaps the button for an inline Yes/Cancel confirm
+  // (window.confirm is unreliable inside extension panels).
   const btnStart = document.getElementById('btn-start');
   if (btnStart) {
-    btnStart.addEventListener('click', async () => {
+    const doStart = async (btn) => {
       const fb = document.getElementById('fb');
-      btnStart.disabled = true;
-      btnStart.textContent = '…  Starting';
+      btn.disabled = true;
+      btn.textContent = '…  Starting';
       try {
         const res = await postRecord(info.name, info.site, 'start');
         if (res.ok) {
@@ -393,17 +396,33 @@ async function render(appData) {
           // recovers the UI if the status never changes (e.g. the model is offline).
           scheduleResync(10000);
         } else {
-          btnStart.disabled = false;
-          btnStart.textContent = '⏺  Start Recording';
+          btn.disabled = false;
+          btn.textContent = '⏺  Start Recording';
           fb.className = 'feedback err';
           fb.textContent = res.error || 'Failed';
         }
       } catch {
-        btnStart.disabled = false;
-        btnStart.textContent = '⏺  Start Recording';
+        btn.disabled = false;
+        btn.textContent = '⏺  Start Recording';
         fb.className = 'feedback err';
         fb.textContent = 'Could not reach StreamRecorder';
       }
+    };
+    btnStart.addEventListener('click', () => {
+      const lr = appData?.linked_recording;
+      if (!lr) { doStart(btnStart); return; }
+      const wrap = document.createElement('div');
+      wrap.className = 'confirm-rec';
+      wrap.innerHTML =
+        `<div class="confirm-txt">⚠ Already recording on ` +
+        `${SITE_NICE[lr.site] || lr.site} as <b>${lr.name}</b>. Record anyway?</div>` +
+        `<button class="btn btn-start" id="btn-start-yes">✔  Yes, record</button>` +
+        `<button class="btn btn-cancel" id="btn-start-no">✕  Cancel</button>`;
+      btnStart.replaceWith(wrap);
+      document.getElementById('btn-start-yes')
+        .addEventListener('click', () => doStart(document.getElementById('btn-start-yes')));
+      document.getElementById('btn-start-no')
+        .addEventListener('click', () => render());
     });
   }
 

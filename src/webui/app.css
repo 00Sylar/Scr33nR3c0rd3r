@@ -307,7 +307,8 @@ input::placeholder { color: var(--text-3); }
   animation: fadein var(--t-med) var(--ease);
 }
 .modal h3 { font: 600 var(--fs-3) var(--font-display); margin-bottom: var(--sp-3); }
-.modal p { color: var(--text-2); font-size: var(--fs-1); line-height: 1.6; margin-bottom: var(--sp-4); }
+.modal p { color: var(--text-2); font-size: var(--fs-1); line-height: 1.6; margin-bottom: var(--sp-4);
+           white-space: pre-line; }  /* modal() text uses \n line breaks */
 .modal-btns { display: flex; justify-content: flex-end; gap: var(--sp-2); }
 .modal-btns .btn-primary { width: auto; padding: 7px 18px; }
 /* Normalize native radios in the browser picker (kills the momentary
@@ -327,6 +328,7 @@ input::placeholder { color: var(--text-3); }
   animation: fadein var(--t-med) var(--ease);
 }
 .toast.err { border-color: var(--red-line); color: var(--red-bright); }
+.toast.warn { border-color: rgba(255, 178, 36, 0.35); color: var(--warn); }
 
 /* ══ toolbar extras ══ */
 .vsep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--sp-1); flex: none; }
@@ -504,6 +506,21 @@ input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), 
 .row .lnk:hover { opacity: 1; }
 .row .lnk { font-style: normal; margin-left: 5px; font-size: 11px;
             opacity: .75; cursor: default; }
+/* Cross-site link marker states (escalating): amber ⧉ = same person is
+   also in the Recorder on another site; red REC = a linked alias is
+   recording right now (×2 = both are — a double capture). Static colors
+   only, no animation. */
+.lnk b { font-style: normal; font-weight: 700; font-size: 9px;
+         margin-left: 3px; letter-spacing: 0.4px; vertical-align: 1px; }
+.lnk.lnk-dup, .lnk.lnk-rec { opacity: 1; }
+.lnk.lnk-dup b { color: var(--warn); font-size: 11px; vertical-align: 0; }
+.lnk.lnk-rec b { color: var(--red-bright); background: var(--red-subtle);
+                 border: 1px solid var(--red-line); border-radius: var(--r-full);
+                 padding: 1px 6px; }
+.lnk.lnk-both b { color: #fff; background: var(--red); border-color: var(--red); }
+/* player tile: same marker, sized to the tile-info bar */
+.tile-lnk:empty { display: none; }
+.tile-lnk .lnk { font-style: normal; font-size: 11px; }
 .lnk-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
              padding: 7px 0; border-bottom: 1px solid var(--line);
              font-size: var(--fs-1); color: var(--text-2); }
@@ -632,6 +649,15 @@ input[type="range"]::-webkit-slider-thumb:hover { box-shadow: var(--shadow-sm), 
 .tile-recbtn, .tile-stopbtn { display: none; padding: 3px 10px; font-size: var(--fs-0); }
 .theater-active .tile-recbtn, .theater-active .tile-stopbtn { display: inline-block; }
 .theater-active .tile-recbtn { margin-left: auto; }
+/* AUTO toggle: big theater tile only (grid + strip tiles stay clean) */
+.tile-auto { display: none; }
+.theater-active .tile-auto {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-0); color: var(--text-2); letter-spacing: 0.5px;
+  cursor: pointer; user-select: none;
+}
+.tile-auto.na { opacity: 0.4; }
+.tile-auto.na .switch { cursor: default; }
 
 /* Rank stars: shown in the Grid layout (own line right under the model
    name) and on the single big theater tile; still hidden on the small

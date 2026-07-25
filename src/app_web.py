@@ -451,6 +451,22 @@ class WebCore:
         self._persist_models()
         audit.log_event("recorder_add", name=name, site=site, source=source)
         self._log_add(f"Added to Recorder: {name} ({site})", "accent")
+        # Cross-site heads-up (linked identities): warn — never block — when
+        # the same person is already recording or listed on another site.
+        # _link_aka takes _rows_lock, so snapshot the rows afterwards.
+        aka = self._link_aka(name, site)
+        if aka:
+            with self._rows_lock:
+                rows = set(self._rows)
+            for k2 in aka:
+                n2, s2 = model_links.split_key(k2)
+                cfg2 = self.recorder.models.get(k2)
+                if cfg2 and _STATUS_STR.get(cfg2.status) == "recording":
+                    self._log_add(f"⚠ {name} ({site}) is already recording "
+                                  f"as {n2} ({s2})", "warn")
+                elif k2 in rows:
+                    self._log_add(f"⚠ {name} ({site}) is also in the "
+                                  f"Recorder as {n2} ({s2})", "warn")
 
     def _add_to_saved(self, name: str, site: str):
         sid = self._saved_key(name, site)

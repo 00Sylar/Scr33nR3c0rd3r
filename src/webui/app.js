@@ -33,10 +33,87 @@ function lnkLabel(k) {
   const i = k.indexOf(":");
   return `${k.slice(i + 1)} · ${SITE_LABEL[k.slice(0, i)] || k.slice(0, i)}`;
 }
-/* 🔗 marker for a row whose model has linked aliases */
-function lnkHtml(aka) {
+/* Live status of a "site:name" key across the Recorder and the Saved
+   scanner (saved_status only ships non-offline models, so a recording
+   alias is always resolvable). */
+function liveStatusOfKey(key) {
+  const m = (S && S.models || []).find(x => x.key === key);
+  if (m) return m.status;
+  const sv = S && S.saved_status && S.saved_status[`saved:${key}`];
+  return sv ? sv[0] : "offline";
+}
+/* aka list for any tracked model — Recorder row or Saved item. */
+function akaOf(name, site) {
+  const lower = String(name).toLowerCase();
+  const m = (S && S.models || []).find(x => x.key === `${site}:${lower}`);
+  if (m) return m.aka || [];
+  const it = savedCache.items.find(x => x.site === site && x.name.toLowerCase() === lower);
+  return (it && it.aka) || [];
+}
+/* Cross-site state of a model's aliases: which are RECORDING right now,
+   and which also sit in the Recorder list (same person twice). */
+function linkedState(aka) {
+  const out = { rec: [], dup: [] };
+  for (const k of aka || []) {
+    if (liveStatusOfKey(k) === "recording") out.rec.push(k);
+    if (S && (S.models || []).some(x => x.key === k)) out.dup.push(k);
+  }
+  return out;
+}
+/* 🔗 marker for a row/tile whose model has linked aliases. Escalates:
+   plain 🔗 → amber ⧉ (same person also in the Recorder on another site)
+   → red REC chip (a linked alias is recording NOW; ×2 when this row is
+   recording too — a true double capture). */
+function lnkHtml(aka, selfStatus) {
   if (!aka || !aka.length) return "";
+  const ls = linkedState(aka);
+  if (ls.rec.length) {
+    const both = selfStatus === "recording";
+    const sites = ls.rec.map(k => SITE_SHORT[k.slice(0, k.indexOf(":"))] || "?").join("+");
+    const tip = (both ? "DOUBLE RECORDING — also recording as " : "Already recording as ")
+      + ls.rec.map(lnkLabel).join(", ");
+    return `<i class="lnk lnk-rec${both ? " lnk-both" : ""}" title="${esc(tip)}">🔗<b>${both ? "REC ×2" : "REC·" + sites}</b></i>`;
+  }
+  if (ls.dup.length)
+    return `<i class="lnk lnk-dup" title="${esc("Also in Recorder: " + ls.dup.map(lnkLabel).join(", "))}">🔗<b>⧉</b></i>`;
   return `<i class="lnk" title="Linked: ${esc(aka.map(lnkLabel).join(", "))}">🔗</i>`;
+}
+/* Cross-site heads-up toast when ADDING models a linked alias of which is
+   already recording or already listed. Warns only — never blocks the add.
+   Keys may carry a "saved:" prefix. */
+function warnCrossSiteKeys(keys) {
+  const msgs = [];
+  for (let k of keys || []) {
+    k = String(k).replace(/^saved:/, "");
+    const i = k.indexOf(":");
+    const site = k.slice(0, i), name = k.slice(i + 1);
+    const ls = linkedState(akaOf(name, site));
+    if (ls.rec.length)
+      msgs.push(`${name} is already recording as ${ls.rec.map(lnkLabel).join(", ")}`);
+    else if (ls.dup.length)
+      msgs.push(`${name} is already in the Recorder as ${ls.dup.map(lnkLabel).join(", ")}`);
+  }
+  if (msgs.length)
+    toast(`⚠ ${msgs.slice(0, 3).join(" • ")}${msgs.length > 3 ? ` (+${msgs.length - 3} more)` : ""}.`,
+          "warn");
+}
+/* Confirm gate before STARTING a recording when a linked alias of any of
+   the models is already being recorded: "Record anyway" runs proceed(),
+   Cancel drops the whole batch. No conflict → proceed() immediately. */
+function confirmCrossSiteRec(keys, proceed) {
+  const msgs = [];
+  for (let k of keys || []) {
+    k = String(k).replace(/^saved:/, "");
+    const i = k.indexOf(":");
+    const site = k.slice(0, i), name = k.slice(i + 1);
+    const recs = linkedState(akaOf(name, site)).rec;
+    if (recs.length)
+      msgs.push(`${name} (${SITE_SHORT[site] || site}) is already recording as ${recs.map(lnkLabel).join(", ")}`);
+  }
+  if (!msgs.length) { proceed(); return; }
+  modal("⚠ Already recording", msgs.join("\n")
+        + "\n\nThis person is already being recorded on another site. Record anyway?",
+        "Record anyway", proceed);
 }
 
 /* ══ global state ══ */
@@ -181,7 +258,7 @@ function computeRecView(models) {
 function recRowHtml(m) {
   return `
     <span class="cb" data-cb="${esc(m.key)}"></span>
-    <span class="name">${esc(m.name)}${lnkHtml(m.aka)}</span>
+    <span class="name">${esc(m.name)}${lnkHtml(m.aka, m.status)}</span>
     <span class="stars" data-stars="${esc(m.key)}" data-rank="${m.rank}">${starsHtml(m.rank)}</span>
     <span class="st ${m.status}"><span class="dot"></span><span class="st-txt">${STATUS_TXT[m.status]}</span></span>
     <span class="file">${esc(m.file || "—")}</span>
@@ -244,12 +321,13 @@ function renderRec(models) {
       stars.dataset.rank = m.rank;
       stars.innerHTML = starsHtml(m.rank);
     }
-    // 🔗 marker follows link changes without waiting for a full rebuild
+    // 🔗 marker follows link/status changes without waiting for a rebuild
     const nameEl = el.querySelector(".name");
-    const wantLnk = lnkHtml(m.aka);
-    const curLnk = nameEl.querySelector(".lnk");
-    if ((curLnk ? curLnk.outerHTML : "") !== wantLnk)
+    const wantLnk = lnkHtml(m.aka, m.status);
+    if (nameEl.dataset.lnk !== wantLnk) {
+      nameEl.dataset.lnk = wantLnk;
       nameEl.innerHTML = `${esc(m.name)}${wantLnk}`;
+    }
     const sc = el.querySelector(".saved-check");
     sc.classList.toggle("no", !m.saved);
     sc.textContent = m.saved ? "✓" : "—";
@@ -326,7 +404,7 @@ function savedRowHtml(it, top) {
       ${sel.saved.has(it.sid) ? "selected" : ""}" style="top:${top}px"
       data-key="${esc(it.sid)}" data-tab="saved">
     <span class="cb ${checked.saved.has(it.sid) ? "on" : ""}" data-cb="${esc(it.sid)}"></span>
-    <span class="name">${esc(it.name)}${lnkHtml(it.aka)}</span>
+    <span class="name">${esc(it.name)}${lnkHtml(it.aka, it.status)}</span>
     <span class="stars" data-stars="${esc(it.sid)}" data-rank="${it.rank}">${starsHtml(it.rank)}</span>
     <span class="st ${it.status}"><span class="dot"></span><span class="st-txt">${STATUS_TXT[it.status]}</span></span>
     <span class="file">${esc(it.file || "—")}</span>
@@ -937,7 +1015,8 @@ document.addEventListener("contextmenu", (e) => {
   if (tab === "rec") {
     const m = (S.models || []).find(x => x.key === k0);
     const items = single ? [
-      { label: `▶  Start Recording  ${m.name}`, action: () => API.record(keys, true) },
+      { label: `▶  Start Recording  ${m.name}`,
+        action: () => confirmCrossSiteRec(keys, () => API.record(keys, true)) },
       { label: "⏹  Stop Recording", action: () => API.record(keys, false) },
       { label: `${m.auto ? "☑" : "☐"}  Auto-Record`, action: () => API.toggle_auto(keys) },
       { label: `🎞  Max Quality  (${m.q ? m.q + "p" : "Default"})`, sub: qualitySub(keys, m.q) },
@@ -963,7 +1042,8 @@ document.addEventListener("contextmenu", (e) => {
         action: () => API.remove(keys) },
       ...checkHelpers(tab),
     ] : [
-      { label: `▶  Start Recording  (${n} selected)`, action: () => API.record(keys, true) },
+      { label: `▶  Start Recording  (${n} selected)`,
+        action: () => confirmCrossSiteRec(keys, () => API.record(keys, true)) },
       { label: `⏹  Stop Recording  (${n} selected)`, action: () => API.record(keys, false) },
       { label: `☑  Toggle AUTO  (${n} selected)`, action: () => API.toggle_auto(keys) },
       { label: `🎞  Max Quality  (${n} selected)`, sub: qualitySub(keys, null) },
@@ -991,9 +1071,10 @@ document.addEventListener("contextmenu", (e) => {
     const st0 = (S.saved_status || {})[k0];
     const liveNow = st0 && (st0[0] === "online" || st0[0] === "recording");
     const items = single ? [
-      { label: `＋  Add to Recorder  ${it.name}`, action: () => API.saved_to_recorder(keys) },
+      { label: `＋  Add to Recorder  ${it.name}`,
+        action: () => { warnCrossSiteKeys(keys); API.saved_to_recorder(keys); } },
       liveNow ? { label: "▶  Add to Recorder & Start Recording",
-                  action: () => API.saved_record(keys) } : null,
+                  action: () => confirmCrossSiteRec(keys, () => API.saved_record(keys)) } : null,
       { label: "▶  Preview", action: () => doPreview(it.name, it.site) },
       liveNow ? { label: "▶  Add to Player", action: () => addPlayerTile(it.name, it.site) } : null,
       "hr",
@@ -1009,7 +1090,8 @@ document.addEventListener("contextmenu", (e) => {
         action: () => API.saved_remove(keys) },
       ...checkHelpers(tab),
     ] : [
-      { label: `＋  Add to Recorder  (${n})`, action: () => API.saved_to_recorder(keys) },
+      { label: `＋  Add to Recorder  (${n})`,
+        action: () => { warnCrossSiteKeys(keys); API.saved_to_recorder(keys); } },
       { label: `⭐  Set Rank  (${n})`, sub: rankSub(keys, true) },
       { label: `🌟  Add to VIP List  (${n})`, action: () => vipRefresh(() => API.vip_add(keys)) },
       { label: `🌟  Remove from VIP List  (${n})`, action: () => vipRefresh(() => API.vip_remove(keys)) },
@@ -1106,8 +1188,10 @@ $("player-close").addEventListener("click", closePlayer);
 // Start via saved_record (adds the model to the Recorder if it isn't there
 // yet, then records); Stop hits the engine directly.
 function recControl(name, site, start) {
-  if (start) API.saved_record([`saved:${site}:${name}`]);
-  else API.record([`${site}:${name}`], false);
+  if (start) {
+    confirmCrossSiteRec([`${site}:${name}`],
+                        () => API.saved_record([`saved:${site}:${name}`]));
+  } else API.record([`${site}:${name}`], false);
 }
 
 // Live status of a model by name/site, checking both the Recorder engine
@@ -1231,6 +1315,10 @@ function tileHtml(t) {
   const st = statusOfTile(t);
   const playing = playerHls.has(t.id);
   const { key: rkey, rank } = rankInfoFor(t.name, t.site);
+  // AUTO switch is only live when the model is in the Recorder (set_auto
+  // refuses otherwise) — "na" renders it dimmed with a hint instead.
+  // Recorder keys are always lowercase; tile keys may keep Saved-list case.
+  const am = (S && S.models || []).find(x => x.key === t.key.toLowerCase());
   return `
     <div class="tile" data-tile="${t.id}">
       <div class="tile-media">
@@ -1241,10 +1329,12 @@ function tileHtml(t) {
       </div>
       <div class="tile-info">
         <span class="tile-name">${esc(t.name)}</span>
+        <span class="tile-lnk">${lnkHtml(akaOf(t.name, t.site), st)}</span>
         <span class="tile-star stars" data-stars="${esc(rkey)}" data-rank="${rank}">${starsHtml(rank)}</span>
         <span class="tile-site">${SITE_LABEL[t.site] || t.site}</span>
         <button class="btn rec tile-recbtn" data-tile-rec="${t.id}"${st === "online" ? "" : " disabled"}>▶ REC</button>
         <button class="btn tile-stopbtn" data-tile-stop="${t.id}"${st === "recording" ? "" : " disabled"}>⏹ Stop</button>
+        <label class="tile-auto${am ? "" : " na"}" title="${am ? "Auto-record when online" : "Add to Recorder to enable Auto-Record"}"><span class="switch${am && am.auto ? " on" : ""}"${am ? ` data-auto="${esc(t.key.toLowerCase())}"` : ""}></span>AUTO</label>
         <span class="st ${st}"><span class="dot"></span><span class="st-txt">${STATUS_TXT[st]}</span></span>
       </div>
       <div class="tile-actions" data-phase2-slot></div>
@@ -1354,6 +1444,25 @@ function patchPlayerStatuses() {
         starEl.dataset.rank = rank;
         starEl.innerHTML = starsHtml(rank);
       }
+    }
+    // 🔗 cross-site marker (dataset caches the last-set html so the node —
+    // and any open tooltip — is only replaced when the state changes)
+    const lnkEl = document.querySelector(`[data-tile="${t.id}"] .tile-lnk`);
+    if (lnkEl) {
+      const want = lnkHtml(akaOf(t.name, t.site), st);
+      if (lnkEl.dataset.h !== want) { lnkEl.dataset.h = want; lnkEl.innerHTML = want; }
+    }
+    // AUTO switch (theater tile): follows Recorder membership + auto state
+    const autoEl = document.querySelector(`[data-tile="${t.id}"] .tile-auto`);
+    if (autoEl) {
+      const am = (S && S.models || []).find(x => x.key === t.key.toLowerCase());
+      const sw = autoEl.querySelector(".switch");
+      sw.classList.toggle("on", !!(am && am.auto));
+      autoEl.classList.toggle("na", !am);
+      autoEl.title = am ? "Auto-record when online"
+                        : "Add to Recorder to enable Auto-Record";
+      if (am) sw.dataset.auto = t.key.toLowerCase();
+      else delete sw.dataset.auto;
     }
     // "checking" is a transient recorder-poll state, not a real status change
     // — reacting to it stopped live playback every poll cycle.
@@ -1678,10 +1787,10 @@ $("player-stage").addEventListener("click", (e) => {
     if (t) recControl(t.name, t.site, false);
     return;
   }
-  // Rank-star clicks are handled by the global click handler — they must
-  // not ALSO count as a tile click, which would yank the layout into
-  // Theater mode mid-rating.
-  if (e.target.closest(".stars")) return;
+  // Rank-star and AUTO-switch clicks are handled by the global click
+  // handler — they must not ALSO count as a tile click, which would yank
+  // the layout into Theater mode mid-interaction.
+  if (e.target.closest(".stars") || e.target.closest(".tile-auto")) return;
   const tileEl = e.target.closest("[data-tile]");
   if (!tileEl) return;
   const tileId = Number(tileEl.dataset.tile);
@@ -2071,8 +2180,27 @@ async function addModel() {
   const raw = $("add-name").value.trim();
   if (!raw) { toast("Enter a model username or link.", true); return; }
   const res = await API.add_model(raw, $("add-site").value);
-  if (res.ok) { $("add-name").value = ""; toast(`Added ${res.name} (${res.site})`); tick(); }
-  else toast(res.error || "Could not add model.", true);
+  if (res.ok) {
+    $("add-name").value = "";
+    toast(`Added ${res.name} (${res.site})`);
+    warnCrossSiteAdd(res.name, res.site);
+    tick();
+  } else toast(res.error || "Could not add model.", true);
+}
+// Add-flow variant of warnCrossSiteKeys: the model isn't in the snapshot
+// yet, so its aka group comes from the links payload instead.
+async function warnCrossSiteAdd(name, site) {
+  try {
+    const key = `${site}:${String(name).toLowerCase()}`;
+    const r = await API.links();
+    const g = (r.links || []).find(x => x.includes(key));
+    if (!g) return;
+    const ls = linkedState(g.filter(k => k !== key));
+    if (ls.rec.length)
+      toast(`⚠ ${name} is already recording as ${ls.rec.map(lnkLabel).join(", ")}.`, "warn");
+    else if (ls.dup.length)
+      toast(`⚠ ${name} is already in the Recorder as ${ls.dup.map(lnkLabel).join(", ")}.`, "warn");
+  } catch (_) { /* informational only — never block the add */ }
 }
 $("btn-term").addEventListener("click", () => {
   const n = (S && S.active_recordings) || 0;
@@ -2188,10 +2316,10 @@ function askText(title, text, onOk, password = false, onCancel = null) {
   inp.onkeydown = (e) => { if (e.key === "Enter") finish(inp.value.trim()); };
 }
 let toastTimer = null;
-function toast(msg, isErr = false) {
+function toast(msg, kind = false) {
   const t = $("toast");
   t.textContent = msg;
-  t.className = "toast" + (isErr ? " err" : "");
+  t.className = "toast" + (kind === "warn" ? " warn" : kind ? " err" : "");
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 3600);
