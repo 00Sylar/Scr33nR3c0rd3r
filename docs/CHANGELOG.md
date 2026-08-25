@@ -10,6 +10,27 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Added
+- **"Hide cross-site recording" filter (Saved Models tab).** A new checkbox
+  at the bottom of the Status ▾ dropdown hides any model whose linked (🔗)
+  identity is already recording on another site — independent of that row's
+  own status. Combine with **Status: Online** to see only models that are
+  online and not already being captured elsewhere under a different account.
+- **Status/Rank filters for the Player tab's "+ Add Tile" picker.** A
+  Status ▾ / Rank ▾ pair now sits in the Player toolbar, left of ★ Fill Top
+  Ranked, scoping what the picker offers — narrowing thousands of tracked
+  models down to e.g. only ★4+ online ones is as fast as on the Recorder/
+  Saved tabs. They persist until cleared, like the Recorder/Saved filters
+  (only the picker's own name search resets each time it opens), and never
+  affect tiles already open.
+- **Right-click context menu on Player tiles.** A tile now offers the same
+  menu as its model's row on the Recorder or Saved Models tab — start/stop
+  recording, set rank, edit links, VIP, copy URL, open in browser — plus a
+  Player-only **✕ Close Tile** that removes just the tile, leaving the
+  Recorder/Saved entry untouched. A tile whose model was since removed from
+  both (closing a tile never removes it there, and vice versa) gets a
+  minimal menu (Close Tile, Open in Browser).
+
 ---
 
 ## V2.4 — 2026-08-25

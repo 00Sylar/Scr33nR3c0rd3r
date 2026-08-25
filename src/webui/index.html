@@ -145,6 +145,8 @@
               <label data-v="offline"><span class="cb"></span>Offline</label>
               <label data-v="private"><span class="cb"></span>Private</label>
               <label data-v="checking"><span class="cb"></span>Checking</label>
+              <hr><label data-v="__hidexrec" title="Hide models whose linked identity is already recording on another site">
+                <span class="cb"></span>Hide cross-site recording</label>
               <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
             </div>
           </div>
@@ -196,6 +198,30 @@
             <button class="btn mini" data-stripe="side">▥ Strip: Side</button>
           </div>
           <div class="spacer"></div>
+          <div class="msf" id="player-msf" title="Filters the '+ Add Tile' picker — doesn't affect tiles already open.">
+            <button class="btn msf-btn">Status: All ▾</button>
+            <div class="msf-menu" hidden>
+              <label data-v="recording"><span class="cb"></span>Recording</label>
+              <label data-v="online"><span class="cb"></span>Online</label>
+              <label data-v="offline"><span class="cb"></span>Offline</label>
+              <label data-v="private"><span class="cb"></span>Private</label>
+              <label data-v="checking"><span class="cb"></span>Checking</label>
+              <label data-v="error"><span class="cb"></span>Error</label>
+              <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
+            </div>
+          </div>
+          <div class="msf" id="player-rankf" title="Filters the '+ Add Tile' picker — doesn't affect tiles already open.">
+            <button class="btn msf-btn">Rank: All ▾</button>
+            <div class="msf-menu" hidden>
+              <label data-v="5"><span class="cb"></span>★★★★★</label>
+              <label data-v="4"><span class="cb"></span>★★★★ &amp; up</label>
+              <label data-v="3"><span class="cb"></span>★★★ &amp; up</label>
+              <label data-v="2"><span class="cb"></span>★★ &amp; up</label>
+              <label data-v="1"><span class="cb"></span>★ &amp; up (any rank)</label>
+              <label data-v="-1"><span class="cb"></span>Unranked only</label>
+              <hr><label data-v="__clear"><span style="width:16px"></span>Clear filter</label>
+            </div>
+          </div>
           <button class="btn" id="player-fill" title="Fill the Player with your highest-ranked models that are online right now (up to the tile cap).">★ Fill Top Ranked</button>
           <button class="btn" id="player-clear">🧹 Clear Player</button>
           <button class="btn" id="player-add">＋ Add Tile</button>

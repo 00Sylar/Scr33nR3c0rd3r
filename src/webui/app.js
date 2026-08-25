@@ -130,6 +130,10 @@ const sort = { rec: { col: "name", dir: 1 }, saved: { col: "name", dir: 1 } };
 const filter = { rec: "", saved: "" };
 const statusFilter = { rec: new Set(), saved: new Set() };   // empty = all
 const rankFilter = { rec: 0, saved: 0 };   // 0 = all, 1-5 = "rank ≥ N", -1 = unranked only
+// Hide a row if a linked alias (see linkedState) is recording on another
+// site right now — independent of the row's own status, so "Online" +
+// this still excludes a model who's ONLINE here but REC·CB elsewhere.
+const xsiteFilter = { rec: false, saved: false };
 
 function rankMatch(rank, rf) {
   return !rf || (rf === -1 ? !rank : rank >= rf);
@@ -370,12 +374,14 @@ function rebuildSavedDisplay() {
   const stMap = (S && S.saved_status) || {};
   const items = [];
   const rf = rankFilter.saved;
+  const hideXRec = xsiteFilter.saved;
   for (const it of savedCache.items) {
     const stat = stMap[it.sid];
     const status = stat ? stat[0] : "offline";
     if (f && !it.name.toLowerCase().includes(f)) continue;
     if (sf.size && !sf.has(status)) continue;
     if (!rankMatch(it.rank, rf)) continue;
+    if (hideXRec && it.aka && it.aka.length && linkedState(it.aka).rec.length) continue;
     items.push({ ...it, status, file: stat ? stat[1] : "", size: stat ? stat[2] : "" });
   }
   const bySite = new Map();
@@ -995,7 +1001,78 @@ function retab(tab) {
   updateSelLabel();
 }
 
+// Player-tile right-click menu: same actions as the Recorder/Saved row this
+// model actually lives in (Recorder takes priority if it's tracked in both,
+// same precedence as statusOfTile/rankInfoFor), plus a Player-only "Close
+// Tile". A tile can outlive its source (closing a tile never touches the
+// Recorder or Saved Models, and removing a model there never auto-closes an
+// open tile) — that orphaned case gets a minimal menu.
+function tileContextItems(t) {
+  const closeItem = { label: "✕  Close Tile (Player only)", action: () => closePlayerTile(t.id) };
+  const m = (S && S.models || []).find(x => x.key === t.key.toLowerCase());
+  if (m) {
+    const keys = [m.key];
+    return [
+      closeItem, "hr",
+      { label: `▶  Start Recording  ${m.name}`,
+        action: () => confirmCrossSiteRec(keys, () => API.record(keys, true)) },
+      { label: "⏹  Stop Recording", action: () => API.record(keys, false) },
+      { label: `${m.auto ? "☑" : "☐"}  Auto-Record`, action: () => API.toggle_auto(keys) },
+      { label: `🎞  Max Quality  (${m.q ? m.q + "p" : "Default"})`, sub: qualitySub(keys, m.q) },
+      "hr",
+      m.saved
+        ? { label: "✕  Remove from Saved Models", action: () => API.saved_remove([`saved:${m.key}`]) }
+        : { label: "⭐  Add to Saved Models", action: () => API.add_saved(keys) },
+      { label: "▶  Preview", action: () => doPreview(m.name, m.site) },
+      { label: "⭐  Set Rank", sub: rankSub(keys, false) },
+      { label: "🔗  Edit Links…", action: () => openLinkEditor(m.key) },
+      m.vip ? { label: "🌟  Remove from VIP List", action: () => vipRefresh(() => API.vip_remove(keys)) }
+            : { label: "🌟  Add to VIP List", action: () => vipRefresh(() => API.vip_add(keys)) },
+      "hr",
+      { label: "🔗  Copy Model URL", action: () => API.copy_urls(keys, false, false) },
+      { label: "🌐  Open in Browser", action: () => openBrowser(keys, false, false) },
+      "hr",
+      { label: "✕  Remove Model", danger: true, action: () => API.remove(keys) },
+    ];
+  }
+  const savedIt = savedCache.items.find(x => x.site === t.site && x.name.toLowerCase() === t.name.toLowerCase());
+  if (savedIt) {
+    const keys = [savedIt.sid];
+    const st0 = (S.saved_status || {})[savedIt.sid];
+    const liveNow = st0 && (st0[0] === "online" || st0[0] === "recording");
+    return [
+      closeItem, "hr",
+      { label: `＋  Add to Recorder  ${savedIt.name}`,
+        action: () => { warnCrossSiteKeys(keys); API.saved_to_recorder(keys); } },
+      liveNow ? { label: "▶  Add to Recorder & Start Recording",
+                  action: () => confirmCrossSiteRec(keys, () => API.saved_record(keys)) } : null,
+      { label: "▶  Preview", action: () => doPreview(savedIt.name, savedIt.site) },
+      "hr",
+      { label: "🔗  Copy Model URL", action: () => API.copy_urls(keys, true, false) },
+      { label: "🌐  Open in Browser", action: () => openBrowser(keys, true, false) },
+      { label: "⭐  Set Rank", sub: rankSub(keys, true) },
+      { label: "🔗  Edit Links…", action: () => openLinkEditor(savedIt.sid) },
+      savedIt.vip ? { label: "🌟  Remove from VIP List", action: () => vipRefresh(() => API.vip_remove(keys)) }
+                  : { label: "🌟  Add to VIP List", action: () => vipRefresh(() => API.vip_add(keys)) },
+      "hr",
+      { label: "✕  Remove from Saved Models", danger: true, action: () => API.saved_remove(keys) },
+    ];
+  }
+  // Orphaned tile — its model isn't tracked anywhere anymore.
+  return [
+    closeItem, "hr",
+    { label: "🌐  Open in Browser", action: () => openBrowser([`${t.site}:${t.name}`], false, false) },
+  ];
+}
+
 document.addEventListener("contextmenu", (e) => {
+  const tileEl = e.target.closest(".tile[data-tile]");
+  if (tileEl) {
+    e.preventDefault();
+    const t = findPlayerTile(Number(tileEl.dataset.tile));
+    if (t) showMenu(tileContextItems(t), e.clientX, e.clientY);
+    return;
+  }
   const row = e.target.closest(".row[data-key]");
   if (!row) return;
   e.preventDefault();
@@ -1254,6 +1331,10 @@ let playerActiveId = null;      // tileId centered in theater mode
 let playerTileSeq = 0;
 let playerTabLoaded = false;
 let playerPickerList = [];
+// Status/Rank filters for the "+ Add Tile" picker — same semantics as
+// statusFilter/rankFilter on the Recorder/Saved tabs, but scoped to this one
+// modal (reset each time it opens) rather than tab-persistent.
+const playerPickFilter = { status: new Set(), rank: 0 };
 let playerPending = new Set();       // tileIds with an in-flight preview_embedded() call
 let playerCooldownUntil = new Map(); // tileId -> ms timestamp; skip auto-retry until then
 let playerTileErr = new Map();       // tileId -> short error text shown on the tile
@@ -1666,18 +1747,23 @@ function openPlayerPicker() {
   for (const m of (S && S.models) || []) {
     if (seen.has(m.key) || open.has(m.key)) continue;
     seen.add(m.key);
-    list.push({ name: m.name, site: m.site, key: m.key });
+    list.push({ name: m.name, site: m.site, key: m.key, status: m.status, rank: m.rank || 0 });
   }
+  const stMap = (S && S.saved_status) || {};
   for (const it of savedCache.items || []) {
     const key = tileKey(it.name, it.site);
     if (seen.has(key) || open.has(key)) continue;
     seen.add(key);
-    list.push({ name: it.name, site: it.site, key });
+    const st = stMap[it.sid];
+    list.push({ name: it.name, site: it.site, key, status: st ? st[0] : "offline", rank: it.rank || 0 });
   }
   list.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   playerPickerList = list;
-  renderPlayerPickerList(list);
+  // Status/Rank live in the main toolbar now (Recorder/Saved-style — sticky
+  // across opens); only the name search resets, for a fresh text search
+  // each time without losing your Status/Rank scope.
   $("playerpick-filter").value = "";
+  applyPlayerPickFilters();
   $("playerpick").hidden = false;
   setTimeout(() => $("playerpick-filter").focus(), 60);
 }
@@ -1745,9 +1831,68 @@ function fillTopRanked() {
 $("player-fill").addEventListener("click", fillTopRanked);
 $("player-add").addEventListener("click", openPlayerPicker);
 $("playerpick-cancel").addEventListener("click", () => { $("playerpick").hidden = true; });
-$("playerpick-filter").addEventListener("input", (e) => {
-  const f = e.target.value.trim().toLowerCase();
-  renderPlayerPickerList(playerPickerList.filter(it => it.name.toLowerCase().includes(f)));
+function applyPlayerPickFilters() {
+  const f = $("playerpick-filter").value.trim().toLowerCase();
+  const sf = playerPickFilter.status;
+  const rf = playerPickFilter.rank;
+  renderPlayerPickerList(playerPickerList.filter(it =>
+    (!f || it.name.toLowerCase().includes(f))
+    && (!sf.size || sf.has(it.status))
+    && rankMatch(it.rank, rf)));
+}
+$("playerpick-filter").addEventListener("input", applyPlayerPickFilters);
+function updatePlayerPickLabels() {
+  const sf = playerPickFilter.status, rf = playerPickFilter.rank;
+  const sBtn = $("player-msf").querySelector(".msf-btn");
+  sBtn.classList.toggle("active", sf.size > 0);
+  sBtn.textContent = (sf.size === 0 ? "Status: All"
+    : sf.size === 1 ? "Status: " + CAP([...sf][0]) : `Status: ${sf.size}`) + " ▾";
+  $("player-msf").querySelectorAll(".msf-menu label[data-v]").forEach(l => {
+    const cb = l.querySelector(".cb");
+    if (cb) cb.classList.toggle("on", sf.has(l.dataset.v));
+  });
+  const rBtn = $("player-rankf").querySelector(".msf-btn");
+  rBtn.classList.toggle("active", rf !== 0);
+  rBtn.textContent = (rf === 0 ? "Rank: All"
+    : rf === -1 ? "Rank: Unranked" : rf === 5 ? "Rank: ★5" : `Rank: ★${rf}+`) + " ▾";
+  $("player-rankf").querySelectorAll(".msf-menu label[data-v]").forEach(l => {
+    const cb = l.querySelector(".cb");
+    if (cb) cb.classList.toggle("on", Number(l.dataset.v) === rf);
+  });
+}
+$("player-msf").querySelector(".msf-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = $("player-msf").querySelector(".msf-menu");
+  const wasOpen = !menu.hidden;
+  document.querySelectorAll(".msf-menu").forEach(m => m.hidden = true);
+  menu.hidden = wasOpen;
+});
+$("player-msf").querySelector(".msf-menu").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const lab = e.target.closest("label[data-v]");
+  if (!lab) return;
+  const v = lab.dataset.v;
+  if (v === "__clear") playerPickFilter.status.clear();
+  else if (playerPickFilter.status.has(v)) playerPickFilter.status.delete(v);
+  else playerPickFilter.status.add(v);
+  updatePlayerPickLabels();
+  applyPlayerPickFilters();
+});
+$("player-rankf").querySelector(".msf-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = $("player-rankf").querySelector(".msf-menu");
+  const wasOpen = !menu.hidden;
+  document.querySelectorAll(".msf-menu").forEach(m => m.hidden = true);
+  menu.hidden = wasOpen;
+});
+$("player-rankf").querySelector(".msf-menu").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const lab = e.target.closest("label[data-v]");
+  if (!lab) return;
+  const v = lab.dataset.v === "__clear" ? 0 : Number(lab.dataset.v);
+  playerPickFilter.rank = (playerPickFilter.rank === v) ? 0 : v;
+  updatePlayerPickLabels();
+  applyPlayerPickFilters();
 });
 $("playerpick-list").addEventListener("click", (e) => {
   const row = e.target.closest("[data-pp-name]");
@@ -2091,13 +2236,15 @@ function updateMsfLabel(tab) {
   const set = statusFilter[tab];
   const root = $(`${tab}-msf`);
   const btn = root.querySelector(".msf-btn");
-  btn.classList.toggle("active", set.size > 0);
+  btn.classList.toggle("active", set.size > 0 || xsiteFilter[tab]);
   btn.textContent = (set.size === 0 ? "Status: All"
     : set.size === 1 ? "Status: " + CAP([...set][0])
-    : `Status: ${set.size}`) + " ▾";
+    : `Status: ${set.size}`) + (xsiteFilter[tab] ? " +" : "") + " ▾";
   root.querySelectorAll(".msf-menu label[data-v]").forEach(l => {
     const cb = l.querySelector(".cb");
-    if (cb) cb.classList.toggle("on", set.has(l.dataset.v));
+    if (!cb) return;
+    cb.classList.toggle("on", l.dataset.v === "__hidexrec"
+      ? xsiteFilter[tab] : set.has(l.dataset.v));
   });
 }
 for (const tab of ["rec", "saved"]) {
@@ -2114,7 +2261,8 @@ for (const tab of ["rec", "saved"]) {
     const lab = e.target.closest("label[data-v]");
     if (!lab) return;
     const v = lab.dataset.v;
-    if (v === "__clear") statusFilter[tab].clear();
+    if (v === "__clear") { statusFilter[tab].clear(); xsiteFilter[tab] = false; }
+    else if (v === "__hidexrec") xsiteFilter[tab] = !xsiteFilter[tab];
     else if (statusFilter[tab].has(v)) statusFilter[tab].delete(v);
     else statusFilter[tab].add(v);
     updateMsfLabel(tab);
