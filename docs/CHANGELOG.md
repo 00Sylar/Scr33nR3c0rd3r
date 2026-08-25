@@ -10,6 +10,15 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+---
+
+## V2.4 — 2026-08-25
+
+**Stripchat is back.** Stripchat silently changed its API partway through
+V2.3's life, breaking the Player, Preview, and recording for every Stripchat
+model while status still showed online. This release fixes that and also
+speeds up how fast Chaturbate models open in the Player.
+
 ### Changed
 - **Chaturbate models open much faster in the Player.** Opening a tile used to
   re-resolve the stream from scratch; it now reuses the URL the online check
