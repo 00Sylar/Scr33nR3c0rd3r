@@ -10,6 +10,12 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+---
+
+## V2.5 — 2026-08-25
+
+**Faster ways to find and manage models in the Player and Saved Models tabs.**
+
 ### Added
 - **"Hide cross-site recording" filter (Saved Models tab).** A new checkbox
   at the bottom of the Status ▾ dropdown hides any model whose linked (🔗)
