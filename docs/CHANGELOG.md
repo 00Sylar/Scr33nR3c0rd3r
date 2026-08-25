@@ -10,6 +10,31 @@ grouped by date / milestone.
 
 ## [Unreleased]
 
+### Changed
+- **Chaturbate models open much faster in the Player.** Opening a tile used to
+  re-resolve the stream from scratch; it now reuses the URL the online check
+  already fetched (up to 30 seconds old), so the tile opens without a single
+  request. Stripchat gets the same treatment. Online/offline detection is
+  unchanged — those checks still go out to the site every time, so a model
+  going offline is noticed exactly as fast as before. Still slow in one case:
+  the first open of a *saved* model while a background scan is running, since
+  nothing has fetched its URL yet.
+
+### Fixed
+- **Stripchat models are recordable and previewable again.** Stripchat's bot
+  filter started answering the endpoint the app used to look up a model's
+  stream id (`/api/front/v2/models/username/<name>/cam`) with HTTP 418 on
+  every request. Nothing after that lookup could work: the Player and the
+  right-click Preview reported "couldn't resolve" for models who were plainly
+  online, and every recording silently dropped to the slower Playwright
+  browser fallback (or, with that fallback turned off, didn't record at all).
+  The stream id now comes from the model page instead, so the lightweight
+  browserless path works again.
+- **Stripchat online checks no longer build a dead playlist URL.** The URL the
+  scanner used to confirm a model was up (`media-hls.doppiocdn.com/hls/…`) had
+  been returning 404; it now points at the master playlist that actually
+  serves.
+
 ---
 
 ## V2.3 — 2026-07-25

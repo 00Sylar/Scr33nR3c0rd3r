@@ -1042,11 +1042,16 @@ class WebCore:
         title = f"{name} ({site})"
         self._log_add(f"Preview: resolving {title}…")
         try:
+            # The status gate above already guarantees a recent check, so both
+            # paths may reuse a URL of that same age instead of re-resolving.
+            # For Chaturbate that also skips the global 1.5 s API gate, which
+            # a background room-list sweep can otherwise hold for seconds.
+            max_age = recorder_mod.PREVIEW_URL_MAX_AGE
             if site == "stripchat":
                 import stripchat_native
-                upstream = stripchat_native.resolve(name)
+                upstream = stripchat_native.resolve(name, max_age=max_age)
             else:
-                upstream = recorder_mod.get_stream_url(site, name)
+                upstream = recorder_mod.get_stream_url(site, name, max_age=max_age)
         except Exception as e:
             return self._preview_unavailable(f"Preview failed for {title}: {e}")
         if not upstream:

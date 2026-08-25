@@ -2490,13 +2490,17 @@ class StreamRecorderApp(tk.Tk):
             self.after(0, lambda: (self._preview_loading_close(loading),
                                    self._log_add(msg, tag)))
         try:
+            # Preview only runs for a model the monitor just saw online, so
+            # both paths may reuse a URL of that same age rather than resolving
+            # again (for Chaturbate that also skips the global API gate).
+            max_age = recorder.PREVIEW_URL_MAX_AGE
             if site == "stripchat":
                 # Stripchat is MOUFLON-encrypted; resolve the keyed variant the
                 # same way recording does (the relay then decrypts the playlist).
                 import stripchat_native
-                upstream = stripchat_native.resolve(name)
+                upstream = stripchat_native.resolve(name, max_age=max_age)
             else:
-                upstream = recorder.get_stream_url(site, name)
+                upstream = recorder.get_stream_url(site, name, max_age=max_age)
         except Exception as e:
             _fail(f"Preview failed for {title}: {e}")
             return

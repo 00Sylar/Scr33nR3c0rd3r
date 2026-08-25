@@ -1,6 +1,6 @@
 """
 recorder.py — Core stream recording engine
-Stripchat: custom HLS downloader using media-hls.doppiocdn.com
+Stripchat: custom HLS downloader using edge-hls.doppiocdn.com
 Chaturbate: ffmpeg direct recording
 """
 
@@ -99,6 +99,27 @@ _CB_API_LOCK           = threading.Lock()  # serialise all CB API calls
 _CB_LAST_API_CALL: float = 0.0             # timestamp of last CB HTTP request
 _CB_MIN_CALL_INTERVAL  = 1.5              # seconds between consecutive CB requests
 
+# Resolved-URL cache, same contract as stripchat_native.page_info(): every
+# success is stored, but it is only read when the caller passes a max_age it
+# will accept. Liveness checks pass 0 and always go to the network.
+#
+# This matters more for Chaturbate than for the other sites: _CB_API_LOCK
+# serialises *every* CB request behind a 1.5 s gap, and the saved-models
+# room-list sweep holds that gate for ~2.5 minutes at a stretch. A resolve
+# that would take ~0.6 s idle measures ~3.0 s while a sweep is running, because
+# the lock isn't FIFO and an interactive request keeps losing the race. Opening
+# the Player can skip the queue entirely by reusing the URL the monitor's own
+# check just stored — no extra requests to Chaturbate, strictly fewer.
+_CB_URL_CACHE: dict[str, tuple[float, str]] = {}
+_CB_URL_LOCK = threading.Lock()
+_CB_URL_CACHE_MAX = 512  # prune oldest entries past this, so a long run can't grow forever
+
+# How stale a cached URL the Player / Preview will accept. Those actions are
+# already gated on a status the monitor refreshed at most one check_interval
+# ago, so reusing a URL of the same age adds no staleness the user isn't
+# already looking at. Nothing that decides online-vs-offline uses this.
+PREVIEW_URL_MAX_AGE = 30.0
+
 
 def _fetch_chaturbate_once(model_name: str) -> tuple[Optional[str], str]:
     """Single attempt. Returns (hls_url_or_None, room_status).
@@ -126,7 +147,8 @@ def _fetch_chaturbate_once(model_name: str) -> tuple[Optional[str], str]:
     return (hls.strip() or None), room.strip()
 
 
-def get_chaturbate_stream_url(model_name: str, max_retries: int = 1) -> Optional[str]:
+def get_chaturbate_stream_url(model_name: str, max_retries: int = 1,
+                              max_age: float = 0.0) -> Optional[str]:
     """
     Fetch the HLS stream URL for a Chaturbate model.
 
@@ -134,7 +156,16 @@ def get_chaturbate_stream_url(model_name: str, max_retries: int = 1) -> Optional
       1  — monitor path: fast, move on if not ready
       4  — manual REC path: persistent, gives CDN time to serve the URL
     Rate-limit responses (empty body / 429) bail immediately without retrying.
+
+    max_age is the oldest cached URL the caller will accept, in seconds — 0
+    (the default) always goes to the network. See _CB_URL_CACHE.
     """
+    key = model_name.lower()
+    if max_age > 0:
+        with _CB_URL_LOCK:
+            hit = _CB_URL_CACHE.get(key)
+            if hit and time.time() - hit[0] < max_age:
+                return hit[1]
     try:
         room = ""
         for attempt in range(max_retries + 1):
@@ -142,6 +173,13 @@ def get_chaturbate_stream_url(model_name: str, max_retries: int = 1) -> Optional
             if hls:
                 if attempt:
                     logger.debug(f"[CB] {model_name}: got URL on attempt {attempt + 1}")
+                with _CB_URL_LOCK:
+                    _CB_URL_CACHE[key] = (time.time(), hls)
+                    if len(_CB_URL_CACHE) > _CB_URL_CACHE_MAX:
+                        for k in sorted(_CB_URL_CACHE,
+                                        key=lambda k: _CB_URL_CACHE[k][0]
+                                        )[:_CB_URL_CACHE_MAX // 4]:
+                            del _CB_URL_CACHE[k]
                 return hls
             if room == "rate_limited":
                 # Silent fallback — old-version monitor treated this as offline.
@@ -163,73 +201,28 @@ def get_chaturbate_stream_url(model_name: str, max_retries: int = 1) -> Optional
 
 # ── Stripchat ─────────────────────────────────────────────────────────────────
 
-def get_stripchat_stream_url(model_name: str) -> Optional[str]:
-    """
-    Confirmed working approach from browser network inspection:
-    1. Page embeds window.__PRELOADED_STATE__ with model id + isLive
-    2. streamName == model numeric ID (e.g. "171032946")
-    3. Master playlist: https://media-hls.doppiocdn.com/hls/{id}/master_{id}.m3u8
-    4. Master playlist contains variant playlists with pkey parameter
-    5. Variant URL format: /b-hls-{N}/{id}/{id}_{quality}p.m3u8?...&pkey={key}
-    """
-    page_headers = {
-        **HEADERS,
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Referer": "https://stripchat.com/",
-    }
+def get_stripchat_stream_url(model_name: str, max_age: float = 0.0) -> Optional[str]:
+    """Master-playlist URL for a live Stripchat model, or None when she isn't
+    live / the page couldn't be read. See get_stream_url() for `max_age`.
 
+    The id comes from stripchat_native.stream_id(), which scrapes the
+    server-rendered model page (the old `/api/front/v2/…/cam` endpoint is
+    bot-blocked with HTTP 418) and caches it briefly, so the online check and
+    a record/preview that follows it share a single page fetch.
+
+    This URL is what the online scanner treats as "she's up"; the actual
+    recording resolves its own keyed variant in launch_stripchat_native().
+    """
+    import stripchat_native
     try:
-        resp = _http.get(
-            f"https://stripchat.com/{model_name}",
-            headers=page_headers, timeout=20
-        )
-        if resp.status_code not in (200,):
-            return None
-
-        html = resp.text
-
-        # Quick live check
-        if not re.search(r'"isLive"\s*:\s*true', html, re.IGNORECASE):
-            return None
-
-        # Get stream name (= model numeric ID)
-        stream_names = re.findall(r'"streamName"\s*:\s*"(\d+)"', html)
-        if not stream_names:
-            # Try from __PRELOADED_STATE__
-            m = re.search(r'window\.__PRELOADED_STATE__\s*=\s*(\{.+)', html, re.DOTALL)
-            if m:
-                raw = m.group(1)
-                end = raw.find('</script>')
-                if end != -1:
-                    raw = raw[:end].rstrip('; \t\n\r')
-                try:
-                    raw = re.sub(r'\\u[0-9A-F]{4}', lambda x: x.group(0).lower(), raw)
-                    data = json.loads(raw)
-                    mid = str(data.get("viewCam", {}).get("model", {}).get("id", ""))
-                    if mid:
-                        stream_names = [mid]
-                except Exception:
-                    pass
-
-        if not stream_names:
-            ids = re.findall(r'"id"\s*:\s*(\d{7,9})', html)
-            if ids:
-                stream_names = [ids[0]]
-
-        if not stream_names:
-            logger.warning(f"[ST] No stream name found for {model_name}")
-            return None
-
-        stream_id = stream_names[0]
-        logger.debug(f"[ST] {model_name} stream_id={stream_id}")
-
-        # Return the master playlist URL — the downloader will resolve pkey
-        master_url = f"https://media-hls.doppiocdn.com/hls/{stream_id}/master_{stream_id}.m3u8"
-        return master_url
-
+        sid = stripchat_native.stream_id(model_name, max_age=max_age)
     except Exception as e:
         logger.error(f"[ST] Error for {model_name}: {e}")
         return None
+    if not sid:
+        return None
+    logger.debug(f"[ST] {model_name} stream_id={sid}")
+    return f"https://edge-hls.doppiocdn.com/hls/{sid}/master/{sid}_auto.m3u8"
 
 
 def get_camsoda_stream_url(model_name: str) -> Optional[str]:
@@ -317,31 +310,29 @@ def _stripchat_is_live(model_name: str) -> Optional[bool]:
     """Lightweight online check for the saved-models scanner.
     Returns True/False, or None when the page couldn't be fetched
     (so the caller keeps the previous status)."""
-    page_headers = {
-        **HEADERS,
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Referer": "https://stripchat.com/",
-    }
+    import stripchat_native
     try:
-        resp = _http.get(
-            f"https://stripchat.com/{model_name}",
-            headers=page_headers, timeout=20
-        )
-        if resp.status_code == 404:
-            return False
-        if resp.status_code != 200:
-            return None
-        return bool(re.search(r'"isLive"\s*:\s*true', resp.text, re.IGNORECASE))
+        info = stripchat_native.page_info(model_name)
     except Exception as e:
         logger.error(f"[ST] live-check error for {model_name}: {e}")
         return None
+    if info is None:
+        return None
+    return bool(info.get("is_live"))
 
 
-def get_stream_url(site: str, model_name: str, thorough: bool = False) -> Optional[str]:
+def get_stream_url(site: str, model_name: str, thorough: bool = False,
+                   max_age: float = 0.0) -> Optional[str]:
+    """Resolve a model's stream URL. `max_age` is the oldest cached answer the
+    caller will accept, in seconds; 0 (the default) always goes to the network,
+    which is what every liveness check wants. Only user actions that are
+    already gated on a fresh status — opening the Player, previewing — should
+    pass a non-zero value."""
     if site == "chaturbate":
-        return get_chaturbate_stream_url(model_name, max_retries=4 if thorough else 1)
+        return get_chaturbate_stream_url(model_name, max_retries=4 if thorough else 1,
+                                         max_age=max_age)
     elif site == "stripchat":
-        return get_stripchat_stream_url(model_name)
+        return get_stripchat_stream_url(model_name, max_age=max_age)
     elif site == "camsoda":
         return get_camsoda_stream_url(model_name)
     elif site == "myfreecams":

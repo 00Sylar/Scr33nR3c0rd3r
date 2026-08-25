@@ -284,15 +284,34 @@ polling triggers. Returns `None` on failure so statuses are preserved.
 **Recording:** master URL → relay (`mode=chaturbate`) → ffmpeg. The relay strips
 LL-HLS partial-segment tags so only full segments are recorded.
 
+> **The 1.5 s gate is the dominant cost of a Chaturbate resolve.** Both
+> `_fetch_chaturbate_once` and the room-list sweep pass through `_CB_API_LOCK`
+> with a 1.5 s minimum gap, and the sweep holds it for ~2.5 minutes at a
+> stretch. The lock is not FIFO, so an interactive request repeatedly loses the
+> race: a resolve measured **0.6 s idle vs 3.0 s while a sweep runs**. Don't
+> "fix" this by letting interactive callers jump the queue — starving the sweep
+> would strand every saved Chaturbate model on a stale status, since the sweep
+> is their only liveness source. Use the resolve cache below instead.
+
 ### Stripchat (`ST`)
 
 Stripchat is the most complex because its playlists are DRM-protected
 ("MOUFLON"). There are **two recording paths**, tried in order:
 
 **Path A — native browserless (preferred, `stripchat_native.py`):**
-1. Resolve numeric stream id via
-   `GET /api/front/v2/models/username/{name}/cam` → `cam.streamName`
-   (and `cam.isCamAvailable`).
+1. Resolve numeric stream id by scraping the **server-rendered model page**
+   (`stripchat_native.page_info`): `GET https://stripchat.com/{name}` with
+   `Accept: text/html,application/xhtml+xml,*/*;q=0.8` → `"isLive"`,
+   `"streamName"` (= the numeric id) and `"status"`. The header matters:
+   with no `Accept` the site answers **406** with an empty body, and with a
+   full browser `Accept`/`Sec-Fetch` set it serves a client-rendered shell
+   with no `streamName`. Successful lookups are cached (see
+   **Resolve caching** below) so the Player can reuse the page the online
+   check just fetched instead of pulling ~430 KB again.
+   > The old source, `GET /api/front/v2/models/username/{name}/cam`
+   > (`cam.streamName` / `cam.isCamAvailable`), is **dead** — stripchat's bot
+   > filter answers it with HTTP **418** for every request regardless of
+   > headers, cookies or a preceding page visit. Don't reintroduce it.
 2. Fetch master playlist
    `https://edge-hls.doppiocdn.com/hls/{id}/master/{id}_auto.m3u8`.
 3. The master lists accepted key-ids as `#EXT-X-MOUFLON:PSCH:v2:<keyId>`. We
@@ -300,8 +319,11 @@ Stripchat is the most complex because its playlists are DRM-protected
    `stripchat_mouflon_keys.json` next to the module). If no listed key-id matches
    our table → keys rotated → return None → fall back to Path B.
 4. Pick the highest-BANDWIDTH variant, append `?psch=v2&pkey=<keyId>`.
-5. Validate it's a real public stream (not an advert loop: reject if
-   `MOUFLON-ADVERT` or `/cpa/` present).
+5. Validate it's a real public stream: reject an advert loop (`MOUFLON-ADVERT`
+   or `/cpa/` present) and reject a playlist with neither `#EXT-X-MOUFLON:` nor
+   `#EXTINF` — a ticket/group show the anonymous viewer isn't entitled to
+   answers the keyed variant with a bare `Forbidden` body, which is what gates
+   non-public shows now that `isCamAvailable` is gone.
 6. The keyed variant URL goes to the relay with `mode=stripchat`. The relay's
    `rewrite_playlist` (in `stripchat_native.py`) **decrypts** each segment URL:
    the `#EXT-X-MOUFLON:URI:` value's 2nd-to-last `_`-token is the real segment
@@ -327,8 +349,32 @@ ticket/private/group show detected.
 > **not counted** by the bandwidth meter, and it records a single quality (no
 > highest-variant pinning beyond what the player chooses).
 
-**Lightweight online check (saved scanner):** fetch the model page and test for
-`"isLive": true` — cheaper than the full resolve.
+**Lightweight online check (saved scanner):** `stripchat_native.page_info`
+(same cached page fetch as step 1) and test `is_live` — cheaper than the full
+resolve. `recorder.get_stripchat_stream_url` builds the step-2 master URL from
+the same lookup; it is the online scanner's "she's up" signal only, since the
+recording resolves its own keyed variant.
+
+### Resolve caching (`max_age`)
+
+`get_stream_url()`, `get_chaturbate_stream_url()` and
+`stripchat_native.page_info()/stream_id()/resolve()` all take a **`max_age`**:
+the oldest cached answer the caller will accept, in seconds.
+
+- Every successful resolve is **stored** in the cache, always.
+- A cached answer is only **read** when `max_age > 0`.
+- The default is `0`, so **every liveness check goes to the network.** This is
+  deliberate: `check_interval` is user-configurable with no floor, so a fixed
+  TTL could otherwise outlive the check that reads it and report a model who
+  just went offline as still online.
+- Only the Player / Preview paths pass a non-zero value
+  (`recorder.PREVIEW_URL_MAX_AGE`, 30 s). They already refuse to open a model
+  that isn't ONLINE/RECORDING, so the URL they reuse is no staler than the
+  status the user is looking at.
+
+The win is largest on Chaturbate, where a cache hit skips the `_CB_API_LOCK`
+gate entirely: a Player open drops from ~0.6 s (idle) or ~3.0 s (sweep running)
+to **0 ms**, and sends no request at all.
 
 ### Camsoda (`CS`)
 

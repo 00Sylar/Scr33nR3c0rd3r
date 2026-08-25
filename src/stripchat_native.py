@@ -13,6 +13,10 @@ rewrites its media playlist into clean HLS, so plain `ffmpeg -c copy` can
 record it — same lightweight path as Chaturbate, no headless Chromium, and
 a fixed resolution (no adaptive-bitrate quality drift).
 
+The model's numeric stream id comes from scraping the server-rendered model
+page (see page_info): the former `/api/front/v2/models/username/<n>/cam`
+endpoint is now bot-blocked with HTTP 418 on every request.
+
 Key table + algorithm are public knowledge from kesamom/stripchat_mouflon
 and lossless1024/StreaMonitor. When Stripchat rotates keys, none of the
 master's PSCH ids will match and resolve() returns None — the caller then
@@ -25,6 +29,8 @@ import itertools
 import json
 import os
 import re
+import threading
+import time
 from typing import Optional
 
 import requests
@@ -55,7 +61,31 @@ _UA = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 _HEADERS = {"User-Agent": _UA, "Referer": "https://stripchat.com/"}
+# The model page is only server-rendered (and only returns 200) when the
+# request looks like a document navigation: without an `Accept: text/html…`
+# header stripchat answers 406 with an empty body, and with a *full* browser
+# Accept/Sec-Fetch set it serves a client-rendered shell that carries no
+# streamName. This exact combination is the one that yields the SSR page.
+_HTML_HEADERS = {
+    **_HEADERS,
+    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+}
 _session = requests.Session()
+
+# Model-page cache. The page is ~430 KB and gets asked for repeatedly in one
+# user action (online check → preview → record start), so a fresh result is
+# always *stored* here — but it is only *read* when the caller explicitly says
+# how stale an answer it will accept (`max_age`). The default is 0: liveness
+# checks always go to the network, so a cached page can never make a model who
+# just went offline look online, whatever the user's Check Interval is set to.
+# Anything the site actually answered (200, or 404 = no such model) is stored,
+# including "she's offline"; only an unreadable response is left out so callers
+# keep their previous status. Storing an offline answer is safe precisely
+# because the readers are the ones that pass max_age > 0, and they already
+# refuse to act on a model who isn't showing as online.
+_page_cache: dict[str, tuple[float, dict]] = {}
+_page_lock = threading.Lock()
+_PAGE_CACHE_MAX = 512  # prune oldest entries past this, so a long run can't grow forever
 
 _DUMMY = "media.mp4"
 
@@ -118,24 +148,72 @@ def rewrite_playlist(text: str) -> str:
     return "\n".join(out) + "\n"
 
 
-def _get_stream_id(model_name: str) -> Optional[str]:
-    """Numeric stream id for a model via the cam JSON endpoint, or None if the
-    cam isn't available. Publicness (vs group/private/advert) is validated
-    later in resolve() against the actual playlist."""
+def page_info(model_name: str, max_age: float = 0.0) -> Optional[dict]:
+    """Scrape the model page for {"is_live", "stream_id", "status"}.
+
+    `max_age` is the oldest cached answer the caller will accept, in seconds.
+    Leave it at 0 (the default) for anything that decides whether a model is
+    online — those must always hit the network. Pass a few tens of seconds
+    from a user action that is already gated on a fresh status (opening the
+    Player, previewing) to reuse the page the online check just fetched.
+
+    Returns None when the page couldn't be read (network error / non-200 that
+    isn't a 404) so callers can keep whatever status they already had; a 404
+    yields a normal record with is_live False.
+
+    Why the page and not the API: `/api/front/v2/models/username/<n>/cam`
+    (the old source of the stream id) is now answered with HTTP 418 by
+    stripchat's bot filter for every request, no matter the headers, cookies
+    or preceding page visit — so it can no longer be used at all. The
+    server-rendered page still carries `"isLive"`, `"streamName"` and
+    `"status"`, and `streamName` is the same numeric id the CDN wants.
+    """
+    now = time.time()
+    key = model_name.lower()
+    if max_age > 0:
+        with _page_lock:
+            hit = _page_cache.get(key)
+            if hit and now - hit[0] < max_age:
+                return hit[1]
+
     try:
-        r = _session.get(
-            f"https://stripchat.com/api/front/v2/models/username/{model_name}/cam",
-            headers=_HEADERS, timeout=20,
-        )
-        if r.status_code != 200:
-            return None
-        cam = r.json().get("cam", {})
-    except (requests.RequestException, ValueError):
+        r = _session.get(f"https://stripchat.com/{model_name}",
+                         headers=_HTML_HEADERS, timeout=20)
+    except requests.RequestException:
         return None
-    if not cam.get("isCamAvailable"):
+    if r.status_code == 404:
+        info = {"is_live": False, "stream_id": None, "status": ""}
+    elif r.status_code != 200:
         return None
-    sid = cam.get("streamName")
-    return str(sid) if sid else None
+    else:
+        html = r.text
+        m = re.search(r'"streamName"\s*:\s*"(\d+)"', html)
+        st = re.search(r'"status"\s*:\s*"(\w+)"', html)
+        info = {
+            "is_live": bool(re.search(r'"isLive"\s*:\s*true', html, re.I)),
+            "stream_id": m.group(1) if m else None,
+            "status": st.group(1) if st else "",
+        }
+
+    with _page_lock:
+        _page_cache[key] = (now, info)
+        if len(_page_cache) > _PAGE_CACHE_MAX:
+            for k in sorted(_page_cache, key=lambda k: _page_cache[k][0])[:_PAGE_CACHE_MAX // 4]:
+                del _page_cache[k]
+    return info
+
+
+def stream_id(model_name: str, max_age: float = 0.0) -> Optional[str]:
+    """Numeric stream id for a live model, or None if it isn't live / the page
+    couldn't be read. Publicness (vs group/private/advert) is validated later
+    in resolve() against the actual playlist, which answers "Forbidden" for
+    shows the anonymous viewer isn't entitled to.
+
+    See page_info() for `max_age`."""
+    info = page_info(model_name, max_age=max_age)
+    if not info or not info.get("is_live"):
+        return None
+    return info.get("stream_id")
 
 
 def _pick_variant(master: str) -> Optional[str]:
@@ -152,15 +230,17 @@ def _pick_variant(master: str) -> Optional[str]:
     return best_url
 
 
-def resolve(model_name: str) -> Optional[str]:
+def resolve(model_name: str, max_age: float = 0.0) -> Optional[str]:
     """Return a keyed, single-quality Stripchat variant URL ready for the relay,
     or None if the model isn't publicly live / no known key matches / only an
-    advert loop is being served (caller should fall back to Playwright)."""
-    stream_id = _get_stream_id(model_name)
-    if not stream_id:
+    advert loop is being served (caller should fall back to Playwright).
+
+    See page_info() for `max_age`."""
+    sid = stream_id(model_name, max_age=max_age)
+    if not sid:
         return None
     master_url = (
-        f"https://edge-hls.doppiocdn.com/hls/{stream_id}/master/{stream_id}_auto.m3u8"
+        f"https://edge-hls.doppiocdn.com/hls/{sid}/master/{sid}_auto.m3u8"
     )
     try:
         master = _session.get(master_url, headers=_HEADERS, timeout=20).text
